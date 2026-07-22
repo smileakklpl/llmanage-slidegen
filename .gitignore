@@ -1,2 +1,6 @@
 # 環境目錄
 .venv
+
+# 比賽題目
+docs/*
+!docs/.gitkeep
