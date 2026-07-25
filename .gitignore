@@ -2,5 +2,5 @@
 .venv
 
 # 比賽題目
-docs/*
-!docs/.gitkeep
+source/*
+!source/template.pptx
