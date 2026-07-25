@@ -4,3 +4,6 @@
 # 比賽題目
 source/*
 !source/template.pptx
+
+# MacOS file
+.DS_Store
