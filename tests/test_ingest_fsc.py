@@ -1,0 +1,81 @@
+"""轉檔器驗收 — 拿附件四當標準答案。
+
+附件四是命題方提供的「預期修正參照資料」，而它就是金管會 11401–11412
+十二個月報重組出來的。所以轉檔器的正確性有現成的黃金標準可比，
+不必另外造測試資料：**轉出來的流通卡數必須與 P.5預期修正_流通卡數 逐格相同。**
+
+這條斷言若過，代表三件事同時成立：
+  期間對應正確（沒有錯位一個月）、機構對應正確（沒有串行）、
+  合計列取值正確（沒有把某家機構當成合計）。
+"""
+
+import sys
+from pathlib import Path
+
+import pytest
+from openpyxl import load_workbook
+
+from tools.ingest_fsc import METRICS, convert, discover, norm
+from paths import find_xlsx
+
+from paths import FSC_RAW as SRC
+REF = find_xlsx()
+
+PERIODS_114 = [f"114{m:02d}" for m in range(1, 13)]
+
+# 轉出的指標檔 → 附件四對應的工作表
+REF_SHEETS = {
+    "流通卡數": "P.5預期修正_流通卡數",
+    "當月簽帳金額": "P.5預期修正_當月簽帳金額",
+}
+
+pytestmark = pytest.mark.skipif(
+    not SRC.exists() or REF is None,
+    reason="缺少金管會月報或附件四",
+)
+
+
+@pytest.fixture(scope="module")
+def converted(tmp_path_factory):
+    return convert(SRC, tmp_path_factory.mktemp("fsc_114"), PERIODS_114)
+
+
+def test_all_24_months_discovered():
+    """11301–11412 共 24 個月，少一個就代表 discover 漏檔。"""
+    periods = [p.parent.name[:5] for p in discover(SRC)]
+    assert len(periods) == 24
+    assert periods[0] == "11301" and periods[-1] == "11412"
+
+
+@pytest.mark.parametrize("metric,ref_sheet", REF_SHEETS.items())
+def test_matches_reference_cell_by_cell(converted, metric, ref_sheet):
+    """轉出的寬表必須與附件四逐格相同。"""
+    got = load_workbook(converted[metric], data_only=True).worksheets[0]
+    ref = load_workbook(REF, data_only=True)[ref_sheet]
+
+    # 附件四：第 1 列標題、第 2–34 列資料（合計在第 34 列末列）
+    ref_rows = {
+        norm(ref.cell(r, 1).value): [ref.cell(r, c).value for c in range(2, 14)]
+        for r in range(2, 35)
+    }
+    got_rows = {
+        norm(got.cell(r, 1).value): [got.cell(r, c).value for c in range(2, 14)]
+        for r in range(2, got.max_row + 1)
+    }
+
+    assert set(got_rows) == set(ref_rows), "機構名單與附件四不符"
+
+    for name, ref_vals in ref_rows.items():
+        assert got_rows[name] == ref_vals, f"{name} 的逐月數值與附件四不符"
+
+
+def test_period_headers_are_roc_yyymm(converted):
+    ws = load_workbook(converted["流通卡數"], data_only=True).worksheets[0]
+    headers = [ws.cell(1, c).value for c in range(2, 14)]
+    assert headers == [int(p) for p in PERIODS_114]
+
+
+def test_derived_metrics_are_not_materialised():
+    """衍生量不得落地——有兩個真相來源就必然有一天會不一致。"""
+    for banned in ("有效卡率", "平均每卡簽帳金額", "市占率", "年增率", "月增率"):
+        assert banned not in METRICS, f"{banned} 是衍生量，應由 engine 計算而非轉檔產出"

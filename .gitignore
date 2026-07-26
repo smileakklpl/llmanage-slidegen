@@ -7,3 +7,29 @@ source/*
 
 # MacOS file
 .DS_Store
+
+# 資料集
+#
+# 金管會月報是政府公開資料，其他模組的實作也要拿它當輸入，所以進版控
+#（原始月報 + 轉檔產出，合計不到 1MB）。
+# 命題素材（附件四）不進版控：那是主辦方提供的東西，這個 repo 是公開的。
+#
+# 注意寫法：這裡不能寫 `fixtures/data/` 再逐一 !例外——git 一旦排除掉
+# 整個目錄就不會再走進去，底下的反向規則會全部失效。必須用 `/*` 排除
+# 「目錄下的項目」，才有辦法逐一放行。
+fixtures/data/*
+!fixtures/data/fsc_114/
+!fixtures/data/fsc_113_114/
+!fixtures/data/金融業務資訊揭露/
+
+# .ods 與 .xlsx 是同一份資料的兩種格式，程式只讀 xlsx
+#（見 tools/ingest_fsc.py 的 _months()），.ods 純屬重複，不進版控
+*.ods
+
+# 生成結果：可清空重生，不進版控
+outputs/
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/

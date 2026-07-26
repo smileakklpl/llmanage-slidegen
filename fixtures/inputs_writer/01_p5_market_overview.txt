@@ -1,0 +1,11 @@
+頁碼：5
+narrative_id：n_p5
+頁面主題：市場規模與消費金額趨勢
+
+可用指標（key = 實值）：
+  market_total_cards_11412 = 60485911
+  market_total_cards_11401 = 58654745
+  market_total_spend_11412 = 453663538
+  market_total_spend_11401 = 338561389
+  ctbc_cards_share = 0.153733
+  esun_cards_share = 0.14038

@@ -1,0 +1,391 @@
+{
+  "workbook": "附件四_預期修正參照資料.xlsx",
+  "sheets": [
+    {
+      "sheet_name": "P.5預期修正_流通卡數",
+      "archetype": "entity_by_period",
+      "header_row": 1,
+      "first_data_row": 2,
+      "last_data_row": 34,
+      "columns": [
+        {
+          "header": "金融機構名稱",
+          "col_letter": "A",
+          "role": "entity",
+          "period_key": null
+        },
+        {
+          "header": "11401",
+          "col_letter": "B",
+          "role": "period",
+          "period_key": "11401"
+        },
+        {
+          "header": "11402",
+          "col_letter": "C",
+          "role": "period",
+          "period_key": "11402"
+        },
+        {
+          "header": "11403",
+          "col_letter": "D",
+          "role": "period",
+          "period_key": "11403"
+        },
+        {
+          "header": "11404",
+          "col_letter": "E",
+          "role": "period",
+          "period_key": "11404"
+        },
+        {
+          "header": "11405",
+          "col_letter": "F",
+          "role": "period",
+          "period_key": "11405"
+        },
+        {
+          "header": "11406",
+          "col_letter": "G",
+          "role": "period",
+          "period_key": "11406"
+        },
+        {
+          "header": "11407",
+          "col_letter": "H",
+          "role": "period",
+          "period_key": "11407"
+        },
+        {
+          "header": "11408",
+          "col_letter": "I",
+          "role": "period",
+          "period_key": "11408"
+        },
+        {
+          "header": "11409",
+          "col_letter": "J",
+          "role": "period",
+          "period_key": "11409"
+        },
+        {
+          "header": "11410",
+          "col_letter": "K",
+          "role": "period",
+          "period_key": "11410"
+        },
+        {
+          "header": "11411",
+          "col_letter": "L",
+          "role": "period",
+          "period_key": "11411"
+        },
+        {
+          "header": "11412",
+          "col_letter": "M",
+          "role": "period",
+          "period_key": "11412"
+        }
+      ],
+      "total_row": 34,
+      "total_label": "總計",
+      "row_order": "source",
+      "sorted_by": null,
+      "notes": [
+        "尾端 N、O 兩欄有格式無內容，不得列入欄位"
+      ]
+    },
+    {
+      "sheet_name": "P.5預期修正_當月簽帳金額",
+      "archetype": "entity_by_period",
+      "header_row": 1,
+      "first_data_row": 2,
+      "last_data_row": 34,
+      "columns": [
+        {
+          "header": "金融機構名稱",
+          "col_letter": "A",
+          "role": "entity",
+          "period_key": null
+        },
+        {
+          "header": "11401",
+          "col_letter": "B",
+          "role": "period",
+          "period_key": "11401"
+        },
+        {
+          "header": "11402",
+          "col_letter": "C",
+          "role": "period",
+          "period_key": "11402"
+        },
+        {
+          "header": "11403",
+          "col_letter": "D",
+          "role": "period",
+          "period_key": "11403"
+        },
+        {
+          "header": "11404",
+          "col_letter": "E",
+          "role": "period",
+          "period_key": "11404"
+        },
+        {
+          "header": "11405",
+          "col_letter": "F",
+          "role": "period",
+          "period_key": "11405"
+        },
+        {
+          "header": "11406",
+          "col_letter": "G",
+          "role": "period",
+          "period_key": "11406"
+        },
+        {
+          "header": "11407",
+          "col_letter": "H",
+          "role": "period",
+          "period_key": "11407"
+        },
+        {
+          "header": "11408",
+          "col_letter": "I",
+          "role": "period",
+          "period_key": "11408"
+        },
+        {
+          "header": "11409",
+          "col_letter": "J",
+          "role": "period",
+          "period_key": "11409"
+        },
+        {
+          "header": "11410",
+          "col_letter": "K",
+          "role": "period",
+          "period_key": "11410"
+        },
+        {
+          "header": "11411",
+          "col_letter": "L",
+          "role": "period",
+          "period_key": "11411"
+        },
+        {
+          "header": "11412",
+          "col_letter": "M",
+          "role": "period",
+          "period_key": "11412"
+        }
+      ],
+      "total_row": 34,
+      "total_label": "總計",
+      "row_order": "source",
+      "sorted_by": null,
+      "notes": []
+    },
+    {
+      "sheet_name": "P.7預期修正_流通卡數",
+      "archetype": "entity_by_period",
+      "header_row": 1,
+      "first_data_row": 2,
+      "last_data_row": 34,
+      "columns": [
+        {
+          "header": "金融機構名稱",
+          "col_letter": "A",
+          "role": "entity",
+          "period_key": null
+        },
+        {
+          "header": "11401",
+          "col_letter": "B",
+          "role": "period",
+          "period_key": "11401"
+        },
+        {
+          "header": "11402",
+          "col_letter": "C",
+          "role": "period",
+          "period_key": "11402"
+        },
+        {
+          "header": "11403",
+          "col_letter": "D",
+          "role": "period",
+          "period_key": "11403"
+        },
+        {
+          "header": "11404",
+          "col_letter": "E",
+          "role": "period",
+          "period_key": "11404"
+        },
+        {
+          "header": "11405",
+          "col_letter": "F",
+          "role": "period",
+          "period_key": "11405"
+        },
+        {
+          "header": "11406",
+          "col_letter": "G",
+          "role": "period",
+          "period_key": "11406"
+        },
+        {
+          "header": "11407",
+          "col_letter": "H",
+          "role": "period",
+          "period_key": "11407"
+        },
+        {
+          "header": "11408",
+          "col_letter": "I",
+          "role": "period",
+          "period_key": "11408"
+        },
+        {
+          "header": "11409",
+          "col_letter": "J",
+          "role": "period",
+          "period_key": "11409"
+        },
+        {
+          "header": "11410",
+          "col_letter": "K",
+          "role": "period",
+          "period_key": "11410"
+        },
+        {
+          "header": "11411",
+          "col_letter": "L",
+          "role": "period",
+          "period_key": "11411"
+        },
+        {
+          "header": "11412",
+          "col_letter": "M",
+          "role": "period",
+          "period_key": "11412"
+        },
+        {
+          "header": "流通卡數市佔率",
+          "col_letter": "N",
+          "role": "derived",
+          "period_key": null
+        }
+      ],
+      "total_row": 2,
+      "total_label": "總計",
+      "row_order": "sorted_desc",
+      "sorted_by": "流通卡數市佔率",
+      "notes": [
+        "合計列在首列，排名時必須排除"
+      ]
+    },
+    {
+      "sheet_name": "P.7預期修正_當月簽帳金額",
+      "archetype": "entity_by_period",
+      "header_row": 1,
+      "first_data_row": 2,
+      "last_data_row": 34,
+      "columns": [
+        {
+          "header": "金融機構名稱",
+          "col_letter": "A",
+          "role": "entity",
+          "period_key": null
+        },
+        {
+          "header": "11401",
+          "col_letter": "B",
+          "role": "period",
+          "period_key": "11401"
+        },
+        {
+          "header": "11402",
+          "col_letter": "C",
+          "role": "period",
+          "period_key": "11402"
+        },
+        {
+          "header": "11403",
+          "col_letter": "D",
+          "role": "period",
+          "period_key": "11403"
+        },
+        {
+          "header": "11404",
+          "col_letter": "E",
+          "role": "period",
+          "period_key": "11404"
+        },
+        {
+          "header": "11405",
+          "col_letter": "F",
+          "role": "period",
+          "period_key": "11405"
+        },
+        {
+          "header": "11406",
+          "col_letter": "G",
+          "role": "period",
+          "period_key": "11406"
+        },
+        {
+          "header": "11407",
+          "col_letter": "H",
+          "role": "period",
+          "period_key": "11407"
+        },
+        {
+          "header": "11408",
+          "col_letter": "I",
+          "role": "period",
+          "period_key": "11408"
+        },
+        {
+          "header": "11409",
+          "col_letter": "J",
+          "role": "period",
+          "period_key": "11409"
+        },
+        {
+          "header": "11410",
+          "col_letter": "K",
+          "role": "period",
+          "period_key": "11410"
+        },
+        {
+          "header": "11411",
+          "col_letter": "L",
+          "role": "period",
+          "period_key": "11411"
+        },
+        {
+          "header": "11412",
+          "col_letter": "M",
+          "role": "period",
+          "period_key": "11412"
+        },
+        {
+          "header": "簽帳金額市占率",
+          "col_letter": "N",
+          "role": "derived",
+          "period_key": null
+        }
+      ],
+      "total_row": 2,
+      "total_label": "總計",
+      "row_order": "sorted_desc",
+      "sorted_by": "簽帳金額市占率",
+      "notes": [
+        "欄名用「市占率」，與另一張的「市佔率」用字不同，不可用字串比對硬綁"
+      ]
+    }
+  ]
+}

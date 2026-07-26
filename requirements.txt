@@ -1,0 +1,12 @@
+# 核心
+pydantic>=2.0          # 資料契約與 schema 驗證（contracts/）
+openpyxl>=3.1          # xlsx 讀寫（engine/）
+python-pptx>=0.6       # 簡報生成（renderer/）
+
+# LLM provider
+requests>=2.28         # Ollama HTTP API
+# boto3>=1.34          # Bedrock，取得額度後解除註解
+
+# 測試與分析
+pytest>=7.0
+pandas>=2.0            # 指標定義的獨立驗算（tests/）

@@ -1,0 +1,26 @@
+{
+  "audience": "銀行高階主管、信用卡事業處、數位金融主管",
+  "page_count": 16,
+  "sections": ["executive_summary", "market_overview", "competitive_landscape", "bank_deepdive", "trend_outlook"],
+  "metrics": [
+    "cards_in_circulation",
+    "active_cards",
+    "active_rate",
+    "spending_amount",
+    "spending_per_card",
+    "market_share",
+    "revolving_balance",
+    "installment_business",
+    "risk_indicators"
+  ],
+  "chart_preferences": ["ranking_bar", "line_bar_dual_axis", "scatter_size_vs_growth", "heatmap"],
+  "recipients": [],
+  "style": "consulting",
+  "requested_derivations": ["mom_growth", "yoy_growth", "market_share_change"],
+  "assumptions": [
+    "使用者未指定收件者，recipients 留空待 UI 補問",
+    "月增率與年增率屬推導指標，已歸入 requested_derivations，可計算性由 engine 依基期資料判定",
+    "「未來趨勢推測」章節對應 trend_outlook，其數值須由確定性預測產生，不得由敘事模組生成"
+  ]
+}
+
