@@ -102,3 +102,40 @@ def add_scatter_chart(
     # TODO: 若需散點標籤（如銀行名稱），需手動操作 chart.plots[0] 的
     # dLbls XML 節點，python-pptx 目前無高階 API。
     return chart
+
+
+def add_pie_chart(
+    slide: Slide,
+    spec: ChartSpec,
+    left: int = Emu(914400),
+    top: int = Emu(1600200),
+    width: int = Emu(6096000),
+    height: int = Emu(4114800),
+):
+    """
+    市占率圖（圓餅圖）。走同一個 CategoryChartData 入口，
+    僅 chart_type 固定為 PIE。要求 spec.series 只能有一組系列。
+    """
+    if len(spec.series) != 1:
+        raise ValueError("圓餅圖只能有一組系列，請確認 ChartSpec.series 長度為 1")
+    pie_spec = ChartSpec(
+        title=spec.title,
+        categories=spec.categories,
+        series=spec.series,
+        chart_type=XL_CHART_TYPE.PIE,
+    )
+    return add_category_chart(slide, pie_spec, left, top, width, height)
+
+
+# ---------------------------------------------------------------------------
+# Skill Registry：圖表 Agent 只透過 skill 名稱字串呼叫，不需知道實作細節。
+# 新增圖表類型時，在此註冊即可，Agent 端無需改動。
+# ---------------------------------------------------------------------------
+CHART_SKILLS = {
+    "column": add_category_chart,   # 長條圖／排名圖／成長率圖
+    "bar": add_category_chart,      # 橫條圖（呼叫時 spec.chart_type 需先設為 BAR_CLUSTERED）
+    "pie": add_pie_chart,           # 市占率圖
+    "scatter": add_scatter_chart,   # 規模 vs 成長散點圖
+    # "heatmap": 由原生表格 + 儲存格底色模擬，不走 add_chart()，
+    #            另外註冊在 table_builder.py（尚未實作），Agent 需個別處理。
+}
