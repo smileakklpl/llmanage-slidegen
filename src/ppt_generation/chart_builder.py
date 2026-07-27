@@ -139,3 +139,111 @@ CHART_SKILLS = {
     # "heatmap": 由原生表格 + 儲存格底色模擬，不走 add_chart()，
     #            另外註冊在 table_builder.py（尚未實作），Agent 需個別處理。
 }
+
+
+# ---------------------------------------------------------------------------
+# Function Calling / Tool Use 對應層
+# ---------------------------------------------------------------------------
+# LLM API（OpenAI / Anthropic / Bedrock 等）本身無法執行 Python 檔案，
+# 它只能根據我們提供的 "tool schema" 回傳一段結構化 JSON，
+# 表達「我想呼叫哪個 skill、帶哪些參數」。
+#
+# 真正的執行流程是：
+#   1. 我們把 CHART_SKILLS 的 key 轉成 tool schema，隨 prompt 送給 LLM
+#   2. LLM 回傳 {"name": "pie", "arguments": {...}}（純文字/JSON，不是程式碼）
+#   3. 我們自己的 dispatcher（如下 dispatch_chart_skill）收到這段 JSON，
+#      在本地 Python 環境查表、驗證、實際呼叫對應函式
+#
+# LLM 從未執行過任何一行本地程式碼，執行權限完全留在我方。
+# ---------------------------------------------------------------------------
+
+CHART_SKILL_TOOL_SCHEMAS = [
+    {
+        "name": "column",
+        "description": "長條圖，適合排名、成長率比較等類別型數據。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "metric_key": {
+                    "type": "string",
+                    "description": "MetricStore 中的指標鍵，不可填入實際數值。",
+                },
+                "series_names": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "限定取用的系列名稱，留空代表全取。",
+                },
+                "chart_title": {"type": "string"},
+            },
+            "required": ["metric_key", "chart_title"],
+        },
+    },
+    {
+        "name": "pie",
+        "description": "圓餅圖，適合市占率等單一系列的佔比數據。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "metric_key": {"type": "string"},
+                "chart_title": {"type": "string"},
+            },
+            "required": ["metric_key", "chart_title"],
+        },
+    },
+    {
+        "name": "scatter",
+        "description": "散點圖，適合「規模 vs 成長」等雙變數關係。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "metric_key": {"type": "string"},
+                "series_names": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "恰好兩個系列名稱，分別對應 x 軸與 y 軸。",
+                },
+                "chart_title": {"type": "string"},
+            },
+            "required": ["metric_key", "series_names", "chart_title"],
+        },
+    },
+]
+"""
+給 LLM API 的 tool schema 清單。注意 schema 中完全沒有 "values" 這種
+數字欄位，LLM 只能填 metric_key 引用，這是刻意設計，逼迫 LLM 無法
+自己編造數字（呼應 .kiro/steering/tech.md 第 1 條原則）。
+
+實際串接時（OpenAI 範例）：
+
+    response = client.chat.completions.create(
+        model=...,
+        messages=[...],
+        tools=[{"type": "function", "function": schema}
+               for schema in CHART_SKILL_TOOL_SCHEMAS],
+    )
+    tool_call = response.choices[0].message.tool_calls[0]
+    skill_name = tool_call.function.name          # 例如 "pie"
+    raw_args = json.loads(tool_call.function.arguments)
+
+Anthropic / Bedrock 的 tool use 格式略有不同（key 名稱不同），
+但核心流程一致：LLM 回傳「工具名稱 + 參數」，執行仍在本地端。
+"""
+
+
+def dispatch_chart_skill(skill_name: str) -> callable:
+    """
+    Dispatcher：LLM 回傳的 skill_name（純字串）透過這裡查表，
+    取得實際的 Python 函式並在本地執行。
+
+    這是 LLM 輸出與本地程式碼執行之間唯一的橋接點，
+    也是防呆的關卡：LLM 若回傳未註冊的名稱，直接拋錯，
+    不會有機會執行任何非預期的程式碼路徑
+    （因為只從 CHART_SKILLS 這個白名單裡取值，不會 eval/exec LLM 的輸出）。
+    """
+    skill = CHART_SKILLS.get(skill_name)
+    if skill is None:
+        raise ValueError(
+            f"LLM 回傳了未註冊的 skill: {skill_name!r}，"
+            f"可用選項: {list(CHART_SKILLS.keys())}"
+        )
+    return skill

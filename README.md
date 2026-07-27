@@ -8,7 +8,7 @@ An LLM-powered presentation generation tool with a focus on robust data ingestio
 ```
 llmanage-slidegen/
 ├── README.md                          # 專案說明
-├── main.py                            # 程式進入點（尚未實作）
+├── app.py                             # 程式進入點（尚未實作）
 ├── requirements.txt                   # Python 套件依賴
 ├── docs/                              # 專案文件
 │   ├── 智匯數據簡報神器_開發規格書_v0.3.md
@@ -19,9 +19,18 @@ llmanage-slidegen/
 │   ├── 附件二_系統提示詞.docx           # 智匯數據簡報神器指令稿
 │   ├── 附件三_信用卡範例簡報及錯誤說明.pptx
 │   └── 附件四_預期修正參照資料.xlsx
-├── src/                               # 原始碼
-│   ├── chart_builder.py               # 圖表生成模組（ChartSpec / add_chart 封裝）
-│   └── verify_chart_consistency.py    # 圖表與內嵌工作表一致性驗證腳本
+├── backend/                            # 後端服務（資料擷取 ingestion 等模組）
+│   ├── app/
+│   │   ├── main.py                     # FastAPI 進入點
+│   │   └── ingestion/                  # 資料擷取模組（分類/擷取/正規化/驗證等）
+│   ├── tests/                          # ingestion 模組對應測試
+│   ├── requirements.txt
+│   └── pytest.ini
+├── src/                                # 原始碼
+│   ├── frontend/                       # 前端（尚未開發）
+│   └── ppt_generation/                  # 圖表生成模組
+│       ├── chart_builder.py             # ChartSpec / add_chart 封裝
+│       └── verify_chart_consistency.py  # 圖表與內嵌工作表一致性驗證腳本
 └── outputs/                            # 生成輸出結果（測試/示範用）
     └── demo_chart.pptx
 ```
