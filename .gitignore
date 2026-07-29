@@ -1,6 +1,10 @@
 # 環境目錄
 .venv
 
+# Python 快取
+__pycache__/
+*.py[cod]
+
 # 比賽題目
 source/*
 !source/template.pptx

@@ -1,14 +1,20 @@
-beautifulsoup4==4.15.0
-fastapi==0.140.4
+# 簡報生成模組（src/ppt_generation）依賴
+# 版本一律精確釘死，不使用開放範圍。
+# backend 資料讀取模組的依賴另見 src/backend/requirements.txt。
+
+# --- 核心：PPT 與 Excel 生成 ---
+python-pptx==1.0.2
 openpyxl==3.1.5
-paddleocr==3.7.0
-pdfplumber==0.11.10
-Pillow==12.3.0
-pydantic==2.13.4
-PyMuPDF==1.28.0
-pypdf==6.14.2
-pytest==9.1.1
-pytest-timeout==2.4.0
-python-multipart==0.0.32
-reportlab==5.0.0
-starlette==1.3.1
+
+# --- 核心：確定性指標計算 ---
+pandas==3.0.1
+numpy==1.26.4
+
+# --- 趨勢外推（缺此套件時 metric_engine 自動回退 numpy.polyfit）---
+scikit-learn==1.8.0
+
+# --- LLM 後端（依 LLM_PROVIDER 擇一安裝即可）---
+# openai：涵蓋 OpenAI 與所有 OpenAI 相容端點（地端 vLLM / Ollama / LiteLLM）
+openai==2.49.0
+# boto3：AWS Bedrock Converse API
+boto3==1.43.57
