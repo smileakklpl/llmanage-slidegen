@@ -1,14 +1,10 @@
-"""金管會信用卡月報 → 附件四格式（entity_by_period 寬表）。
+"""金管會信用卡月報 → entity_by_period 寬表。
 
-## 為什麼是轉檔而不是手動整理
+    python -m tools.ingest_fsc --out fixtures/data/fsc_114 --periods 11401,…,11412
 
-金管會每月一檔，形狀是 entity_by_metric（列＝機構，欄＝13 個指標）。
-附件四是 entity_by_period（列＝機構，欄＝12 個期間，一個指標一張表）。
-手抄 32 機構 × 24 月 × 6 指標 = 4608 格，抄錯一格就是一個查不出來的數字錯誤。
-
-而且轉檔器有手動整理拿不到的東西：**可以拿附件四當驗收標準**。
-把 11401–11412 的流通卡數轉出來，必須與 P.5預期修正_流通卡數 逐格相同——
-tests/test_ingest_fsc.py 就是這條斷言。
+月報每月一檔，形狀是 entity_by_metric（列＝機構，欄＝13 個指標）。
+下游要的是 entity_by_period（列＝機構，欄＝期間，一指標一檔）。
+32 機構 × 24 月 × 6 指標 = 4608 格，不適合手動整理。
 
 ## 來源檔的四個坑（實測 24 個檔）
 
@@ -113,7 +109,7 @@ def discover(root: Path) -> List[Path]:
 
 
 def build_wide(months: List[MonthTable], source_header: str) -> Workbook:
-    """把某個指標的 N 個月組成 entity_by_period 寬表，合計列放末列（比照附件四 P.5）。"""
+    """把某個指標的 N 個月組成 entity_by_period 寬表，合計列放末列。"""
     periods = [m.period for m in months]
     entities = months[0].entities
 

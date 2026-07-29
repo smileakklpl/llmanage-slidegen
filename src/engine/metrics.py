@@ -1,28 +1,17 @@
 """SheetData → MetricStore。管線 [2]，全部確定性計算，不碰 LLM。
 
-指標定義一律讀 metric_definitions.json，不在程式裡寫死——
-那份檔案是業務規則、有測試把關（tests/test_metric_definitions.py 以附件四為標準答案），
-而業務規則會改，程式邏輯不該跟著散落各處。
+指標定義讀 metric_definitions.json，不寫死在程式裡。
 
-## 三條規則的實作位置
-
-  market_share  全年 12 個月加總佔比，**不是最新月份佔比**。
-                用錯定義時簽帳金額有 7 家名次改變，含第 3/4 名對調。
-  ranking       依 market_share 降序，且合計列早在 reader 就被排除了。
-  yoy           附件四只有 114 年，無 113 基期 → computable=false，
-                帶 reason 而不是丟例外或填 0。
-
-## key 命名
+key 命名：
 
     {實體slug}_{指標}_{期間}   taishin_cards_11412
-    {實體slug}_{指標}_share    taishin_cards_share
-    {實體slug}_{指標}_rank     taishin_cards_rank
-    market_{指標}_{期間}       market_cards_11412（合計列）
+    {實體slug}_{指標}_share / _rank / _yoy_{期間}
+    market_total_{指標}_{期間}  合計列
 
-實體 slug 表目前只收了主要幾家，其餘退回 bank_{序號}（依來源列序，同一份檔案內穩定）。
-**完整的機構名稱 ↔ slug 對照表待補**，這裡只放跑得動的最小集合。
+取捨與踩過的坑見 docs/設計決策.md。
 """
 
+import hashlib
 import json
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -32,9 +21,7 @@ from engine.reader import SheetData
 
 from paths import METRIC_DEFS as DEFS_PATH
 
-# 工作表名稱 → 指標 slug 與單位。
-# 比對用 endswith，所以附件四的「P.5預期修正_流通卡數」與轉檔產出的「流通卡數」
-# 都吃得到同一條規則。
+# 工作表名稱 → 指標 slug 與單位。用 endswith 比對，容許來源檔加前綴。
 SHEET_METRICS = {
     "流通卡數": ("cards", "張"),
     "有效卡數": ("active_cards", "張"),
@@ -44,17 +31,46 @@ SHEET_METRICS = {
     "當月轉銷呆帳金額": ("writeoff", "千元"),
 }
 
-# 機構名稱 → slug。只收主要幾家，其餘走 bank_{序號}。
+# 月報 32 家發卡機構全部收錄。未收錄者會退回名稱雜湊，
+# tests/test_entity_slugs.py 會擋下來要求補齊。
 ENTITY_SLUGS = {
     "總計": "market",
-    "中國信託商業銀行": "ctbc",
+    # 公股與大型行庫
+    "臺灣銀行": "bot",
+    "臺灣土地銀行": "landbank",
+    "合作金庫商業銀行": "tcb",
+    "第一商業銀行": "firstbank",
+    "華南商業銀行": "hncb",
+    "彰化商業銀行": "chb",
+    "上海商業儲蓄銀行": "scsb",
+    "高雄銀行": "bok",
+    "兆豐國際商業銀行": "megabank",
+    "臺灣中小企業銀行": "tbb",
+    # 民營主要發卡行
+    "台北富邦商業銀行": "fubon",
     "國泰世華商業銀行": "cathay",
     "玉山商業銀行": "esun",
-    "台北富邦商業銀行": "fubon",
     "台新國際商業銀行": "taishin",
-    "臺灣銀行": "bot",
-    "第一商業銀行": "firstbank",
-    "合作金庫商業銀行": "tcb",
+    "中國信託商業銀行": "ctbc",
+    "永豐商業銀行": "sinopac",
+    "元大商業銀行": "yuanta",
+    "凱基商業銀行": "kgi",
+    "聯邦商業銀行": "ubot",
+    "遠東國際商業銀行": "feib",
+    "臺灣新光商業銀行": "skbank",
+    "安泰商業銀行": "entie",
+    "陽信商業銀行": "sunny",
+    "三信商業銀行": "cotabank",
+    "台中商業銀行": "taichung",
+    "華泰商業銀行": "hwatai",
+    # 外商
+    "花旗(台灣)商業銀行": "citi",
+    "渣打國際商業銀行": "sc",
+    "滙豐(台灣)商業銀行": "hsbc",
+    "星展(台灣)商業銀行": "dbs",
+    # 非銀行發卡機構
+    "台灣樂天信用卡股份有限公司": "rakuten",
+    "台灣美國運通國際(股)公司": "amex",
 }
 
 
@@ -70,8 +86,13 @@ def metric_slug(sheet_name: str) -> tuple[str, str]:
     return "unknown", ""
 
 
-def entity_slug(name: str, index: int) -> str:
-    return ENTITY_SLUGS.get(name, f"bank_{index:02d}")
+def entity_slug(name: str) -> str:
+    """機構名稱 → slug。刻意不吃列序，否則 key 會隨來源檔案改變。"""
+    slug = ENTITY_SLUGS.get(name)
+    if slug:
+        return slug
+    digest = hashlib.sha1(name.encode("utf-8")).hexdigest()[:6]
+    return f"bank_{digest}"
 
 
 def _add_yoy(store: MetricStore, sd: SheetData, slug: str, defs: dict) -> None:
@@ -87,7 +108,7 @@ def _add_yoy(store: MetricStore, sd: SheetData, slug: str, defs: dict) -> None:
         entities = [("market_total", sd.total)] + [(e, v) for e, v in sd.rows.items()]
 
         for i, (name, vals) in enumerate(entities):
-            es = "market_total" if name == "market_total" else entity_slug(name, i)
+            es = "market_total" if name == "market_total" else entity_slug(name)
             key = f"{es}_{slug}_yoy_{p}"
 
             if base not in periods:
@@ -121,9 +142,7 @@ def build_store(sheets: List[SheetData], defs: Optional[dict] = None) -> MetricS
         slug, unit = metric_slug(sd.sheet_name)
         total_sum = sd.total_sum()
 
-        # --- 合計列的逐期值 ---
-        # key 名稱對齊規格書 §5.2 的範例 market_total_cards_11412，
-        # 不要自創——A 會照規格書實作，兩邊名稱不一致下游就對不起來。
+        # 合計列。key 名稱對齊規格書 §5.2 的範例。
         for p, v in sd.total.items():
             store.add(Metric(
                 key=f"market_total_{slug}_{p}", value=v, unit=unit, label=f"全市場{slug} {p}",
@@ -131,10 +150,9 @@ def build_store(sheets: List[SheetData], defs: Optional[dict] = None) -> MetricS
                                     formula="來源檔合計列直接取值"),
             ))
 
-        # --- 各機構逐期值 + 市佔率 ---
         shares: Dict[str, float] = {}
         for i, (name, vals) in enumerate(sd.rows.items(), 1):
-            es = entity_slug(name, i)
+            es = entity_slug(name)
             for p, v in vals.items():
                 store.add(Metric(
                     key=f"{es}_{slug}_{p}", value=v, unit=unit, label=f"{name} {slug} {p}",
@@ -142,8 +160,6 @@ def build_store(sheets: List[SheetData], defs: Optional[dict] = None) -> MetricS
                                         formula="來源檔直接取值"),
                 ))
 
-            # market_share：全年加總佔比。最新月份法是 metric_definitions.json
-            # 明列的 wrong_but_intuitive，誤差達 0.00425。
             s = sd.entity_sum(name)
             if s is not None and total_sum:
                 share = s / total_sum
@@ -157,7 +173,7 @@ def build_store(sheets: List[SheetData], defs: Optional[dict] = None) -> MetricS
                     ),
                 ))
 
-        # --- 排名：依市佔率降序。合計列已在 reader 排除，這裡不會混進來 ---
+        # 排名：依市佔率降序。合計列已在 reader 排除。
         for rank, (es, _) in enumerate(
             sorted(shares.items(), key=lambda kv: kv[1], reverse=True), 1
         ):
@@ -168,11 +184,7 @@ def build_store(sheets: List[SheetData], defs: Optional[dict] = None) -> MetricS
                                     formula=defs["ranking"]["definition"]),
             ))
 
-        # --- YoY：基期存在才算，不存在就明確標記不可計算 ---
-        #
-        # 這個分支是 FR-1.5 的開關，也是附件三錯誤 #1 的防線。
-        # 附件四只有 114 年 → 全部 computable=false；
-        # 金管會 113+114 兩年 → 真的算得出來。同一段程式碼，資料決定行為。
+        # FR-1.5 的開關：基期存在才算，不存在標記 computable=false
         _add_yoy(store, sd, slug, defs)
 
     return store

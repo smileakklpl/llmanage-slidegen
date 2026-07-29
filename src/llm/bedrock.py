@@ -1,13 +1,13 @@
-"""Bedrock adapter — 【尚未在真實環境驗證】
+"""Bedrock adapter — 已在真實環境驗證（us-east-1，Haiku 4.5）。
 
-寫好放著，等拿到額度那天第一件事就是跑 evalh.harness --provider bedrock。
-以下幾點是規格書預期、但必須實測確認的，驗過後把註記刪掉：
+    python -m evalh.harness --provider bedrock --stage writer
+      → schema 通過率 100%（8/8 fixture）、fallback 0%、p50 3.2–5.0s
 
-  [ ] Converse API 的 toolConfig 強制 schema 是否穩定（比 prompt 拜託可靠得多）
-  [ ] model id 的 inference profile 前綴（us.）在 us-east-1 是否必要
-  [ ] ThrottlingException 在 16-way 平行下的實際觸發點與錯誤形狀
-  [ ] prompt caching 的實際命中率
-  [ ] instance role 需要的 bedrock:InvokeModel 權限邊界（與部署負責人一起做）
+走 legacy Converse + `us.` 前綴；model id 格式、新帳號會卡住的兩道門、
+temperature 的模型限制，全部記在 docs/設計決策.md。
+
+尚未驗證：平行下的 ThrottlingException 形狀、prompt caching 命中率、
+instance role 的權限邊界。
 """
 
 import json
@@ -23,7 +23,7 @@ try:
 except ImportError:  # pragma: no cover
     boto3 = None
 
-VERIFIED_ON_REAL_BEDROCK = False
+VERIFIED_ON_REAL_BEDROCK = True
 
 
 class BedrockProvider(LLMProvider):
@@ -50,6 +50,7 @@ class BedrockProvider(LLMProvider):
             "modelId": self.model,
             "system": [{"text": system}],
             "messages": [{"role": "user", "content": [{"text": user}]}],
+            # Opus 4.7 以後的模型已移除 temperature，換模型時這行要刪
             "inferenceConfig": {"temperature": 0.2, "maxTokens": 4096},
         }
         if tool_config:

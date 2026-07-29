@@ -1,7 +1,7 @@
-"""以附件四為標準答案，斷言指標定義正確。
+"""指標定義的獨立驗算 —— 用 pandas 重算一次，不走 engine 的實作。
 
-這是 T1 的核心：算出來的值必須逐格等於附件四。
-附件四的位置由 paths.find_xlsx() 解析，規則與 spike_a.py 完全相同。
+選用的外部交叉驗證：參照檔有一欄自算的市佔率，月報沒有。
+缺檔時整份 skip，不影響驗收。見 fixtures/README.md。
 """
 
 import sys
@@ -26,7 +26,7 @@ def _load(sheet):
     return df, periods
 
 
-@pytest.mark.skipif(XLSX is None, reason="找不到附件四，請放進 fixtures/data/ 或設 B_LLM_XLSX")
+@pytest.mark.skipif(XLSX is None, reason="找不到附件四，請放進 source/ 或設 SLIDEGEN_XLSX")
 @pytest.mark.parametrize("sheet,share_col", CASES)
 def test_market_share_is_full_year_aggregate(sheet, share_col):
     df, periods = _load(sheet)
@@ -35,7 +35,7 @@ def test_market_share_is_full_year_aggregate(sheet, share_col):
     assert (calc - body[share_col]).abs().max() < 1e-9
 
 
-@pytest.mark.skipif(XLSX is None, reason="找不到附件四，請放進 fixtures/data/ 或設 B_LLM_XLSX")
+@pytest.mark.skipif(XLSX is None, reason="找不到附件四，請放進 source/ 或設 SLIDEGEN_XLSX")
 @pytest.mark.parametrize("sheet,share_col", CASES)
 def test_latest_month_definition_is_wrong(sheet, share_col):
     """反面斷言：確認直覺算法確實會錯，避免有人日後「順手改回去」。"""
@@ -45,7 +45,7 @@ def test_latest_month_definition_is_wrong(sheet, share_col):
     assert (naive - body[share_col]).abs().max() > 1e-4
 
 
-@pytest.mark.skipif(XLSX is None, reason="找不到附件四，請放進 fixtures/data/ 或設 B_LLM_XLSX")
+@pytest.mark.skipif(XLSX is None, reason="找不到附件四，請放進 source/ 或設 SLIDEGEN_XLSX")
 @pytest.mark.parametrize("sheet,share_col", CASES)
 def test_total_row_excluded_from_ranking(sheet, share_col):
     df, _ = _load(sheet)
@@ -54,7 +54,7 @@ def test_total_row_excluded_from_ranking(sheet, share_col):
     assert ranked.min() == 1
 
 
-@pytest.mark.skipif(XLSX is None, reason="找不到附件四，請放進 fixtures/data/ 或設 B_LLM_XLSX")
+@pytest.mark.skipif(XLSX is None, reason="找不到附件四，請放進 source/ 或設 SLIDEGEN_XLSX")
 def test_no_yoy_available():
     """附件四只有 114 年，任何 YoY 都不可計算（附件三錯誤 #1）。"""
     _, periods = _load("P.5預期修正_流通卡數")

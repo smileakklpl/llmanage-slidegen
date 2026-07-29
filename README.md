@@ -20,10 +20,22 @@ python -m evalh.harness --stage writer             # 敘事品質
 python -m tools.compare_models --models gemma2:9b  # 多模型並排（FR-A1 驗收）
 ```
 
-`verify_all.py` 每次 push / PR 會由 GitHub Actions 自動跑（`.github/workflows/verify.yml`）。
-金管會月報進版控，所以 CI 上連兩組資料集的端到端都會跑；
-只有需要附件四的項目會顯示 `⊘ 跳過`（命題素材不進版控）。
-**完整驗收仍需把附件四放進 `source/` 後在本機跑一次。**
+`verify_all.py` 每次 push / PR 由 GitHub Actions 自動跑（`.github/workflows/verify.yml`）。
+所有檢查只依賴版控內的資料，**CI 跑的就是完整驗收**，不需要任何本機檔案。
+
+## 資料
+
+資料來源是**金管會「金融業務資訊揭露」信用卡月報**——公開、每月更新、格式固定。
+clone 下來就能直接跑，不需要向任何人索取檔案。
+
+    fixtures/data/金融業務資訊揭露/   原始月報（11301–11412）
+    fixtures/data/fsc_114/           轉檔產出：單年，YoY 不可算
+    fixtures/data/fsc_113_114/       轉檔產出：雙年，YoY 可算
+
+兩個資料集不是備份，是 FR-1.5 的兩半：同一段程式碼，資料決定年增率算不算得出來。
+
+轉檔器只輸出原始量，市佔率與排名一律由 engine 即時計算——衍生量落地就會有
+兩個真相來源。細節見 [fixtures/README.md](fixtures/README.md)。
 
 ## 目錄結構
 
@@ -70,17 +82,16 @@ llmanage-slidegen/
 ├── prompts/                  # system prompt，外部化成檔案（規格書 §6.3）
 ├── evalh/                    # eval harness 與計分器
 ├── tools/                    # 開發工具（轉檔、spike、多模型比較）
-├── tests/                    # 以附件四為標準答案的斷言測試
-├── fixtures/                 # 固定測試輸入、golden 檔、資料集
-│                             #   data/ 只有金管會月報進版控，附件四不進
+├── tests/                    # 斷言測試
+├── fixtures/                 # 資料、固定輸入、golden（見 fixtures/README.md）
 │
 ├── docs/                     # 規格書與設計文件（設計決策的唯一真相來源）
-├── source/                   # 命題原始素材（唯讀，不進版控）
+├── source/                   # 選用的外部參照檔（不進版控）
 └── outputs/                  # 生成結果（可清空重生）
 ```
 
-金管會月報（政府公開資料）已進版控，clone 下來就能直接用：
-`fixtures/data/金融業務資訊揭露/` 是原始月報，`fsc_114/`、`fsc_113_114/` 是轉檔產出。
-要自行重轉：`python -m tools.ingest_fsc --out fixtures/data/fsc_114`。
+### 選用：外部交叉驗證
 
-命題素材（附件四）**不進版控**，需自行放入 `source/`（或設 `SLIDEGEN_XLSX`）。
+命題方的「附件四」參照檔**不是資料來源，缺了不影響任何驗收**。它有一欄自算的
+市佔率而月報沒有，所以在它存在時可以拿來驗我們的公式。相關測試缺檔時自動 skip。
+要跑就放進 `source/` 或設 `SLIDEGEN_XLSX`——細節見 [fixtures/README.md](fixtures/README.md)。

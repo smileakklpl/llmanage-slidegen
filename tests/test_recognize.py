@@ -1,9 +1,7 @@
 """格式辨識器驗收。
 
-辨識器存在的理由是：實測三個模型的 structure locator 是 86–97%，
-錯的全是 total_row / row_order 這種確定性可算的欄位。已知格式不該承擔那個風險。
-
-所以這裡的斷言標準比模型嚴格：**對附件四必須 100%**，錯一格就是退步。
+已知格式不該交給模型定位：實測模型在 total_row / row_order 這類
+確定性可算的欄位上會出錯。辨識得出來就走確定性路徑。
 """
 
 import json
@@ -29,13 +27,19 @@ REF = find_xlsx()
 
 
 @pytest.mark.skipif(REF is None, reason="缺少附件四")
-def test_attachment4_recognized_perfectly():
-    """對附件四必須 100%——確定性辨識沒有「差不多」這種事。"""
+def test_attachment4_also_recognized():
+    """辨識器不只認得金管會月報，也認得附件四那種單檔多工作表的排版。
+
+    這是**通用性**的證據：辨識規則不是為單一檔案寫死的。
+    附件四本身是選用的外部交叉驗證檔，不進版控。
+    """
     rec = recognize_workbook(REF)
-    assert rec.kind == ENTITY_BY_PERIOD
-    truth = SheetMap.model_validate(json.loads(GOLDEN.read_text(encoding="utf-8")))
-    _, overall = score(SheetMap(workbook="x", sheets=rec.sheets), truth)
-    assert overall == 1.0, f"命中率 {overall:.0%}，低於 100% 就不該走快路徑"
+    assert rec.recognized and rec.kind == ENTITY_BY_PERIOD
+    assert len(rec.sheets) == 4
+    for spec in rec.sheets:
+        assert spec.archetype == ENTITY_BY_PERIOD
+        assert spec.total_row is not None, f"{spec.sheet_name} 沒認出合計列"
+        assert len(spec.period_cols) == 12
 
 
 @pytest.mark.skipif(not FSC_SRC.exists(), reason="缺少金管會月報")

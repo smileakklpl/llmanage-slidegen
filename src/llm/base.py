@@ -16,18 +16,7 @@ from pydantic import BaseModel
 def schema_doc(schema: Type[BaseModel]) -> str:
     """把 schema 的欄位描述渲染成文字，供塞進 prompt。
 
-    為什麼需要這支：**約束解碼會丟掉 description。**
-    Ollama（以及底層 llama.cpp）收到 JSON Schema 後轉成 GBNF grammar，
-    grammar 只表達得了結構——type / enum / properties / items / required。
-    description 與 title 是註解，沒有對應的文法產生式，轉換時直接捨棄。
-    也就是說：description 有送進 payload，但模型永遠看不到。
-
-    實測代價：qwen2.5:14b 對「有描述但描述只存在於 schema」的欄位，
-    row_order 四張表全填預設值 unknown、chart_preferences 回空陣列、
-    requested_derivations 自創 key。把同樣的文字放進 prompt 才會生效。
-
-    Bedrock 的 toolConfig 走的是另一條路（schema 原樣進模型 context，
-    描述讀得到），所以這支主要是給 Ollama 用的補償，但放進 prompt 對兩邊都無害。
+    約束解碼會丟掉 description，模型看不到——見 docs/設計決策.md。
     """
     s = schema.model_json_schema()
     defs = s.get("$defs", {})

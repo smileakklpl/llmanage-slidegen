@@ -1,27 +1,12 @@
-"""預設文案 fallback — 規格書 §6.2 的最後一段。
+"""預設文案 fallback — 規格書 §6.2。
 
-`repair.py` 早就支援 `fallback` 參數，兩個 adapter 也都會轉傳，
-但在此之前沒有任何呼叫端傳入過，所以三次重試全敗時 `parsed` 是 None，
-管線是**斷掉**而不是降級繼續。harness 報表上長期顯示的 `fallback 0%`
-不是因為從沒觸發，是因為根本沒接。
+降級的前提是「錯了看得出來」：
 
-## 什麼該有 fallback，什麼不該
+  IntentSpec / PageNarrative  給。填明顯是佔位的文案，管線走完，人一眼看得出來。
+  SheetMap                    不給。定位錯了外觀正常但數字全錯，寧可中止。
 
-有 fallback 的前提是「降級後的錯誤是**看得出來**的」。
-
-  IntentSpec / PageNarrative —— 給。解析失敗時填一段明顯是佔位的文案，
-    管線繼續走完，人一眼就看得出這頁沒寫好。
-
-  SheetMap —— **不給，刻意的。** 結構定位錯了不會長得像錯的：
-    total_row 填錯只會讓合計列被當成一般機構納入排名，
-    產出一份數字全錯但外觀完全正常的簡報。
-    這種情境寧可讓管線停下來喊失敗，也不要靜默降級。
-    metric_definitions.json 已記載，合計列未排除會佔據第一名並使其後名次全部位移。
-
-## 一條硬限制
-
-PageNarrative 的文案**不得含任何阿拉伯數字**，否則 fallback 自己會被
-contracts/narrative.py 的 validator 擋下來，變成「連降級都失敗」。
+硬限制：PageNarrative 的文案不得含阿拉伯數字，否則 fallback 自己會被
+contracts/narrative.py 的 validator 擋下來。設計說明見 docs/設計決策.md §4.3。
 """
 
 import re

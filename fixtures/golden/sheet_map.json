@@ -1,8 +1,8 @@
 {
-  "workbook": "附件四_預期修正參照資料.xlsx",
+  "workbook": "fsc_113_114",
   "sheets": [
     {
-      "sheet_name": "P.5預期修正_流通卡數",
+      "sheet_name": "循環信用餘額",
       "archetype": "entity_by_period",
       "header_row": 1,
       "first_data_row": 2,
@@ -15,168 +15,146 @@
           "period_key": null
         },
         {
-          "header": "11401",
+          "header": "11301",
           "col_letter": "B",
+          "role": "period",
+          "period_key": "11301"
+        },
+        {
+          "header": "11302",
+          "col_letter": "C",
+          "role": "period",
+          "period_key": "11302"
+        },
+        {
+          "header": "11303",
+          "col_letter": "D",
+          "role": "period",
+          "period_key": "11303"
+        },
+        {
+          "header": "11304",
+          "col_letter": "E",
+          "role": "period",
+          "period_key": "11304"
+        },
+        {
+          "header": "11305",
+          "col_letter": "F",
+          "role": "period",
+          "period_key": "11305"
+        },
+        {
+          "header": "11306",
+          "col_letter": "G",
+          "role": "period",
+          "period_key": "11306"
+        },
+        {
+          "header": "11307",
+          "col_letter": "H",
+          "role": "period",
+          "period_key": "11307"
+        },
+        {
+          "header": "11308",
+          "col_letter": "I",
+          "role": "period",
+          "period_key": "11308"
+        },
+        {
+          "header": "11309",
+          "col_letter": "J",
+          "role": "period",
+          "period_key": "11309"
+        },
+        {
+          "header": "11310",
+          "col_letter": "K",
+          "role": "period",
+          "period_key": "11310"
+        },
+        {
+          "header": "11311",
+          "col_letter": "L",
+          "role": "period",
+          "period_key": "11311"
+        },
+        {
+          "header": "11312",
+          "col_letter": "M",
+          "role": "period",
+          "period_key": "11312"
+        },
+        {
+          "header": "11401",
+          "col_letter": "N",
           "role": "period",
           "period_key": "11401"
         },
         {
           "header": "11402",
-          "col_letter": "C",
+          "col_letter": "O",
           "role": "period",
           "period_key": "11402"
         },
         {
           "header": "11403",
-          "col_letter": "D",
+          "col_letter": "P",
           "role": "period",
           "period_key": "11403"
         },
         {
           "header": "11404",
-          "col_letter": "E",
+          "col_letter": "Q",
           "role": "period",
           "period_key": "11404"
         },
         {
           "header": "11405",
-          "col_letter": "F",
+          "col_letter": "R",
           "role": "period",
           "period_key": "11405"
         },
         {
           "header": "11406",
-          "col_letter": "G",
+          "col_letter": "S",
           "role": "period",
           "period_key": "11406"
         },
         {
           "header": "11407",
-          "col_letter": "H",
+          "col_letter": "T",
           "role": "period",
           "period_key": "11407"
         },
         {
           "header": "11408",
-          "col_letter": "I",
+          "col_letter": "U",
           "role": "period",
           "period_key": "11408"
         },
         {
           "header": "11409",
-          "col_letter": "J",
+          "col_letter": "V",
           "role": "period",
           "period_key": "11409"
         },
         {
           "header": "11410",
-          "col_letter": "K",
+          "col_letter": "W",
           "role": "period",
           "period_key": "11410"
         },
         {
           "header": "11411",
-          "col_letter": "L",
+          "col_letter": "X",
           "role": "period",
           "period_key": "11411"
         },
         {
           "header": "11412",
-          "col_letter": "M",
-          "role": "period",
-          "period_key": "11412"
-        }
-      ],
-      "total_row": 34,
-      "total_label": "總計",
-      "row_order": "source",
-      "sorted_by": null,
-      "notes": [
-        "尾端 N、O 兩欄有格式無內容，不得列入欄位"
-      ]
-    },
-    {
-      "sheet_name": "P.5預期修正_當月簽帳金額",
-      "archetype": "entity_by_period",
-      "header_row": 1,
-      "first_data_row": 2,
-      "last_data_row": 34,
-      "columns": [
-        {
-          "header": "金融機構名稱",
-          "col_letter": "A",
-          "role": "entity",
-          "period_key": null
-        },
-        {
-          "header": "11401",
-          "col_letter": "B",
-          "role": "period",
-          "period_key": "11401"
-        },
-        {
-          "header": "11402",
-          "col_letter": "C",
-          "role": "period",
-          "period_key": "11402"
-        },
-        {
-          "header": "11403",
-          "col_letter": "D",
-          "role": "period",
-          "period_key": "11403"
-        },
-        {
-          "header": "11404",
-          "col_letter": "E",
-          "role": "period",
-          "period_key": "11404"
-        },
-        {
-          "header": "11405",
-          "col_letter": "F",
-          "role": "period",
-          "period_key": "11405"
-        },
-        {
-          "header": "11406",
-          "col_letter": "G",
-          "role": "period",
-          "period_key": "11406"
-        },
-        {
-          "header": "11407",
-          "col_letter": "H",
-          "role": "period",
-          "period_key": "11407"
-        },
-        {
-          "header": "11408",
-          "col_letter": "I",
-          "role": "period",
-          "period_key": "11408"
-        },
-        {
-          "header": "11409",
-          "col_letter": "J",
-          "role": "period",
-          "period_key": "11409"
-        },
-        {
-          "header": "11410",
-          "col_letter": "K",
-          "role": "period",
-          "period_key": "11410"
-        },
-        {
-          "header": "11411",
-          "col_letter": "L",
-          "role": "period",
-          "period_key": "11411"
-        },
-        {
-          "header": "11412",
-          "col_letter": "M",
+          "col_letter": "Y",
           "role": "period",
           "period_key": "11412"
         }
@@ -188,7 +166,7 @@
       "notes": []
     },
     {
-      "sheet_name": "P.7預期修正_流通卡數",
+      "sheet_name": "有效卡數",
       "archetype": "entity_by_period",
       "header_row": 1,
       "first_data_row": 2,
@@ -201,94 +179,158 @@
           "period_key": null
         },
         {
-          "header": "11401",
+          "header": "11301",
           "col_letter": "B",
+          "role": "period",
+          "period_key": "11301"
+        },
+        {
+          "header": "11302",
+          "col_letter": "C",
+          "role": "period",
+          "period_key": "11302"
+        },
+        {
+          "header": "11303",
+          "col_letter": "D",
+          "role": "period",
+          "period_key": "11303"
+        },
+        {
+          "header": "11304",
+          "col_letter": "E",
+          "role": "period",
+          "period_key": "11304"
+        },
+        {
+          "header": "11305",
+          "col_letter": "F",
+          "role": "period",
+          "period_key": "11305"
+        },
+        {
+          "header": "11306",
+          "col_letter": "G",
+          "role": "period",
+          "period_key": "11306"
+        },
+        {
+          "header": "11307",
+          "col_letter": "H",
+          "role": "period",
+          "period_key": "11307"
+        },
+        {
+          "header": "11308",
+          "col_letter": "I",
+          "role": "period",
+          "period_key": "11308"
+        },
+        {
+          "header": "11309",
+          "col_letter": "J",
+          "role": "period",
+          "period_key": "11309"
+        },
+        {
+          "header": "11310",
+          "col_letter": "K",
+          "role": "period",
+          "period_key": "11310"
+        },
+        {
+          "header": "11311",
+          "col_letter": "L",
+          "role": "period",
+          "period_key": "11311"
+        },
+        {
+          "header": "11312",
+          "col_letter": "M",
+          "role": "period",
+          "period_key": "11312"
+        },
+        {
+          "header": "11401",
+          "col_letter": "N",
           "role": "period",
           "period_key": "11401"
         },
         {
           "header": "11402",
-          "col_letter": "C",
+          "col_letter": "O",
           "role": "period",
           "period_key": "11402"
         },
         {
           "header": "11403",
-          "col_letter": "D",
+          "col_letter": "P",
           "role": "period",
           "period_key": "11403"
         },
         {
           "header": "11404",
-          "col_letter": "E",
+          "col_letter": "Q",
           "role": "period",
           "period_key": "11404"
         },
         {
           "header": "11405",
-          "col_letter": "F",
+          "col_letter": "R",
           "role": "period",
           "period_key": "11405"
         },
         {
           "header": "11406",
-          "col_letter": "G",
+          "col_letter": "S",
           "role": "period",
           "period_key": "11406"
         },
         {
           "header": "11407",
-          "col_letter": "H",
+          "col_letter": "T",
           "role": "period",
           "period_key": "11407"
         },
         {
           "header": "11408",
-          "col_letter": "I",
+          "col_letter": "U",
           "role": "period",
           "period_key": "11408"
         },
         {
           "header": "11409",
-          "col_letter": "J",
+          "col_letter": "V",
           "role": "period",
           "period_key": "11409"
         },
         {
           "header": "11410",
-          "col_letter": "K",
+          "col_letter": "W",
           "role": "period",
           "period_key": "11410"
         },
         {
           "header": "11411",
-          "col_letter": "L",
+          "col_letter": "X",
           "role": "period",
           "period_key": "11411"
         },
         {
           "header": "11412",
-          "col_letter": "M",
+          "col_letter": "Y",
           "role": "period",
           "period_key": "11412"
-        },
-        {
-          "header": "流通卡數市佔率",
-          "col_letter": "N",
-          "role": "derived",
-          "period_key": null
         }
       ],
-      "total_row": 2,
+      "total_row": 34,
       "total_label": "總計",
-      "row_order": "sorted_desc",
-      "sorted_by": "流通卡數市佔率",
-      "notes": [
-        "合計列在首列，排名時必須排除"
-      ]
+      "row_order": "source",
+      "sorted_by": null,
+      "notes": []
     },
     {
-      "sheet_name": "P.7預期修正_當月簽帳金額",
+      "sheet_name": "未到期分期付款餘額",
       "archetype": "entity_by_period",
       "header_row": 1,
       "first_data_row": 2,
@@ -301,91 +343,647 @@
           "period_key": null
         },
         {
-          "header": "11401",
+          "header": "11301",
           "col_letter": "B",
+          "role": "period",
+          "period_key": "11301"
+        },
+        {
+          "header": "11302",
+          "col_letter": "C",
+          "role": "period",
+          "period_key": "11302"
+        },
+        {
+          "header": "11303",
+          "col_letter": "D",
+          "role": "period",
+          "period_key": "11303"
+        },
+        {
+          "header": "11304",
+          "col_letter": "E",
+          "role": "period",
+          "period_key": "11304"
+        },
+        {
+          "header": "11305",
+          "col_letter": "F",
+          "role": "period",
+          "period_key": "11305"
+        },
+        {
+          "header": "11306",
+          "col_letter": "G",
+          "role": "period",
+          "period_key": "11306"
+        },
+        {
+          "header": "11307",
+          "col_letter": "H",
+          "role": "period",
+          "period_key": "11307"
+        },
+        {
+          "header": "11308",
+          "col_letter": "I",
+          "role": "period",
+          "period_key": "11308"
+        },
+        {
+          "header": "11309",
+          "col_letter": "J",
+          "role": "period",
+          "period_key": "11309"
+        },
+        {
+          "header": "11310",
+          "col_letter": "K",
+          "role": "period",
+          "period_key": "11310"
+        },
+        {
+          "header": "11311",
+          "col_letter": "L",
+          "role": "period",
+          "period_key": "11311"
+        },
+        {
+          "header": "11312",
+          "col_letter": "M",
+          "role": "period",
+          "period_key": "11312"
+        },
+        {
+          "header": "11401",
+          "col_letter": "N",
           "role": "period",
           "period_key": "11401"
         },
         {
           "header": "11402",
-          "col_letter": "C",
+          "col_letter": "O",
           "role": "period",
           "period_key": "11402"
         },
         {
           "header": "11403",
-          "col_letter": "D",
+          "col_letter": "P",
           "role": "period",
           "period_key": "11403"
         },
         {
           "header": "11404",
-          "col_letter": "E",
+          "col_letter": "Q",
           "role": "period",
           "period_key": "11404"
         },
         {
           "header": "11405",
-          "col_letter": "F",
+          "col_letter": "R",
           "role": "period",
           "period_key": "11405"
         },
         {
           "header": "11406",
-          "col_letter": "G",
+          "col_letter": "S",
           "role": "period",
           "period_key": "11406"
         },
         {
           "header": "11407",
-          "col_letter": "H",
+          "col_letter": "T",
           "role": "period",
           "period_key": "11407"
         },
         {
           "header": "11408",
-          "col_letter": "I",
+          "col_letter": "U",
           "role": "period",
           "period_key": "11408"
         },
         {
           "header": "11409",
-          "col_letter": "J",
+          "col_letter": "V",
           "role": "period",
           "period_key": "11409"
         },
         {
           "header": "11410",
-          "col_letter": "K",
+          "col_letter": "W",
           "role": "period",
           "period_key": "11410"
         },
         {
           "header": "11411",
-          "col_letter": "L",
+          "col_letter": "X",
           "role": "period",
           "period_key": "11411"
         },
         {
           "header": "11412",
-          "col_letter": "M",
+          "col_letter": "Y",
           "role": "period",
           "period_key": "11412"
-        },
-        {
-          "header": "簽帳金額市占率",
-          "col_letter": "N",
-          "role": "derived",
-          "period_key": null
         }
       ],
-      "total_row": 2,
+      "total_row": 34,
       "total_label": "總計",
-      "row_order": "sorted_desc",
-      "sorted_by": "簽帳金額市占率",
-      "notes": [
-        "欄名用「市占率」，與另一張的「市佔率」用字不同，不可用字串比對硬綁"
-      ]
+      "row_order": "source",
+      "sorted_by": null,
+      "notes": []
+    },
+    {
+      "sheet_name": "流通卡數",
+      "archetype": "entity_by_period",
+      "header_row": 1,
+      "first_data_row": 2,
+      "last_data_row": 34,
+      "columns": [
+        {
+          "header": "金融機構名稱",
+          "col_letter": "A",
+          "role": "entity",
+          "period_key": null
+        },
+        {
+          "header": "11301",
+          "col_letter": "B",
+          "role": "period",
+          "period_key": "11301"
+        },
+        {
+          "header": "11302",
+          "col_letter": "C",
+          "role": "period",
+          "period_key": "11302"
+        },
+        {
+          "header": "11303",
+          "col_letter": "D",
+          "role": "period",
+          "period_key": "11303"
+        },
+        {
+          "header": "11304",
+          "col_letter": "E",
+          "role": "period",
+          "period_key": "11304"
+        },
+        {
+          "header": "11305",
+          "col_letter": "F",
+          "role": "period",
+          "period_key": "11305"
+        },
+        {
+          "header": "11306",
+          "col_letter": "G",
+          "role": "period",
+          "period_key": "11306"
+        },
+        {
+          "header": "11307",
+          "col_letter": "H",
+          "role": "period",
+          "period_key": "11307"
+        },
+        {
+          "header": "11308",
+          "col_letter": "I",
+          "role": "period",
+          "period_key": "11308"
+        },
+        {
+          "header": "11309",
+          "col_letter": "J",
+          "role": "period",
+          "period_key": "11309"
+        },
+        {
+          "header": "11310",
+          "col_letter": "K",
+          "role": "period",
+          "period_key": "11310"
+        },
+        {
+          "header": "11311",
+          "col_letter": "L",
+          "role": "period",
+          "period_key": "11311"
+        },
+        {
+          "header": "11312",
+          "col_letter": "M",
+          "role": "period",
+          "period_key": "11312"
+        },
+        {
+          "header": "11401",
+          "col_letter": "N",
+          "role": "period",
+          "period_key": "11401"
+        },
+        {
+          "header": "11402",
+          "col_letter": "O",
+          "role": "period",
+          "period_key": "11402"
+        },
+        {
+          "header": "11403",
+          "col_letter": "P",
+          "role": "period",
+          "period_key": "11403"
+        },
+        {
+          "header": "11404",
+          "col_letter": "Q",
+          "role": "period",
+          "period_key": "11404"
+        },
+        {
+          "header": "11405",
+          "col_letter": "R",
+          "role": "period",
+          "period_key": "11405"
+        },
+        {
+          "header": "11406",
+          "col_letter": "S",
+          "role": "period",
+          "period_key": "11406"
+        },
+        {
+          "header": "11407",
+          "col_letter": "T",
+          "role": "period",
+          "period_key": "11407"
+        },
+        {
+          "header": "11408",
+          "col_letter": "U",
+          "role": "period",
+          "period_key": "11408"
+        },
+        {
+          "header": "11409",
+          "col_letter": "V",
+          "role": "period",
+          "period_key": "11409"
+        },
+        {
+          "header": "11410",
+          "col_letter": "W",
+          "role": "period",
+          "period_key": "11410"
+        },
+        {
+          "header": "11411",
+          "col_letter": "X",
+          "role": "period",
+          "period_key": "11411"
+        },
+        {
+          "header": "11412",
+          "col_letter": "Y",
+          "role": "period",
+          "period_key": "11412"
+        }
+      ],
+      "total_row": 34,
+      "total_label": "總計",
+      "row_order": "source",
+      "sorted_by": null,
+      "notes": []
+    },
+    {
+      "sheet_name": "當月簽帳金額",
+      "archetype": "entity_by_period",
+      "header_row": 1,
+      "first_data_row": 2,
+      "last_data_row": 34,
+      "columns": [
+        {
+          "header": "金融機構名稱",
+          "col_letter": "A",
+          "role": "entity",
+          "period_key": null
+        },
+        {
+          "header": "11301",
+          "col_letter": "B",
+          "role": "period",
+          "period_key": "11301"
+        },
+        {
+          "header": "11302",
+          "col_letter": "C",
+          "role": "period",
+          "period_key": "11302"
+        },
+        {
+          "header": "11303",
+          "col_letter": "D",
+          "role": "period",
+          "period_key": "11303"
+        },
+        {
+          "header": "11304",
+          "col_letter": "E",
+          "role": "period",
+          "period_key": "11304"
+        },
+        {
+          "header": "11305",
+          "col_letter": "F",
+          "role": "period",
+          "period_key": "11305"
+        },
+        {
+          "header": "11306",
+          "col_letter": "G",
+          "role": "period",
+          "period_key": "11306"
+        },
+        {
+          "header": "11307",
+          "col_letter": "H",
+          "role": "period",
+          "period_key": "11307"
+        },
+        {
+          "header": "11308",
+          "col_letter": "I",
+          "role": "period",
+          "period_key": "11308"
+        },
+        {
+          "header": "11309",
+          "col_letter": "J",
+          "role": "period",
+          "period_key": "11309"
+        },
+        {
+          "header": "11310",
+          "col_letter": "K",
+          "role": "period",
+          "period_key": "11310"
+        },
+        {
+          "header": "11311",
+          "col_letter": "L",
+          "role": "period",
+          "period_key": "11311"
+        },
+        {
+          "header": "11312",
+          "col_letter": "M",
+          "role": "period",
+          "period_key": "11312"
+        },
+        {
+          "header": "11401",
+          "col_letter": "N",
+          "role": "period",
+          "period_key": "11401"
+        },
+        {
+          "header": "11402",
+          "col_letter": "O",
+          "role": "period",
+          "period_key": "11402"
+        },
+        {
+          "header": "11403",
+          "col_letter": "P",
+          "role": "period",
+          "period_key": "11403"
+        },
+        {
+          "header": "11404",
+          "col_letter": "Q",
+          "role": "period",
+          "period_key": "11404"
+        },
+        {
+          "header": "11405",
+          "col_letter": "R",
+          "role": "period",
+          "period_key": "11405"
+        },
+        {
+          "header": "11406",
+          "col_letter": "S",
+          "role": "period",
+          "period_key": "11406"
+        },
+        {
+          "header": "11407",
+          "col_letter": "T",
+          "role": "period",
+          "period_key": "11407"
+        },
+        {
+          "header": "11408",
+          "col_letter": "U",
+          "role": "period",
+          "period_key": "11408"
+        },
+        {
+          "header": "11409",
+          "col_letter": "V",
+          "role": "period",
+          "period_key": "11409"
+        },
+        {
+          "header": "11410",
+          "col_letter": "W",
+          "role": "period",
+          "period_key": "11410"
+        },
+        {
+          "header": "11411",
+          "col_letter": "X",
+          "role": "period",
+          "period_key": "11411"
+        },
+        {
+          "header": "11412",
+          "col_letter": "Y",
+          "role": "period",
+          "period_key": "11412"
+        }
+      ],
+      "total_row": 34,
+      "total_label": "總計",
+      "row_order": "source",
+      "sorted_by": null,
+      "notes": []
+    },
+    {
+      "sheet_name": "當月轉銷呆帳金額",
+      "archetype": "entity_by_period",
+      "header_row": 1,
+      "first_data_row": 2,
+      "last_data_row": 34,
+      "columns": [
+        {
+          "header": "金融機構名稱",
+          "col_letter": "A",
+          "role": "entity",
+          "period_key": null
+        },
+        {
+          "header": "11301",
+          "col_letter": "B",
+          "role": "period",
+          "period_key": "11301"
+        },
+        {
+          "header": "11302",
+          "col_letter": "C",
+          "role": "period",
+          "period_key": "11302"
+        },
+        {
+          "header": "11303",
+          "col_letter": "D",
+          "role": "period",
+          "period_key": "11303"
+        },
+        {
+          "header": "11304",
+          "col_letter": "E",
+          "role": "period",
+          "period_key": "11304"
+        },
+        {
+          "header": "11305",
+          "col_letter": "F",
+          "role": "period",
+          "period_key": "11305"
+        },
+        {
+          "header": "11306",
+          "col_letter": "G",
+          "role": "period",
+          "period_key": "11306"
+        },
+        {
+          "header": "11307",
+          "col_letter": "H",
+          "role": "period",
+          "period_key": "11307"
+        },
+        {
+          "header": "11308",
+          "col_letter": "I",
+          "role": "period",
+          "period_key": "11308"
+        },
+        {
+          "header": "11309",
+          "col_letter": "J",
+          "role": "period",
+          "period_key": "11309"
+        },
+        {
+          "header": "11310",
+          "col_letter": "K",
+          "role": "period",
+          "period_key": "11310"
+        },
+        {
+          "header": "11311",
+          "col_letter": "L",
+          "role": "period",
+          "period_key": "11311"
+        },
+        {
+          "header": "11312",
+          "col_letter": "M",
+          "role": "period",
+          "period_key": "11312"
+        },
+        {
+          "header": "11401",
+          "col_letter": "N",
+          "role": "period",
+          "period_key": "11401"
+        },
+        {
+          "header": "11402",
+          "col_letter": "O",
+          "role": "period",
+          "period_key": "11402"
+        },
+        {
+          "header": "11403",
+          "col_letter": "P",
+          "role": "period",
+          "period_key": "11403"
+        },
+        {
+          "header": "11404",
+          "col_letter": "Q",
+          "role": "period",
+          "period_key": "11404"
+        },
+        {
+          "header": "11405",
+          "col_letter": "R",
+          "role": "period",
+          "period_key": "11405"
+        },
+        {
+          "header": "11406",
+          "col_letter": "S",
+          "role": "period",
+          "period_key": "11406"
+        },
+        {
+          "header": "11407",
+          "col_letter": "T",
+          "role": "period",
+          "period_key": "11407"
+        },
+        {
+          "header": "11408",
+          "col_letter": "U",
+          "role": "period",
+          "period_key": "11408"
+        },
+        {
+          "header": "11409",
+          "col_letter": "V",
+          "role": "period",
+          "period_key": "11409"
+        },
+        {
+          "header": "11410",
+          "col_letter": "W",
+          "role": "period",
+          "period_key": "11410"
+        },
+        {
+          "header": "11411",
+          "col_letter": "X",
+          "role": "period",
+          "period_key": "11411"
+        },
+        {
+          "header": "11412",
+          "col_letter": "Y",
+          "role": "period",
+          "period_key": "11412"
+        }
+      ],
+      "total_row": 34,
+      "total_label": "總計",
+      "row_order": "source",
+      "sorted_by": null,
+      "notes": []
     }
   ]
 }

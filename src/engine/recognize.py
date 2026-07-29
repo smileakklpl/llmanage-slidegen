@@ -1,32 +1,17 @@
 """來源格式辨識 — 認得的走確定性快路徑，認不得的才問模型。
 
-## 為什麼要有這一層
+    認得的格式  →  確定性建 SheetMap（零延遲、零 token）
+    認不得的    →  profiler + LLM locator（通用性）
 
-實測三個模型 × 三次重跑，structure locator 的命中率是 86–97%，
-而錯的欄位有明顯規律：total_row 5 次、row_order 4 次——**全是確定性可算的欄位**。
-反過來 header_row / first_data_row / entity_col / derived_cols
-在 12 次呼叫裡一次都沒錯。
+模型在 total_row / row_order 這類確定性可算的欄位上會出錯，已知格式不該
+承擔那個風險。LLM 路徑仍是處理未知格式的唯一手段，由 spike_a 量它的命中率。
 
-對於我們認得的來源，那 3–14% 的錯誤是**白白引入的風險**。
-合計列判斷錯的後果 metric_definitions.json 寫得很清楚：
-它會佔據第一名並使其後所有名次位移。
+目前認得兩種：
 
-所以分成兩條路：
+  fsc_monthly       月報原始檔（entity_by_metric，標題列第 4 列，第 38 列後是註釋）
+  entity_by_period  機構 × 期間寬表
 
-    認得的格式  →  確定性建 SheetMap（100%、零延遲、零 token）
-    認不得的    →  profiler + LLM locator（通用性，FR-A1 的展示價值）
-
-LLM 那條路**沒有被拿掉**，它仍是處理未知格式的唯一手段，
-spike_a.py 也仍然在量它。這裡只是不讓已知格式承擔不必要的風險。
-
-## 目前認得兩種
-
-  fsc_monthly       金管會信用卡月報原始檔（entity_by_metric，標題列在第 4 列，
-                    第 38 列之後是註釋）
-  entity_by_period  機構 × 期間寬表（附件四四張、轉檔產出的六個指標檔都是這種）
-
-辨識一律**保守**：指紋不完全符合就回 unknown 交給模型，
-不要為了多認一種而放寬條件——認錯的代價比認不出來高得多。
+辨識一律保守：指紋不完全符合就回 unknown 交給模型。認錯的代價比認不出來高。
 """
 
 import re
@@ -155,7 +140,7 @@ def _match_entity_by_period(ws) -> Optional[SheetSpec]:
 
     # row_order 用算術判定，不猜。
     #
-    # 必須掃**所有**數值欄，不能只看最後一個期間：附件四 P.7 是依「市佔率」
+    # 必須掃所有數值欄，不能只看最後一個期間：來源可能依衍生欄
     # 降序排的，而市佔率＝全年加總佔比，並不蘊含最新月份也單調——
     # 只探測 11412 會得到 none，把 sorted_desc 誤判成 source。
     # 衍生欄先掃，因為排序鍵通常是衍生值（市佔率、排名）。

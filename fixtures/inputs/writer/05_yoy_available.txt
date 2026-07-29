@@ -1,0 +1,13 @@
+頁碼：5
+narrative_id：n_p5
+頁面主題：消費金額年增動能
+
+可用指標（key = 實值）：
+  ctbc_spend_yoy_11412 = 0.163619
+  cathay_spend_yoy_11412 = 0.13393
+  esun_spend_yoy_11412 = 0.060232
+  fubon_spend_yoy_11412 = 0.03248
+  taishin_spend_yoy_11412 = 0.09174
+  ctbc_cards_yoy_11412 = 0.030306
+  cathay_cards_yoy_11412 = -0.020078
+  esun_cards_yoy_11412 = 0.170117

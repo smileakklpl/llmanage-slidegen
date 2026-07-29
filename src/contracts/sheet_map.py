@@ -1,19 +1,14 @@
 """SheetMap — 管線 [1.5] 結構定位的輸出契約。
 
-規格書 §5.2 的 MetricStore 每個指標都帶 source(sheet/range/formula)，
-但沒說那個對應是誰產生的。SheetMap 就是那個缺口：
-它描述「這張工作表長什麼樣」，讓 pandas 不必為每張表寫一支程式。
-
-設計原則：描述**形狀參數**，不是描述某一張特定的表。
-附件四的四張工作表只差三個參數（總計列位置、有無衍生欄、列排序），
-因此同一支 reader 加上不同的 SheetMap 就能全部吃下。
+描述**形狀參數**而非某一張特定的表：合計列位置、有無衍生欄、列排序。
+同一支 reader 換一份 SheetMap 就能吃下不同排版的來源檔。
 """
 
 from typing import List, Literal, Optional
 from pydantic import BaseModel, Field
 
 Archetype = Literal[
-    "entity_by_period",   # 實體 × 期間 寬表（附件四四張皆是）
+    "entity_by_period",   # 實體 × 期間 寬表
     "entity_by_metric",   # 實體 × 多指標
     "long_records",       # 長格式逐筆記錄
     "unknown",
@@ -35,7 +30,7 @@ class SheetSpec(BaseModel):
     sheet_name: str
     archetype: Archetype
 
-    # 一份 SheetMap 可以橫跨多個檔案：附件四是「1 檔 × 4 表」，
+    # 一份 SheetMap 可以橫跨多個檔案（月報是一指標一檔），
     # 一指標一檔的資料集是「N 檔 × 1 表」，兩者塌陷成同一組 (檔案, 工作表) 配對。
     # None 表示沿用 SheetMap.workbook。模型不必填這欄，由呼叫端補。
     source_file: Optional[str] = Field(

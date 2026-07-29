@@ -1,8 +1,7 @@
-"""engine 實作正確性 — T1 的核心：算出來的值必須逐格等於附件四。
+"""engine 實作正確性 —— 走 reader + build_store 這條真的管線。
 
-tests/test_metric_definitions.py 驗的是**定義**對不對（用 pandas 直接算）。
-這支驗的是**實作**對不對（走 reader + build_store 這條真的管線）。
-兩者缺一不可：定義對但實作寫錯，一樣會產出錯的簡報。
+test_metric_definitions.py 驗**定義**（pandas 重算），這支驗**實作**。
+兩者都是選用的外部交叉驗證，缺參照檔時 skip。見 fixtures/README.md。
 """
 
 import json
@@ -16,6 +15,7 @@ from openpyxl.utils import column_index_from_string
 from contracts.sheet_map import SheetMap
 from engine.metrics import build_store, entity_slug, metric_slug
 from engine.reader import read_sheet
+from engine.recognize import recognize_workbook
 from paths import find_xlsx
 
 XLSX = find_xlsx()
@@ -23,15 +23,15 @@ from paths import GOLDEN as _G
 GOLDEN = _G / "sheet_map.json"
 
 pytestmark = pytest.mark.skipif(
-    XLSX is None, reason="找不到附件四，請放進 fixtures/data/ 或設 B_LLM_XLSX"
+    XLSX is None, reason="找不到附件四，請放進 source/ 或設 SLIDEGEN_XLSX"
 )
 
 P7 = ["P.7預期修正_流通卡數", "P.7預期修正_當月簽帳金額"]
 
 
 def _spec(name):
-    smap = SheetMap.model_validate(json.loads(GOLDEN.read_text(encoding="utf-8")))
-    return smap.get(name)
+    """參照檔的工作表規格由辨識器現場推出；golden 描述的是月報。"""
+    return next(s for s in recognize_workbook(XLSX).sheets if s.sheet_name == name)
 
 
 @pytest.mark.parametrize("sheet", P7)
@@ -48,8 +48,8 @@ def test_share_matches_source_derived_column(sheet):
     names = {str(ws.cell(r, ecol).value).strip(): r
              for r in range(spec.first_data_row, spec.last_data_row + 1)}
 
-    for i, name in enumerate(sd.rows, 1):
-        got = store.value_of(f"{entity_slug(name, i)}_{slug}_share")
+    for name in sd.rows:
+        got = store.value_of(f"{entity_slug(name)}_{slug}_share")
         expected = ws.cell(names[name], dcol).value
         assert abs(got - expected) < 1e-12, f"{name} 市佔率不符"
 

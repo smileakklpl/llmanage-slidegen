@@ -1,22 +1,9 @@
-"""MetricStore → writer 的單頁摘要。規格書沒定義這塊，是 engine 與 writer 之間的界面缺口。
+"""MetricStore → writer 的單頁摘要。
 
-為什麼需要摘要策略：附件四四張表就產生 922 個指標，全塞給 writer 會爆 token，
-弱模型的 context 也撐不住。必須**按頁切，只餵該頁需要的 key**。
+按頁切，只餵該頁需要的 key——全塞會爆 token。
+不可用指標按原因分組明列，不逐一列舉。
 
-輸出格式刻意與 fixtures/inputs_writer/*.txt 逐字相同——
-那四份手寫 fixture 當初就是在模擬這支程式的產出。現在它真的存在了，
-fixture 從「假裝的輸入」變成「這支程式的迴歸基準」。
-
-## 兩條硬規則
-
-1. **不可用指標要明列，不能只是不給。** 只是省略的話，模型會自己腦補
-   「沒給大概是我要自己算」——實測 gemma2 就寫過
-   `{{cards_11412 - cards_11401}}` 這種自算式。明講 computable=false
-   才擋得住。
-
-2. **實值要給，佔位符要求要另外講。** writer 必須知道 A>B 才寫得出 claim，
-   所以看得到數值是必要的；「看得到卻不准寫出來」的規則寫在 prompt，
-   不寫在資料裡（fixtures/inputs_writer/README.md 記錄了為什麼）。
+為什麼這樣切見 docs/設計決策.md；輸出格式是 fixtures/inputs/writer/ 的迴歸基準。
 """
 
 import re

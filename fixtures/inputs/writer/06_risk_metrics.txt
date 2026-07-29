@@ -1,0 +1,15 @@
+頁碼：9
+narrative_id：n_p9
+頁面主題：信用風險指標分佈
+
+可用指標（key = 實值）：
+  cathay_revolving_share = 0.180454
+  ctbc_revolving_share = 0.150429
+  esun_revolving_share = 0.14999
+  taishin_revolving_share = 0.095279
+  fubon_revolving_share = 0.092417
+  cathay_writeoff_share = 0.164982
+  ctbc_writeoff_share = 0.159721
+  fubon_writeoff_share = 0.145756
+  dbs_writeoff_share = 0.103931
+  esun_writeoff_share = 0.095952

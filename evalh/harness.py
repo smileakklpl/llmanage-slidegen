@@ -31,7 +31,7 @@ from llm.factory import load_provider
 from evalh import intent_score
 from evalh.checks import CheckResult, run_all_checks
 
-from paths import FIXTURES, GOLDEN, PROMPTS
+from paths import BASELINES, GOLDEN, INPUTS_INTENT, INPUTS_WRITER, PROMPTS
 
 
 class Stage(NamedTuple):
@@ -53,18 +53,17 @@ class Stage(NamedTuple):
 
 STAGES: Dict[str, Stage] = {
     "intent": Stage(
-        FIXTURES / "inputs",
+        INPUTS_INTENT,
         "intent_parser.system.md",
         IntentSpec,
-        # intent_spec.json 本來就是照 01_official 的內容寫的，直接當標準答案。
-        # 其餘三份輸入沒有 golden，維持只驗 schema。
+        # intent_spec.json 照 01_official 的內容寫，直接當標準答案。其餘只驗 schema。
         {"01_official": "intent_spec.json"},
     ),
     "writer": Stage(
-        FIXTURES / "inputs_writer",
+        INPUTS_WRITER,
         "insight_writer.system.md",
         PageNarrative,
-        # 敘事沒有唯一正確答案，不做等值比對；品質由 checks.py 的規則項把關。
+        # 敘事沒有唯一正確答案，品質由 checks.py 的規則項把關。
         {},
     ),
 }
@@ -82,6 +81,7 @@ class RunRecord:
     checks: List[CheckResult] = field(default_factory=list)
     content_score: float | None = None  # 對 golden 的內容正確率，無 golden 時為 None
     content_detail: str = ""
+    model: str = ""
 
 
 def run(
@@ -127,6 +127,7 @@ def run(
                     checks=run_all_checks(res),
                     content_score=cscore,
                     content_detail=cdetail,
+                    model=res.model or "",
                 )
             )
     return records
@@ -146,6 +147,83 @@ def _content_score(st: Stage, input_id: str, parsed) -> tuple[float | None, str]
         scores, overall, intent_score.reference_diff(parsed, truth)
     )
     return overall, detail
+
+
+def summarize(records: List[RunRecord], provider: str, repeat: int) -> dict:
+    """把一次 run 壓成可存檔比較的數字。
+
+    model 取自實際回應而非 CLI 參數——省略 --model 時走 adapter 預設值，
+    而基準線跨模型比較沒有意義，這欄必須是真的跑了哪個模型。
+    """
+    n = len(records)
+    live = [c for r in records for c in r.checks if c.applicable]
+    fails: Dict[str, int] = {}
+    for c in live:
+        if not c.passed:
+            fails[c.name] = fails.get(c.name, 0) + 1
+    return {
+        "provider": provider,
+        "model": next((r.model for r in records if r.model), "-"),
+        "recorded_at": time.strftime("%Y-%m-%d"),
+        "repeat": repeat,
+        "inputs": len({r.input_id for r in records}),
+        "schema_pass": round(sum(1 for r in records if r.ok) / n, 4),
+        "first_try": round(sum(1 for r in records if r.attempts == 1 and r.ok) / n, 4),
+        "fallback": round(sum(1 for r in records if r.fell_back) / n, 4),
+        "check_fail_rate": round(sum(fails.values()) / len(live), 4) if live else 0.0,
+        "check_fails": dict(sorted(fails.items())),
+    }
+
+
+def baseline_path(stage: str, provider: str) -> Path:
+    return BASELINES / f"{stage}_{provider}.json"
+
+
+def load_baseline(stage: str, provider: str) -> dict | None:
+    p = baseline_path(stage, provider)
+    return json.loads(p.read_text(encoding="utf-8")) if p.exists() else None
+
+
+def save_baseline(stage: str, provider: str, summary: dict) -> Path:
+    BASELINES.mkdir(parents=True, exist_ok=True)
+    p = baseline_path(stage, provider)
+    p.write_text(json.dumps(summary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return p
+
+
+def compare_to_baseline(cur: dict, base: dict) -> List[str]:
+    """輸出與基準線的差異。方向已正規化：+ 一律代表變好。"""
+    lines = [f"\n=== 對基準線（{base['recorded_at']}，{base['model']}，"
+             f"repeat={base['repeat']}）==="]
+    if cur["inputs"] != base["inputs"]:
+        lines.append(f"⚠ 輸入份數不同（{base['inputs']} → {cur['inputs']}），"
+                     f"基準線已失效，請重新 --save")
+    if cur["model"] != base["model"]:
+        lines.append(f"⚠ 模型不同（{base['model']} → {cur['model']}），"
+                     f"這是模型比較不是 prompt 比較")
+
+    for key, label, higher_better in [
+        ("schema_pass", "schema 通過率", True),
+        ("first_try", "一次過", True),
+        ("fallback", "fallback", False),
+        ("check_fail_rate", "檢查項失敗率", False),
+    ]:
+        d = cur[key] - base[key]
+        arrow = "→" if abs(d) < 1e-9 else ("↑" if d > 0 else "↓")
+        good = "" if abs(d) < 1e-9 else ("  ✓" if (d > 0) == higher_better else "  ✗")
+        lines.append(f"  {label:<14} {base[key]:>7.1%} {arrow} {cur[key]:>7.1%}"
+                     f"  ({d:+.1%}){good}")
+
+    names = sorted(set(cur["check_fails"]) | set(base["check_fails"]))
+    if names:
+        # repeat 不同時原始次數不可比（rate 仍可比），標明以免誤讀
+        note = "" if cur["repeat"] == base["repeat"] else f"（repeat {base['repeat']}→{cur['repeat']}，次數不可直接比）"
+        lines.append(f"  失敗項變化：{note}")
+        for nm in names:
+            b, c = base["check_fails"].get(nm, 0), cur["check_fails"].get(nm, 0)
+            if b != c:
+                lines.append(f"    {nm:<16} {b} → {c}  ({c - b:+d})")
+    return lines
 
 
 def report(records: List[RunRecord]) -> str:
@@ -206,6 +284,8 @@ def main() -> None:
     ap.add_argument("--model", default=None)
     ap.add_argument("--repeat", type=int, default=1, help="同一輸入重跑次數，量穩定度用")
     ap.add_argument("--stage", default="intent", choices=sorted(STAGES))
+    ap.add_argument("--save", action="store_true",
+                    help="把這次結果存成新的基準線（改 prompt 前先跑一次）")
     ap.add_argument(
         "--num-ctx",
         type=int,
@@ -215,7 +295,19 @@ def main() -> None:
     )
     args = ap.parse_args()
     print(f"stage={args.stage} provider={args.provider} model={args.model or '-'}")
-    print(report(run(args.provider, args.model, args.repeat, args.stage, args.num_ctx)))
+
+    records = run(args.provider, args.model, args.repeat, args.stage, args.num_ctx)
+    print(report(records))
+
+    cur = summarize(records, args.provider, args.repeat)
+    base = load_baseline(args.stage, args.provider)
+    if base:
+        print("\n".join(compare_to_baseline(cur, base)))
+    elif not args.save:
+        print(f"\n（沒有基準線。加 --save 建立：{baseline_path(args.stage, args.provider)}）")
+
+    if args.save:
+        print(f"\n基準線已寫入 {save_baseline(args.stage, args.provider, cur)}")
 
 
 if __name__ == "__main__":

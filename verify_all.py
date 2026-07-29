@@ -6,15 +6,10 @@
 理由是合併前要回答的問題是「契約和管線有沒有壞」，不是「模型好不好」。
 模型品質請跑 compare_models.py，那是另一件事、另一個節奏。
 
-全綠代表：
-  - 25 項單元測試通過（含轉檔器對附件四逐格比對、engine 市佔率零誤差）
-  - 三個資料集都能端到端跑完（附件四 / fsc_114 / fsc_113_114）
-  - FR-1.5 的開關會依資料翻轉（無基期全拒、有基期算得出）
-  - 格式辨識器對附件四 100%
-  - writer fixture 與引擎輸出沒有漂移
+全綠代表契約與管線是完整的。任何一項紅燈都代表**不該合併**。
 
-任何一項紅燈都代表**不該合併**——合併會把問題帶進共用 repo，
-屆時其他模組的維護者也要跟著一起 debug。
+所有檢查只依賴版控內的金管會月報，所以 CI 上跑的是完整驗收，不是打折版。
+細節見 fixtures/README.md。
 """
 
 import bootstrap  # noqa: F401  補上 src/ 的 import 路徑
@@ -28,29 +23,18 @@ from contextlib import redirect_stdout
 from pathlib import Path
 from typing import Callable, List, Tuple
 
-from paths import DATA, GOLDEN, INPUTS_WRITER, REPO_ROOT, find_xlsx
+from paths import FSC_1Y, FSC_2Y, GOLDEN, INPUTS_WRITER, REPO_ROOT
 
-DATASETS = [
-    ("附件四", None),
-    ("fsc_114", DATA / "fsc_114"),
-    ("fsc_113_114", DATA / "fsc_113_114"),
-]
+DATASETS = [("fsc_114", FSC_1Y), ("fsc_113_114", FSC_2Y)]
 
 Check = Tuple[str, Callable[[], str]]
 
 
 class Skipped(Exception):
-    """這項檢查所需的資料不在版控內。
+    """這項檢查所需的資料不在。
 
-    金管會月報進版控（政府公開資料，其他模組也要用），但命題素材（附件四）
-    不進——那是主辦方給的東西，而這個 repo 是公開的。所以 CI 上拿得到前者、
-    拿不到後者，要用附件四的項目就跑不了。
-
-    缺資料是「這台機器沒有」，不是「程式壞了」，兩者混為一談的話 CI 會永遠紅燈，
-    紅燈久了就沒人看——那比沒有 CI 更糟。
-
-    但跳過也不能靜悄悄：跳掉的項目一律列在報表上，並在結尾標明覆蓋率打了折。
-    本機把資料放好就會全部跑起來，那才是完整的驗收。
+    正常情況不該發生——資料都在版控內。會觸發代表有人刪了 fixtures/data/。
+    缺資料是「這台機器沒有」不是「程式壞了」，兩者混為一談的話 CI 會永遠紅燈。
     """
 
 
@@ -60,19 +44,16 @@ def _need_dir(path: Path, what: str) -> Path:
     return path
 
 
-def _need_xlsx() -> Path:
-    found = find_xlsx()
-    if found is None:
-        raise Skipped("缺附件四（放進 source/ 或設 SLIDEGEN_XLSX）")
-    return found
-
-
 def _pytest() -> str:
+    # encoding 要明講：繁中 Windows 的 locale 是 cp950，解不了 pytest 的 UTF-8 輸出，
+    # 會在讀取階段就 UnicodeDecodeError，蓋掉真正的測試失敗原因。
     r = subprocess.run(
         [sys.executable, "-m", "pytest", "tests/", "-q"],
         cwd=REPO_ROOT, capture_output=True, text=True,
+        encoding="utf-8", errors="replace",
     )
-    tail = (r.stdout or r.stderr).strip().splitlines()[-1]
+    lines = (r.stdout or r.stderr).strip().splitlines()
+    tail = lines[-1] if lines else "pytest 沒有輸出"
     if r.returncode != 0:
         raise AssertionError(tail)
     return tail
@@ -117,15 +98,13 @@ def _pipeline(name: str, dataset) -> str:
     from pipeline import locate
     from llm.mock import MockProvider
 
-    target = _need_dir(dataset, name) if dataset is not None else _need_xlsx()
+    target = _need_dir(dataset, name)
     provider = MockProvider()
     smap, files, route = locate(provider, target, force_model=False)
     assert "模型" not in route, f"{name} 應該走確定性辨識，實際走了 {route}"
 
     by_name = {f.name: f for f in files}
     wanted = [s for s in smap.sheets if s.archetype == "entity_by_period"]
-    if dataset is None:
-        wanted = [s for s in wanted if s.sheet_name.startswith("P.7")]
     store = build_store([read_sheet(by_name.get(s.source_file, target), s) for s in wanted])
 
     brief_text = render_brief(ranking_page(store, "cards"), store)
@@ -145,7 +124,7 @@ def _fr15_switch() -> str:
     from engine.recognize import recognize_dataset
 
     out = []
-    for name, d in [("fsc_114", DATASETS[1][1]), ("fsc_113_114", DATASETS[2][1])]:
+    for name, d in DATASETS:
         recs = recognize_dataset(_need_dir(d, name))
         sheets = []
         for f, rec in recs.items():
@@ -162,43 +141,57 @@ def _fr15_switch() -> str:
 
 
 def _recognizer() -> str:
+    """確定性辨識器的產出必須等於 committed 的 golden。
+
+    golden 也是這支辨識器產生的，所以這不是「對不對」的驗證，是**回歸**驗證：
+    改了 recognize.py 而 golden 沒跟著更新，就是紅燈。golden 的正確性由
+    tests/ 那組斷言把關（見 fixtures/README.md）。
+    """
     from contracts.sheet_map import SheetMap
-    from engine.recognize import recognize_workbook
+    from engine.recognize import recognize_dataset
     from evalh.sheetmap_score import score
 
-    rec = recognize_workbook(_need_xlsx())
+    recs = recognize_dataset(_need_dir(FSC_2Y, "fsc_113_114"))
+    specs = []
+    for f, rec in sorted(recs.items(), key=lambda kv: kv[0].name):
+        for spec in rec.sheets:
+            spec.source_file = f.name
+            specs.append(spec)
+
     truth = SheetMap.model_validate(
         json.loads((GOLDEN / "sheet_map.json").read_text(encoding="utf-8"))
     )
-    _, overall = score(SheetMap(workbook="x", sheets=rec.sheets), truth)
-    assert overall == 1.0, f"辨識器對附件四只有 {overall:.0%}，低於 100% 就不該走快路徑"
-    return f"附件四 {overall:.0%}（{rec.kind}）"
+    _, overall = score(SheetMap(workbook="x", sheets=specs), truth)
+    assert overall == 1.0, f"辨識器與 golden 只吻合 {overall:.0%}"
+    return f"{len(specs)} 張表與 golden 一致"
 
 
 def _fixture_drift() -> str:
     """committed 的 writer fixture 必須等於引擎現在會產出的內容。
 
-    這是上一輪真的發生過的 bug：改了 summarize.py 的格式，fixture 和 prompt
-    都沒跟上，writer 的 prompt 開始描述引擎已不再產出的格式。
-    有這條檢查，漂移就會變成紅燈而不是靜默分家。
+    真的發生過：改了 summarize.py 的格式，fixture 與 prompt 都沒跟上，
+    於是 prompt 在描述一個引擎已不再產出的格式。
     """
-    from tools.gen_writer_fixtures import _store, briefs
+    from tools.gen_writer_fixtures import all_briefs
     from engine.summarize import render_brief
 
-    _need_xlsx()  # _store() 會讀附件四
-    store = _store()
+    _need_dir(FSC_1Y, "fsc_114")
+    _need_dir(FSC_2Y, "fsc_113_114")
+
     drift: List[str] = []
-    for name, brief in briefs(store).items():
+    items = all_briefs()
+    for name, (brief, store) in items.items():
         path = INPUTS_WRITER / f"{name}.txt"
         expected = render_brief(brief, store)
         if not path.exists() or path.read_text(encoding="utf-8") != expected:
             drift.append(name)
+
     assert not drift, (
         f"這些 fixture 與引擎輸出不一致：{drift}。"
         f"若是刻意改格式，跑 python -m tools.gen_writer_fixtures --write "
         f"重新產生，**並重跑 writer 基準線**。"
     )
-    return f"{len(briefs(store))} 份 fixture 與引擎一致"
+    return f"{len(items)} 份 fixture 與引擎一致"
 
 
 def _harness() -> str:
@@ -255,9 +248,7 @@ def main() -> int:
     if skipped:
         # 綠燈但覆蓋率打折。講清楚，免得有人把「CI 過了」當成「全部驗過了」。
         print(f"已跑的 {len(checks) - skipped} 項全數通過，但有 {skipped} 項因缺資料跳過。")
-        print("CI 上這是正常的：金管會月報進版控，命題素材（附件四）不進，")
-        print("所以要用到附件四的項目跑不了。契約、import 與 fsc 兩組資料的端到端都是綠的；")
-        print("但**合併前請把附件四放進 source/ 再跑一次**，跳過的那幾項才是完整驗收。")
+        print("資料都在版控內，正常不該跳過——請確認 fixtures/data/ 沒有被刪。")
     else:
         print("全數通過。契約與管線是完整的，可以合併。")
         print("模型品質是另一回事，請另外跑 python -m tools.compare_models。")

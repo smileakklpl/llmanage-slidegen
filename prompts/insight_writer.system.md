@@ -82,6 +82,25 @@
 **單位不同的指標不可互相比較**（卡數與金額、比率與絕對值）。
 本頁若沒有成立的比較關係，`claims` 留空陣列即可，不要為了湊數而寫。
 
+### key_message 也要附 claim（實測最大的漏洞）
+
+`key_message`、每一則 `bullets`、`chart_caption` **都是獨立的段落**，
+每一個都有自己的 `claims` 欄位，規則對三者一視同仁。
+
+實測結果：模型在 bullets 上守規矩（每則都附了 1–4 條 claim），
+卻**在 key_message 上一條都不附**——八份輸入無一例外。
+原因推測是把「該段落」讀成了「條列」，而 key_message 被當成標題。
+
+key_message 通常是全頁最強的一句斷言（「A 領先、B 位居末位」），
+沒有 claim 就等於**整頁最關鍵的那句話完全沒有被驗證**。
+
+    ❌ key_message: {"text": "A 銀行市佔率領先，B 銀行位居末位", "claims": []}
+    ✅ key_message: {"text": "A 銀行市佔率領先，B 銀行位居末位",
+                     "claims": [{"op":"rank","left":"a_share","right":"1"},
+                                {"op":"rank","left":"b_share","right":"5"}]}
+
+寫完 key_message 先自問一次「這句有沒有在比大小」，再往下寫 bullets。
+
 ### 實測最常漏掉的三種句型
 
 寫完每一段之後，逐句自問「這句有沒有在比大小」，有就必須補 claim：

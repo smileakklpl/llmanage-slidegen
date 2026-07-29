@@ -6,13 +6,9 @@
     python main.py --provider ollama --model gemma2:9b
     python main.py --provider ollama --model gemma2:9b --locate  # 連結構定位也交給模型
 
-在此之前三段 LLM 各自對著 fixture 跑、彼此不相連：
-intent 吐 IntentSpec 就丟掉、locator 吐 SheetMap 沒人接、
-writer 吃的是手寫模擬的摘要。這支程式把它們串成一條。
-
 ## 管線
 
-    附件四.xlsx
+    fsc_113_114/
         │  profiler（確定性）
         ▼
     純文字結構描述 ──►【LLM】locator ──► SheetMap
@@ -53,7 +49,7 @@ from validator import render_page, validate_narrative
 from llm import fallbacks
 from llm.factory import load_provider
 
-from paths import PROMPTS, resolve_xlsx
+from paths import FSC_2Y, PROMPTS
 
 
 def locate(provider, target: Path, force_model: bool) -> tuple[SheetMap, List[Path], str]:
@@ -102,14 +98,13 @@ def main() -> None:
     ap.add_argument("--model", default=None)
     ap.add_argument("--num-ctx", type=int, default=None)
     ap.add_argument("--dataset", default=None,
-                    help="資料來源：單一 xlsx 或一整個目錄（一指標一檔）。"
-                         "省略時用附件四")
+                    help="資料來源：單一 xlsx 或一整個目錄，省略時用 fsc_113_114")
     ap.add_argument("--locate", action="store_true",
                     help="強制交給模型定位，即使格式認得（用來考模型）")
     ap.add_argument("--metric", default="cards", choices=["cards", "spend"])
     args = ap.parse_args()
 
-    target = Path(args.dataset) if args.dataset else resolve_xlsx()
+    target = Path(args.dataset) if args.dataset else FSC_2Y
     provider = load_provider(args.provider, args.model, args.num_ctx)
 
     print("[1.5] 結構辨識…")
@@ -119,8 +114,6 @@ def main() -> None:
     print("[2]   讀取資料並計算指標…")
     by_name = {f.name: f for f in files}
     wanted = [s for s in smap.sheets if s.archetype == "entity_by_period"]
-    if args.dataset is None:  # 附件四四張表結構相同，取 P.7 兩張即可
-        wanted = [s for s in wanted if s.sheet_name.startswith("P.7")]
     sheets = [read_sheet(by_name.get(s.source_file, target), s) for s in wanted]
     store = build_store(sheets)
     print(f"      MetricStore：{len(store.computable_keys())} 個可算、"

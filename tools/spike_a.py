@@ -1,15 +1,11 @@
-"""Spike A — 驗證模型能不能正確定位試算表結構。
-
-一律從 repo root 執行：
+"""Spike A — 量模型結構定位的命中率。
 
     python -m tools.spike_a --provider mock
-    python -m tools.spike_a --provider ollama --model qwen2.5:14b
     python -m tools.spike_a --provider bedrock
     python -m tools.spike_a --dump-profile   # 只看 profiler 產出，不打模型
 
-輸入固定為附件四；prompt 是唯一變因。
-
-被量的 `locate_one` 住在 `src/locator.py`（產品碼），這支只負責量它的命中率。
+輸入固定為 fixtures/data/fsc_113_114，標準答案是 fixtures/golden/sheet_map.json。
+被量的 `locate_one` 在 src/locator.py。
 """
 
 import argparse
@@ -21,7 +17,7 @@ from contracts.sheet_map import SheetMap, SheetSpec
 from evalh.sheetmap_score import FIELDS, report, score
 from llm.factory import load_provider
 from locator import locate_one
-from paths import resolve_xlsx
+from paths import FSC_2Y
 from engine.profiler import profile_workbook
 
 from paths import GOLDEN, PROMPTS
@@ -31,11 +27,7 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--provider", default="mock")
     ap.add_argument("--model", default=None)
-    ap.add_argument(
-        "--xlsx",
-        default=None,
-        help="附件四路徑。未指定時依序找 $B_LLM_XLSX、fixtures/data/",
-    )
+    ap.add_argument("--dataset", default=None, help="資料集目錄，省略時用 fsc_113_114")
     ap.add_argument("--dump-profile", action="store_true")
     ap.add_argument(
         "--num-ctx",
@@ -52,8 +44,10 @@ def main() -> None:
     )
     args = ap.parse_args()
 
-    xlsx = resolve_xlsx(args.xlsx)
-    profiles = profile_workbook(xlsx)
+    dataset = Path(args.dataset) if args.dataset else FSC_2Y
+    profiles = {}
+    for f in sorted(dataset.glob("*.xlsx")):
+        profiles.update(profile_workbook(f))
 
     if args.dump_profile:
         for name, text in profiles.items():
@@ -93,7 +87,7 @@ def main() -> None:
                 continue
             specs.append(spec)
 
-        scores, overall = score(SheetMap(workbook=xlsx.name, sheets=specs), truth)
+        scores, overall = score(SheetMap(workbook=dataset.name, sheets=specs), truth)
         overalls.append(overall)
         for s in scores:
             missed = {m[0] for m in s.misses}

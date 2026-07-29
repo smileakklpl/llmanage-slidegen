@@ -10,4 +10,4 @@ narrative_id：n_p11
   esun_spend_share = 0.132961
 
 不可用指標（engine 已判定 computable=false，不得引用也不得改用文字描述）：
-  bank_06_spend_yoy_11401、bank_06_spend_yoy_11402 等 396 個：缺少基期 該期 的資料，依 FR-1.5 不得產出
+  amex_spend_yoy_11401、amex_spend_yoy_11402 等 396 個：缺少基期 該期 的資料，依 FR-1.5 不得產出

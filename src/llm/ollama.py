@@ -59,7 +59,7 @@ class OllamaProvider(LLMProvider):
     ):
         self.model = model
         self.host = host.rstrip("/")
-        # Ollama 預設 num_ctx 只有 2048，附件四整份結構描述就 ~2200 tokens。
+        # Ollama 預設 num_ctx 只有 2048，一份結構描述就可能超過。
         # 不顯式指定會被靜默截斷：模型看不到後半段工作表，卻仍吐出合法 JSON，
         # 計分器報「整張漏掉」，你會誤判成模型笨。
         #
