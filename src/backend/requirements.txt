@@ -1,2 +1,21 @@
-pypdf
-pdfplumber
+# ingestion 後端的相依。主管線的相依在 repo root 的 requirements.txt。
+#
+# 安裝：在 src/backend/ 下 pip install -r requirements.txt
+#
+# 注意：paddleocr 需要另外安裝推論框架 paddlepaddle，它不是 paddleocr wheel
+# 的相依，沒裝的話 import paddleocr 會失敗（連帶 test_visual_ingestion.py
+# 收不起來）。確認實際使用的版本後補進這份清單。
+beautifulsoup4==4.15.0
+fastapi==0.140.4
+openpyxl==3.1.5
+paddleocr==3.7.0
+pdfplumber==0.11.10
+Pillow==12.3.0
+pydantic==2.13.4
+PyMuPDF==1.28.0
+pypdf==6.14.2
+pytest==9.1.1
+pytest-timeout==2.4.0
+python-multipart==0.0.32
+reportlab==5.0.0
+starlette==1.3.1
