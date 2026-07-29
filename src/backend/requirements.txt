@@ -2,13 +2,13 @@
 #
 # 安裝：在 src/backend/ 下 pip install -r requirements.txt
 #
-# 注意：paddleocr 需要另外安裝推論框架 paddlepaddle，它不是 paddleocr wheel
-# 的相依，沒裝的話 import paddleocr 會失敗（連帶 test_visual_ingestion.py
-# 收不起來）。確認實際使用的版本後補進這份清單。
+# OCR（paddleocr）不在這份清單裡，改放 requirements-ocr.txt。
+# 理由是程式碼本來就把它當選用：visual_parser.py 在函式內才 import，
+# 抓到 ImportError 會提示安裝指令。整套測試注入 FakeEngine，不碰真引擎，
+# 所以 CI 與一般開發都不需要裝它——要跑真的 OCR 才裝。
 beautifulsoup4==4.15.0
 fastapi==0.140.4
 openpyxl==3.1.5
-paddleocr==3.7.0
 pdfplumber==0.11.10
 Pillow==12.3.0
 pydantic==2.13.4
