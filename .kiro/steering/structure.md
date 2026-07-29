@@ -9,6 +9,9 @@ inclusion: always
 ```
 llmanage-slidegen/
 ├── .github/workflows/        # CI：每次 push / PR 跑 verify_all.py
+├── .kiro/
+│   ├── steering/             # 專案級指導文件（本檔所在）
+│   └── skills/               # 開發輔助 skill（progress、update-requirements）
 ├── verify_all.py             # 驗收關卡（CI 入口，對應規格書 §7）
 ├── bootstrap.py              # import 路徑設定：一律從 repo root 執行
 ├── main.py                   # 程式進入點 → src/pipeline.py
@@ -19,7 +22,11 @@ llmanage-slidegen/
 │   ├── contracts/            # 跨模組 JSON 契約（§5）；改動需知會所有下游模組
 │   ├── llm/                  # FR-A1 統一介面 + adapter + factory + repair + fallback
 │   ├── engine/               # FR-1 資料解析與指標計算（確定性，不碰 LLM）
-│   ├── renderer/             # FR-2/FR-3 簡報生成
+│   ├── renderer/             # FR-2/FR-3 簡報生成（chart_builder / 一致性驗證）
+│   ├── backend/              # FR-A2 檔案上傳與 ingestion（FastAPI）
+│   │   ├── app/ingestion/    #   偵測、分類、擷取、正規化、驗證管線
+│   │   └── tests/            #   ingestion 專屬測試（見下方「測試分佈」）
+│   ├── frontend/             # 前端（尚為空殼）
 │   ├── locator.py            # 結構定位（LLM）：profiler 文字 → SheetSpec
 │   ├── validator.py          # NFR-2 / T8 敘事一致性
 │   ├── pipeline.py           # 端到端串接
@@ -33,7 +40,14 @@ llmanage-slidegen/
 │                             #   data/ 僅金管會月報進版控，附件四不進
 │
 ├── docs/                     # 規格書（設計決策的唯一真相來源）
+│   ├── 智匯數據簡報神器_開發規格書_v0.3.md   # 規格的唯一真相來源
+│   ├── 圖表原生性與資料同步設計.md          # PPT 圖表與 Excel 資料同步機制設計
+│   └── current_progress.md                # 進度快照
 ├── source/                   # 命題原始素材（唯讀，不進版控）
+│   ├── template.pptx         #   台新新光金控簡報模板（renderer 的 base file）
+│   ├── 附件二_系統提示詞.docx            #   智匯數據簡報神器指令稿
+│   ├── 附件三_信用卡範例簡報及錯誤說明.pptx  #   錯誤範例，對應 T7 測試斷言
+│   └── 附件四_預期修正參照資料.xlsx        #   正確數值參照，對應 T1/T7 測試資料
 └── outputs/                  # 生成結果（可清空重生）
 ```
 
@@ -114,3 +128,11 @@ DeckSpec 落地保存（供 Refresh 重放）
 - 紀律：**輸入固定，prompt 演進。** `fixtures/inputs*/` 定案後凍結；
   同時改動輸入與 prompt 就無法歸因品質變化
 - 任何新增的圖表生成邏輯，必須有對應的一致性驗證（chart cache vs 內嵌 workbook）
+
+### 測試分佈
+測試目前落在兩處，各有自己的執行方式，尚未整併：
+
+| 位置 | 範圍 | 執行方式 |
+|---|---|---|
+| `tests/` | 主管線（engine / recognize / ingest / 指標定義） | repo root 跑 `pytest`（`conftest.py` 已設好路徑） |
+| `src/backend/tests/` | ingestion 管線 | `src/backend/` 下跑 `pytest`（該層有自己的 `pytest.ini`） |

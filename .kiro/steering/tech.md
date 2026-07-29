@@ -44,7 +44,7 @@ LLM 只能做三件事：**意圖解析、洞察敘事、信件摘要**。三者
 | 圖表需求 | 實作方式 | 狀態 |
 |---|---|---|
 | 排名圖、成長率圖 | `CategoryChartData` + `COLUMN_CLUSTERED`/`BAR_CLUSTERED` | 已驗證 |
-| 市占率圖 | `CategoryChartData` + `PIE` | 待實作，同一入口 |
+| 市占率圖 | `CategoryChartData` + `PIE` | 已實作（`add_pie_chart`），同一入口 |
 | 散點圖（規模 vs 成長） | `XyChartData` | 已實作，資料點標籤需額外處理 `c:dLbls` |
 | 雙軸圖（長條+折線疊圖） | 無高階 API，需手動插入第二個 plot | M0 必驗項，風險最高 |
 | 熱力圖 | 無原生圖表類型，改用原生表格 + 儲存格底色模擬 | 非真正圖表，右鍵無編輯資料選項 |

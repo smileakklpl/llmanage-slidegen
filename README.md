@@ -48,6 +48,7 @@ clone 下來就能直接跑，不需要向任何人索取檔案。
 ```
 llmanage-slidegen/
 ├── .github/workflows/        # CI：每次 push / PR 跑 verify_all.py
+├── .kiro/                    # steering 指導文件與開發輔助 skill
 ├── verify_all.py             # 驗收關卡（CI 入口，對應規格書 §7）
 ├── bootstrap.py              # import 路徑設定
 ├── main.py                   # 程式進入點 → src/pipeline.py
@@ -72,8 +73,13 @@ llmanage-slidegen/
 │   │   ├── metrics.py        #   → MetricStore（市佔率、排名、YoY 可算性）
 │   │   └── summarize.py      #   MetricStore → 單頁摘要
 │   ├── renderer/             # 簡報生成
-│   │   ├── chart_builder.py  #   ChartSpec / add_chart 封裝
+│   │   ├── chart_builder.py  #   ChartSpec / add_chart 封裝 + CHART_SKILLS registry
 │   │   └── verify_chart_consistency.py
+│   ├── backend/              # 檔案上傳與 ingestion 服務
+│   │   ├── app/main.py       #   FastAPI 進入點
+│   │   ├── app/ingestion/    #   偵測 / 分類 / 擷取 / 正規化 / 驗證
+│   │   └── tests/            #   ingestion 專屬測試（在 src/backend/ 下跑 pytest）
+│   ├── frontend/             # 前端（尚未開發）
 │   ├── locator.py            # 結構定位（LLM）：profiler 文字 → SheetSpec
 │   ├── validator.py          # T8 敘事一致性斷言 + 佔位符代入
 │   ├── pipeline.py           # 端到端串接
@@ -82,11 +88,12 @@ llmanage-slidegen/
 ├── prompts/                  # system prompt，外部化成檔案（規格書 §6.3）
 ├── evalh/                    # eval harness 與計分器
 ├── tools/                    # 開發工具（轉檔、spike、多模型比較）
-├── tests/                    # 斷言測試
+├── tests/                    # 斷言測試（主管線，repo root 跑 pytest）
 ├── fixtures/                 # 資料、固定輸入、golden（見 fixtures/README.md）
 │
 ├── docs/                     # 規格書與設計文件（設計決策的唯一真相來源）
-├── source/                   # 選用的外部參照檔（不進版控）
+├── source/                   # 命題原始素材與選用參照檔（不進版控）
+│                             #   template.pptx、附件二/三/四
 └── outputs/                  # 生成結果（可清空重生）
 ```
 
