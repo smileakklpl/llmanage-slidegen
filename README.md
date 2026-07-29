@@ -88,9 +88,15 @@ llmanage-slidegen/
 │   │   ├── pipeline.py         #   端到端串接
 │   │   └── paths.py            #   專案路徑的唯一權威
 │   │
-│   ├── ppt_generation/         # 【輸出】簡報生成（規格書 §4.3 的 renderer 模組）
-│   │   ├── chart_builder.py    #   ChartSpec / add_chart 封裝 + CHART_SKILLS registry
-│   │   └── verification/       #   圖表與內嵌工作表一致性驗證
+│   ├── ppt_generation/         # 【輸出】簡報生成（詳見其 Guide.md）
+│   │   ├── Guide.md            #   模組說明：資料流、執行方式、相容性
+│   │   ├── run_pipeline.py     #   端到端 CLI（唯一入口，支援 --stage）
+│   │   ├── core/               #   跨階段共用：設定 / LLM 介面 / 佔位符
+│   │   ├── data/               #   資料讀取與確定性指標計算
+│   │   ├── charts/             #   圖表定義、add_chart 單一入口、防呆
+│   │   ├── agents/             #   章節規劃 / 圖表 / 敘事 / 審查
+│   │   ├── output/             #   .pptx 與稽核 .xlsx 產出
+│   │   └── verification/       #   三方數值比對（T1）
 │   │
 │   └── frontend/               # 前端（尚未開發）
 │
@@ -103,8 +109,15 @@ llmanage-slidegen/
 ├── docs/                     # 規格書與設計文件（設計決策的唯一真相來源）
 ├── source/                   # 命題原始素材與選用參照檔（不進版控）
 │                             #   template.pptx、附件二/三/四
-└── outputs/                  # 生成結果（可清空重生）
+└── outputs/                  # 生成結果
+    ├── deck.pptx             #   生成的簡報（示範產出，進版控）
+    ├── deck_data.xlsx        #   對應的稽核資料
+    ├── current_progress.md   #   開發進度報告
+    └── stages/               #   --stage 分階段中間結果 JSON（不進版控）
 ```
+
+簡報生成模組的使用方式、資料流與各檔案職責，見
+[`src/ppt_generation/Guide.md`](src/ppt_generation/Guide.md)。
 
 ### 選用：外部交叉驗證
 

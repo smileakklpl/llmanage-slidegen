@@ -133,11 +133,23 @@ def add_pie_chart(
 # ---------------------------------------------------------------------------
 CHART_SKILLS = {
     "column": add_category_chart,   # 長條圖／排名圖／成長率圖
-    "bar": add_category_chart,      # 橫條圖（呼叫時 spec.chart_type 需先設為 BAR_CLUSTERED）
+    "bar": add_category_chart,      # 橫條圖
+    "line": add_category_chart,     # 折線圖／時間趨勢圖
     "pie": add_pie_chart,           # 市占率圖
     "scatter": add_scatter_chart,   # 規模 vs 成長散點圖
     # "heatmap": 由原生表格 + 儲存格底色模擬，不走 add_chart()，
     #            另外註冊在 table_builder.py（尚未實作），Agent 需個別處理。
+}
+
+#: skill 名稱 → python-pptx 圖表類型。
+#: chart_planner 依此設定 ChartSpec.chart_type，讓 CHART_SKILLS 中共用
+#: add_category_chart 的多個 skill（column/bar/line）產生不同圖形。
+CHART_TYPE_BY_SKILL = {
+    "column": XL_CHART_TYPE.COLUMN_CLUSTERED,
+    "bar": XL_CHART_TYPE.BAR_CLUSTERED,
+    "line": XL_CHART_TYPE.LINE_MARKERS,
+    "pie": XL_CHART_TYPE.PIE,
+    "scatter": XL_CHART_TYPE.XY_SCATTER,
 }
 
 
@@ -161,6 +173,50 @@ CHART_SKILL_TOOL_SCHEMAS = [
     {
         "name": "column",
         "description": "長條圖，適合排名、成長率比較等類別型數據。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "metric_key": {
+                    "type": "string",
+                    "description": "MetricStore 中的指標鍵，不可填入實際數值。",
+                },
+                "series_names": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "限定取用的系列名稱，留空代表全取。",
+                },
+                "chart_title": {"type": "string"},
+            },
+            "required": ["metric_key", "chart_title"],
+        },
+    },
+    {
+        "name": "bar",
+        "description": (
+            "橫條圖，適合類別名稱較長的排名比較（如銀行名稱橫向排列）。"
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "metric_key": {
+                    "type": "string",
+                    "description": "MetricStore 中的指標鍵，不可填入實際數值。",
+                },
+                "series_names": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "限定取用的系列名稱，留空代表全取。",
+                },
+                "chart_title": {"type": "string"},
+            },
+            "required": ["metric_key", "chart_title"],
+        },
+    },
+    {
+        "name": "line",
+        "description": (
+            "折線圖，適合時間序列趨勢。僅可用於 axis_kind 為 temporal 的指標。"
+        ),
         "parameters": {
             "type": "object",
             "properties": {

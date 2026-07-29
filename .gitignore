@@ -9,6 +9,9 @@ __pycache__/
 source/*
 !source/template.pptx
 
+# 管線分階段除錯用的中間結果，可重生，不進版控
+outputs/stages/
+
 # MacOS file
 .DS_Store
 
@@ -30,10 +33,8 @@ fixtures/data/*
 #（見 tools/ingest_fsc.py 的 _months()），.ods 純屬重複，不進版控
 *.ods
 
-# 生成結果：可清空重生，不進版控
-outputs/
+# 生成結果：deck.pptx / deck_data.xlsx 是示範產出，刻意進版控供他人直接檢視；
+# 分階段中間結果不進（規則在上面的 outputs/stages/）。
 
 # Python
-__pycache__/
-*.pyc
 .pytest_cache/
