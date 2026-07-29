@@ -8,21 +8,26 @@ inclusion: always
 
 ```
 llmanage-slidegen/
-├── .github/workflows/        # CI：每次 push / PR 跑 verify_all.py
+├── .github/workflows/        # CI：每次 push / PR 跑 scripts/verify_all.py
 ├── .kiro/
 │   ├── steering/             # 專案級指導文件（本檔所在）
 │   └── skills/               # 開發輔助 skill（progress、update-requirements）
-├── verify_all.py             # 驗收關卡（CI 入口，對應規格書 §7）
-├── bootstrap.py              # import 路徑設定：一律從 repo root 執行
-├── main.py                   # 程式進入點 → src/core/pipeline.py
+├── main.py                   # 程式進入點（根目錄唯一程式檔）→ src/core/pipeline.py
 ├── requirements.txt
-├── metric_definitions.json   # 指標定義（業務規則外部化，對應通用性風險對策）
+├── pytest.ini                # 主管線測試設定，必須留在 repo root（見檔內註解）
+│
+├── scripts/                  # 開發輔助腳本
+│   ├── bootstrap.py          #   import 路徑設定：一律從 repo root 執行
+│   └── verify_all.py         #   驗收關卡（CI 入口，對應規格書 §7）
+│
+├── config/                   # 業務規則設定
+│   └── metric_definitions.json  # 指標定義（外部化，對應通用性風險對策）
 │
 ├── src/                      # 產品碼，依管線階段分四塊
 │   ├── backend/              # 【輸入】FR-A2 檔案上傳與 ingestion（FastAPI）
 │   │   ├── app/ingestion/    #   偵測、分類、擷取、正規化、驗證管線
 │   │   └── tests/            #   ingestion 專屬測試（見下方「測試分佈」）
-│   ├── core/                 # 【計算與 LLM】bootstrap.py 掛的 import 根目錄
+│   ├── core/                 # 【計算與 LLM】scripts/bootstrap.py 掛的 import 根目錄
 │   │   ├── contracts/        #   跨模組 JSON 契約（§5）；改動需知會所有下游模組
 │   │   ├── llm/              #   FR-A1 統一介面 + adapter + factory + repair + fallback
 │   │   ├── engine/           #   FR-1 資料解析與指標計算（確定性，不碰 LLM）
@@ -64,7 +69,7 @@ llmanage-slidegen/
 ModuleNotFoundError。兩者現已歸位到 `src/core/llm/factory.py` 與 `src/core/locator.py`。
 
 要在 `src/` 用到某個東西，就把那個東西搬進 `src/`，不要反向 import。
-這條規則由 `verify_all.py` 的「分層依賴方向」檢查靜態掃描守著。
+這條規則由 `scripts/verify_all.py` 的「分層依賴方向」檢查靜態掃描守著。
 
 ### `src/` 四塊之間的方向
 
@@ -132,7 +137,7 @@ DeckSpec 落地保存（供 Refresh 重放）
   再依模組切分表命名（如 `src/core/engine/`、`src/core/writer/`），避免所有邏輯塞在單一檔案
 
 ## 測試與驗證慣例
-- `python verify_all.py` 是合併前的關卡：全部走確定性路徑、不呼叫模型、秒級跑完。
+- `python scripts/verify_all.py` 是合併前的關卡：全部走確定性路徑、不呼叫模型、秒級跑完。
   紅燈就不要合併。每次 push / PR 由 GitHub Actions 自動跑
 - 金管會月報進版控（公開資料，其他模組也要用），附件四不進（主辦方素材、repo 公開）。
   CI 上要用附件四的項目會顯示 `⊘ 跳過`，屬正常；

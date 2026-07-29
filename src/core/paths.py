@@ -17,7 +17,7 @@ INPUTS_WRITER = FIXTURES / "inputs" / "writer"
 BASELINES = FIXTURES / "baselines"
 SOURCE = REPO_ROOT / "source"
 OUTPUTS = REPO_ROOT / "outputs"
-METRIC_DEFS = REPO_ROOT / "metric_definitions.json"
+METRIC_DEFS = REPO_ROOT / "config" / "metric_definitions.json"
 
 # 金管會月報：原始檔與轉檔產出。這是本專案的資料來源。
 FSC_RAW = DATA / "金融業務資訊揭露"

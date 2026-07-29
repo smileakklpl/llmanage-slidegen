@@ -1,9 +1,9 @@
-# 合併前驗收 —— verify_all.py 的自動化版本。
+# 合併前驗收 —— scripts/verify_all.py 的自動化版本。
 #
-# verify_all.py 一直自稱「CI 入口」，但在此之前沒有任何東西呼叫它，
+# scripts/verify_all.py 一直自稱「CI 入口」，但在此之前沒有任何東西呼叫它，
 # 等於一支要靠人記得跑的腳本。這份 workflow 補上那一步。
 #
-# 之所以能在免費 runner 上跑：verify_all.py 刻意全走 mock / 確定性路徑，
+# 之所以能在免費 runner 上跑：scripts/verify_all.py 刻意全走 mock / 確定性路徑，
 # 不碰 ollama、不需要 GPU、秒級跑完。模型品質是另一條線
 #（python -m tools.compare_models），那條要 GPU，不該擋 PR。
 #
@@ -57,10 +57,10 @@ jobs:
         # 中文報表在 runner 上要 UTF-8 才印得出來
         env:
           PYTHONIOENCODING: utf-8
-        run: python verify_all.py
+        run: python scripts/verify_all.py
 
   backend:
-    # ingestion 管線的測試。以前只有 verify_all.py 進 CI，等於這 43 個測試
+    # ingestion 管線的測試。以前只有 scripts/verify_all.py 進 CI，等於這 43 個測試
     # 從來沒被擋過——backend 改壞了，CI 照樣綠燈。
     #
     # 不裝 requirements-ocr.txt：paddleocr 是選用相依，測試全程注入

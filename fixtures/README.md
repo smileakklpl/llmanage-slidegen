@@ -147,7 +147,7 @@ python -m evalh.harness --stage writer --provider bedrock --repeat 3          # 
 
 它唯一的用途是**選用的外部交叉驗證**。它的 P.7 有一欄命題方自己算的市佔率，
 而金管會月報沒有 —— 所以在它存在時，可以拿來驗我們的市佔率公式算得對不對。
-`metric_definitions.json` 裡「全年加總 vs 最新月份」那條規則就是這樣定下來的
+`config/metric_definitions.json` 裡「全年加總 vs 最新月份」那條規則就是這樣定下來的
 （用錯定義有 7 家名次改變，含第 3/4 名對調）。
 
 相關測試在缺檔時自動 skip：

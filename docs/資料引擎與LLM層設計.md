@@ -38,17 +38,17 @@ market_total_{指標}_{期間}    market_total_cards_11412
 
 | 規則 | 定義 | 實作位置 |
 |---|---|---|
-| `market_share` | 全期間加總佔比 | `metric_definitions.json` |
+| `market_share` | 全期間加總佔比 | `config/metric_definitions.json` |
 | `ranking` | 依 `market_share` 降序，合計列已在 reader 排除 | 同上 |
 | `yoy` | `entity[p] / entity[p-100] - 1` | 同上 |
 
-定義外部化在 `metric_definitions.json`，不寫死在程式。業務規則會改，
+定義外部化在 `config/metric_definitions.json`，不寫死在程式。業務規則會改，
 不該散落各處；且該檔有獨立測試以 pandas 重算驗證。
 
 ### 2.1 market_share 用加總佔比而非最新月份佔比
 
 兩種算法在同一份資料上結果不同：以最新月份計算時，簽帳金額有 7 家名次改變，
-含第 3、4 名對調。`metric_definitions.json` 將最新月份法標記為
+含第 3、4 名對調。`config/metric_definitions.json` 將最新月份法標記為
 `wrong_but_intuitive` 並記錄誤差值。
 
 ### 2.2 YoY 不可算時標記，不丟例外也不填 0
@@ -184,12 +184,12 @@ tests/  ──┐
 tools/  ──┼──►  src/          （允許）
 evalh/  ──┘
 
-src/  ──╳──►  evalh/ tools/   （禁止，verify_all 靜態掃描）
+src/  ──╳──►  evalh/ tools/   （禁止，scripts/verify_all.py 靜態掃描）
 ```
 
 `src/` 需能單獨出貨；`tools/` 下的 spike 依定義可隨時移除，量測骨架不應
-成為產品的必要相依。違反時 `verify_all.py` 的「分層依賴方向」會紅燈並指出
-檔案與行號。
+成為產品的必要相依。違反時 `scripts/verify_all.py` 的「分層依賴方向」會紅燈
+並指出檔案與行號。
 
 ---
 
@@ -203,5 +203,5 @@ src/  ──╳──►  evalh/ tools/   （禁止，verify_all 靜態掃描）
 
 | 位置 | 處理 |
 |---|---|
-| `bootstrap.py` | 將 stdout / stderr 釘為 UTF-8 |
-| `verify_all.py` | 呼叫 pytest 的 subprocess 明指 `encoding="utf-8"` |
+| `scripts/bootstrap.py` | 將 stdout / stderr 釘為 UTF-8 |
+| `scripts/verify_all.py` | 呼叫 pytest 的 subprocess 明指 `encoding="utf-8"` |

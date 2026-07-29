@@ -7,10 +7,10 @@ An LLM-powered presentation generation tool with a focus on robust data ingestio
 
 ```bash
 pip install -r requirements.txt
-python verify_all.py          # 驗收關卡：2 秒跑完，全綠代表管線與契約完整
+python scripts/verify_all.py  # 驗收關卡：2 秒跑完，全綠代表管線與契約完整
 ```
 
-一律**從 repo root 執行**（`bootstrap.py` 會補上 `src/core/` 的 import 路徑）：
+一律**從 repo root 執行**（`scripts/bootstrap.py` 會補上 `src/core/` 的 import 路徑）：
 
 ```bash
 python main.py --provider mock                     # 端到端：xlsx → 成品文字
@@ -20,7 +20,7 @@ python -m evalh.harness --stage writer             # 敘事品質
 python -m tools.compare_models --models gemma2:9b  # 多模型並排（FR-A1 驗收）
 ```
 
-`verify_all.py` 每次 push / PR 由 GitHub Actions 自動跑（`.github/workflows/verify.yml`）。
+`scripts/verify_all.py` 每次 push / PR 由 GitHub Actions 自動跑（`.github/workflows/verify.yml`）。
 所有檢查只依賴版控內的資料，**CI 跑的就是完整驗收**，不需要任何本機檔案。
 
 ## 資料
@@ -40,25 +40,32 @@ clone 下來就能直接跑，不需要向任何人索取檔案。
 ## 目錄結構
 
 `src/` 放產品碼，依**管線階段**分四塊：`backend/`（輸入）、`core/`（計算與 LLM）、
-`ppt_generation/`（輸出）、`frontend/`。量測工具與測試資料放 repo root。
+`ppt_generation/`（輸出）、`frontend/`。根目錄只留 `main.py` 這個唯一進入點，
+量測工具、測試資料與輔助腳本歸位到各自的目錄（`scripts/`、`tests/`、`config/`）。
 
-四塊各自從自己的目錄執行、各有自己的 import 根目錄——`core/` 由 `bootstrap.py`
-掛上，`backend/` 由該層 `pytest.ini` 的 `pythonpath = .` 掛上。所以 `core/` 底下
-一律寫 `from engine.reader import ...`，不寫 `from src.core.engine.reader import ...`。
+四塊各自從自己的目錄執行、各有自己的 import 根目錄——`core/` 由
+`scripts/bootstrap.py` 掛上，`backend/` 由該層 `pytest.ini` 的
+`pythonpath = .` 掛上。所以 `core/` 底下一律寫 `from engine.reader import ...`，
+不寫 `from src.core.engine.reader import ...`。
 
 依賴方向是**單向**的：`evalh/`、`tools/`、`tests/` 可以 import `src/`，
 反過來不行。`src/` 是要能單獨出貨的東西，不該依賴隨時可砍的 spike 與量測骨架。
-這條規則由 `verify_all.py` 的「分層依賴方向」檢查守著。
+這條規則由 `scripts/verify_all.py` 的「分層依賴方向」檢查守著。
 
 ```
 llmanage-slidegen/
-├── .github/workflows/        # CI：每次 push / PR 跑 verify_all.py
+├── .github/workflows/        # CI：每次 push / PR 跑 scripts/verify_all.py
 ├── .kiro/                    # steering 指導文件與開發輔助 skill
-├── verify_all.py             # 驗收關卡（CI 入口，對應規格書 §7）
-├── bootstrap.py              # import 路徑設定
-├── main.py                   # 程式進入點 → src/core/pipeline.py
+├── main.py                   # 程式進入點（唯一根層程式檔）→ src/core/pipeline.py
 ├── requirements.txt
-├── metric_definitions.json   # 指標定義（業務規則，外部化以利通用性）
+├── pytest.ini                # 主管線測試設定（必須留在 repo root，見檔內註解）
+│
+├── scripts/                  # 開發輔助腳本
+│   ├── bootstrap.py          #   import 路徑設定
+│   └── verify_all.py         #   驗收關卡（CI 入口，對應規格書 §7）
+│
+├── config/                   # 業務規則設定
+│   └── metric_definitions.json  # 指標定義（外部化以利通用性）
 │
 ├── src/                        # 產品碼，依管線階段分四塊
 │   ├── backend/                # 【輸入】檔案上傳與 ingestion 服務
@@ -103,7 +110,7 @@ llmanage-slidegen/
 ├── prompts/                  # system prompt，外部化成檔案（規格書 §6.3）
 ├── evalh/                    # eval harness 與計分器
 ├── tools/                    # 開發工具（轉檔、spike、多模型比較）
-├── tests/                    # 斷言測試（主管線，repo root 跑 pytest）
+├── tests/                    # 斷言測試（主管線，repo root 跑 pytest；conftest.py 在此）
 ├── fixtures/                 # 資料、固定輸入、golden（見 fixtures/README.md）
 │
 ├── docs/                     # 規格書與設計文件（設計決策的唯一真相來源）

@@ -1,6 +1,6 @@
 """合併前的驗收關卡 — 一條指令跑完所有不需要模型的檢查。
 
-    python verify_all.py
+    python scripts/verify_all.py
 
 刻意**全部走 mock / 確定性路徑**：不碰 ollama、不需要 GPU、秒級跑完。
 理由是合併前要回答的問題是「契約和管線有沒有壞」，不是「模型好不好」。
@@ -12,7 +12,12 @@
 細節見 fixtures/README.md。
 """
 
-import bootstrap  # noqa: F401  補上 src/ 的 import 路徑
+import sys as _sys
+from pathlib import Path as _Path
+
+_sys.path.insert(0, str(_Path(__file__).resolve().parent))
+
+import bootstrap  # noqa: E402,F401  補上 src/ 的 import 路徑
 
 import io
 import json
