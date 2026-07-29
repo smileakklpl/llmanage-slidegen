@@ -3,7 +3,7 @@
 > **版本**：v0.1
 > **狀態**：engine 已驗證；Bedrock 已在 us-east-1 實測
 > **對應規格書章節**：FR-1（數據解析）、FR-1.5（推導可行性）、FR-A1（LLM 統一介面）、§6.2（輸出修復）
-> **相關程式**：`src/engine/`、`src/llm/`、`src/locator.py`
+> **相關程式**：`src/core/engine/`、`src/core/llm/`、`src/core/locator.py`
 
 ---
 

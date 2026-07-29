@@ -5,7 +5,7 @@
     python -m tools.spike_a --dump-profile   # 只看 profiler 產出，不打模型
 
 輸入固定為 fixtures/data/fsc_113_114，標準答案是 fixtures/golden/sheet_map.json。
-被量的 `locate_one` 在 src/locator.py。
+被量的 `locate_one` 在 src/core/locator.py。
 """
 
 import argparse

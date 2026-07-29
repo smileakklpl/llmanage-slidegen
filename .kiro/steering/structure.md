@@ -14,24 +14,25 @@ llmanage-slidegen/
 │   └── skills/               # 開發輔助 skill（progress、update-requirements）
 ├── verify_all.py             # 驗收關卡（CI 入口，對應規格書 §7）
 ├── bootstrap.py              # import 路徑設定：一律從 repo root 執行
-├── main.py                   # 程式進入點 → src/pipeline.py
+├── main.py                   # 程式進入點 → src/core/pipeline.py
 ├── requirements.txt
 ├── metric_definitions.json   # 指標定義（業務規則外部化，對應通用性風險對策）
 │
-├── src/                      # 產品碼，依規格書 §4.3 模組切分命名
-│   ├── contracts/            # 跨模組 JSON 契約（§5）；改動需知會所有下游模組
-│   ├── llm/                  # FR-A1 統一介面 + adapter + factory + repair + fallback
-│   ├── engine/               # FR-1 資料解析與指標計算（確定性，不碰 LLM）
-│   ├── ppt_generation/       # FR-2/FR-3 簡報生成（chart_builder / 一致性驗證）
-│   │                         #   = 規格書 §4.3 的 renderer 模組，目錄名沿用團隊既有慣例
-│   ├── backend/              # FR-A2 檔案上傳與 ingestion（FastAPI）
+├── src/                      # 產品碼，依管線階段分四塊
+│   ├── backend/              # 【輸入】FR-A2 檔案上傳與 ingestion（FastAPI）
 │   │   ├── app/ingestion/    #   偵測、分類、擷取、正規化、驗證管線
 │   │   └── tests/            #   ingestion 專屬測試（見下方「測試分佈」）
-│   ├── frontend/             # 前端（尚為空殼）
-│   ├── locator.py            # 結構定位（LLM）：profiler 文字 → SheetSpec
-│   ├── validator.py          # NFR-2 / T8 敘事一致性
-│   ├── pipeline.py           # 端到端串接
-│   └── paths.py              # 專案路徑的唯一權威
+│   ├── core/                 # 【計算與 LLM】bootstrap.py 掛的 import 根目錄
+│   │   ├── contracts/        #   跨模組 JSON 契約（§5）；改動需知會所有下游模組
+│   │   ├── llm/              #   FR-A1 統一介面 + adapter + factory + repair + fallback
+│   │   ├── engine/           #   FR-1 資料解析與指標計算（確定性，不碰 LLM）
+│   │   ├── locator.py        #   結構定位（LLM）：profiler 文字 → SheetSpec
+│   │   ├── validator.py      #   NFR-2 / T8 敘事一致性
+│   │   ├── pipeline.py       #   端到端串接
+│   │   └── paths.py          #   專案路徑的唯一權威
+│   ├── ppt_generation/       # 【輸出】FR-2/FR-3 簡報生成（chart_builder / 一致性驗證）
+│   │                         #   = 規格書 §4.3 的 renderer 模組，目錄名沿用團隊既有慣例
+│   └── frontend/             # 前端（尚為空殼）
 │
 ├── prompts/                  # system prompt 外部化（§6.3）
 ├── evalh/                    # eval harness 與計分器
@@ -60,10 +61,22 @@ llmanage-slidegen/
 量測骨架也不該成為產品的必要相依。曾經破過一次：`pipeline.py` 為了拿
 `load_provider`（原在 evalh）和 `locate_one`（原在 tools/spike_a）而反向 import，
 形成 `src → evalh → src` 的循環，副作用是 README 寫的執行指令直接
-ModuleNotFoundError。兩者現已歸位到 `src/llm/factory.py` 與 `src/locator.py`。
+ModuleNotFoundError。兩者現已歸位到 `src/core/llm/factory.py` 與 `src/core/locator.py`。
 
 要在 `src/` 用到某個東西，就把那個東西搬進 `src/`，不要反向 import。
 這條規則由 `verify_all.py` 的「分層依賴方向」檢查靜態掃描守著。
+
+### `src/` 四塊之間的方向
+
+順著管線走，不回頭：
+
+    backend ──→ core ──→ ppt_generation
+    （輸入）    （計算與 LLM）  （輸出）
+
+`core` 是共用核心：MetricStore、指標計算、LLM 統一介面都只有這一份，
+`ppt_generation` 消費它，不自己再實作一套。這條邊界尚未與全體成員確認，
+`docs/圖表原生性與資料同步設計.md` v0.3 規劃的 `ppt_generation/data/`
+與 `ppt_generation/llm_client.py` 與本規則衝突，需先議定歸屬。
 
 ## 模組切分（依開發規格書 §4.3）
 
@@ -115,7 +128,8 @@ DeckSpec 落地保存（供 Refresh 重放）
 ## 檔案處理原則
 - `source/` 下的檔案是命題方提供的原始素材，**唯讀不修改**，所有解析/生成邏輯以它們為輸入
 - `docs/` 下的規格文件是設計決策的唯一真相來源，程式實作若與文件衝突，先確認是否需要更新文件再動程式碼
-- 新增模組時放在 `src/` 下，依模組切分表命名（如 `src/engine/`、`src/writer/`），避免所有邏輯塞在單一檔案
+- 新增模組時先決定它屬於哪一塊（`backend` 輸入 / `core` 計算 / `ppt_generation` 輸出），
+  再依模組切分表命名（如 `src/core/engine/`、`src/core/writer/`），避免所有邏輯塞在單一檔案
 
 ## 測試與驗證慣例
 - `python verify_all.py` 是合併前的關卡：全部走確定性路徑、不呼叫模型、秒級跑完。

@@ -4,7 +4,8 @@ import os
 from pathlib import Path
 from typing import List, Optional
 
-SRC = Path(__file__).resolve().parent
+CORE = Path(__file__).resolve().parent   # src/core
+SRC = CORE.parent                        # src
 REPO_ROOT = SRC.parent
 
 PROMPTS = REPO_ROOT / "prompts"
