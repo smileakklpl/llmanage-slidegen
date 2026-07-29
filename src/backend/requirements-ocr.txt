@@ -1,0 +1,12 @@
+# 選用：真實 OCR 引擎（PP-StructureV3）。
+#
+# 只有實際要對圖片/掃描 PDF 跑辨識時才需要。visual_parser.inspect_visual_input()
+# 接受注入 engine，測試一律走 FakeEngine，所以 CI 不裝這份。
+#
+# 安裝：pip install -r requirements-ocr.txt
+#
+# 注意：paddleocr 需要推論框架 paddlepaddle，它不是 paddleocr wheel 的相依，
+# 要另外裝，且 CPU/GPU 版與 CUDA 版本綁定，請依實機環境挑：
+#   https://www.paddlepaddle.org.cn/install/quick
+# 確認團隊實際使用的版本後把它釘進這份清單。
+paddleocr==3.7.0

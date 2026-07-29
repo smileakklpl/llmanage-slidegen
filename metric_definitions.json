@@ -1,0 +1,23 @@
+{
+  "_comment": "指標定義檔（外部化）。這裡的定義是業務規則，模型猜不出來，必須人工確認並寫成測試。",
+  "market_share": {
+    "label": "市佔率",
+    "definition": "sum(entity, all_periods) / sum(total_row, all_periods)",
+    "wrong_but_intuitive": "entity[latest_period] / total[latest_period]",
+    "evidence": "以附件四 P.7 兩張表反推：全年加總法誤差 0.0000000000；最新月份法誤差達 0.00425",
+    "impact_if_wrong": "簽帳金額排名有 7 家名次改變，含第 3/4 名玉山與富邦對調；流通卡數有 2 家改變",
+    "verified_against": "附件四_預期修正參照資料.xlsx",
+    "owner": "engine (A)"
+  },
+  "ranking": {
+    "label": "排名",
+    "definition": "依 market_share 由大到小，且必須先排除 total_row",
+    "impact_if_wrong": "合計列若未排除，會佔據第 1 名並使其後所有名次位移 1"
+  },
+  "yoy": {
+    "label": "年增率",
+    "definition": "entity[period] / entity[period - 100] - 1",
+    "computable_when": "同期去年基期存在於來源資料",
+    "note": "附件四僅含 11401–11412，無 113 年基期，故 YoY 一律 computable=false。附件三錯誤 #1 即源於此。"
+  }
+}

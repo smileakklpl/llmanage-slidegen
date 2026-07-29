@@ -1,0 +1,92 @@
+# 合併前驗收 —— verify_all.py 的自動化版本。
+#
+# verify_all.py 一直自稱「CI 入口」，但在此之前沒有任何東西呼叫它，
+# 等於一支要靠人記得跑的腳本。這份 workflow 補上那一步。
+#
+# 之所以能在免費 runner 上跑：verify_all.py 刻意全走 mock / 確定性路徑，
+# 不碰 ollama、不需要 GPU、秒級跑完。模型品質是另一條線
+#（python -m tools.compare_models），那條要 GPU，不該擋 PR。
+#
+# 覆蓋率的實話：命題素材與資料集不進版控（見 .gitignore），
+# 所以 CI 上端到端那幾項會顯示 ⊘ 跳過。這裡擋得住的是
+# 「契約壞了 / import 壞了 / 分層反了 / fixture 漂移了」——
+# 也就是絕大多數會在合併時炸掉別人的那類問題。
+# 真正的端到端驗收請在本機備妥資料後自己跑一次。
+#
+# 兩個 job 對應專案裡兩處測試，各自從自己的目錄跑、裝自己的相依
+#（見 .kiro/steering/structure.md 的「測試分佈」）。分開的理由是相依不相交：
+# 主管線用不到 fastapi / PIL / reportlab，backend 用不到 boto3 / pptx，
+# 混裝只會讓兩邊都白等。
+
+name: verify
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # 同一分支連續推送時，只跑最新的那次
+  group: verify-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: 安裝相依
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: 合併前驗收
+        # 中文報表在 runner 上要 UTF-8 才印得出來
+        env:
+          PYTHONIOENCODING: utf-8
+        run: python verify_all.py
+
+  backend:
+    # ingestion 管線的測試。以前只有 verify_all.py 進 CI，等於這 43 個測試
+    # 從來沒被擋過——backend 改壞了，CI 照樣綠燈。
+    #
+    # 不裝 requirements-ocr.txt：paddleocr 是選用相依，測試全程注入
+    # FakeEngine，不碰真引擎。裝了只是為 0 個測試多拉幾百 MB。
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    defaults:
+      run:
+        working-directory: src/backend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: src/backend/requirements.txt
+
+      - name: 安裝相依
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: ingestion 測試
+        env:
+          PYTHONIOENCODING: utf-8
+        run: python -m pytest

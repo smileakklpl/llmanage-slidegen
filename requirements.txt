@@ -1,4 +1,4 @@
-# 簡報生成模組（src/ppt_generation）依賴
+# 簡報生成模組（src/ppt_generation）與主管線依賴
 # 版本一律精確釘死，不使用開放範圍。
 # backend 資料讀取模組的依賴另見 src/backend/requirements.txt。
 
@@ -13,8 +13,23 @@ numpy==1.26.4
 # --- 趨勢外推（缺此套件時 metric_engine 自動回退 numpy.polyfit）---
 scikit-learn==1.8.0
 
+# --- 資料契約（src/core/contracts 的 IntentSpec / SheetMap / MetricStore / PageNarrative）---
+pydantic==2.13.4
+
 # --- LLM 後端（依 LLM_PROVIDER 擇一安裝即可）---
 # openai：涵蓋 OpenAI 與所有 OpenAI 相容端點（地端 vLLM / Ollama / LiteLLM）
 openai==2.49.0
 # boto3：AWS Bedrock Converse API
 boto3==1.43.57
+# botocore[crt]：`aws login` / SSO 憑證需要 CRT，否則連 STS 都打不通。
+# 不另外釘版，由上面的 boto3 決定，避免兩邊版本打架。
+botocore[crt]
+# requests：src/core/llm/ollama.py 直接打 Ollama 的 HTTP API
+# TODO 待有 .venv 後依實裝版本釘死
+requests>=2.28
+
+# --- 測試 ---
+pytest==9.1.1
+
+# 只有 tools/smoke_bedrock.py 需要（Mantle client）：
+# pip install "anthropic[bedrock]"

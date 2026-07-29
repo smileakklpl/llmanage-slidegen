@@ -1,0 +1,15 @@
+{
+  "provider": "bedrock",
+  "model": "us.anthropic.claude-haiku-4-5-20251001-v1:0",
+  "recorded_at": "2026-07-29",
+  "repeat": 3,
+  "inputs": 8,
+  "schema_pass": 1.0,
+  "first_try": 0.7917,
+  "fallback": 0.0,
+  "check_fail_rate": 0.0667,
+  "check_fails": {
+    "一次過": 5,
+    "比較句有 claim": 3
+  }
+}

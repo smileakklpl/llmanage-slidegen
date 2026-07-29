@@ -1,0 +1,13 @@
+頁碼：11
+narrative_id：n_p11
+頁面主題：成長動能與趨勢觀察
+
+可用指標（key = 實值）：
+  market_total_spend_11401 = 338561389
+  market_total_spend_11412 = 453663538
+  ctbc_spend_share = 0.178531
+  cathay_spend_share = 0.171613
+  esun_spend_share = 0.132961
+
+不可用指標（engine 已判定 computable=false，不得引用也不得改用文字描述）：
+  amex_spend_yoy_11401、amex_spend_yoy_11402 等 396 個：缺少基期 該期 的資料，依 FR-1.5 不得產出
