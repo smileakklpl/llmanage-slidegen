@@ -22,7 +22,8 @@ llmanage-slidegen/
 │   ├── contracts/            # 跨模組 JSON 契約（§5）；改動需知會所有下游模組
 │   ├── llm/                  # FR-A1 統一介面 + adapter + factory + repair + fallback
 │   ├── engine/               # FR-1 資料解析與指標計算（確定性，不碰 LLM）
-│   ├── renderer/             # FR-2/FR-3 簡報生成（chart_builder / 一致性驗證）
+│   ├── ppt_generation/       # FR-2/FR-3 簡報生成（chart_builder / 一致性驗證）
+│   │                         #   = 規格書 §4.3 的 renderer 模組，目錄名沿用團隊既有慣例
 │   ├── backend/              # FR-A2 檔案上傳與 ingestion（FastAPI）
 │   │   ├── app/ingestion/    #   偵測、分類、擷取、正規化、驗證管線
 │   │   └── tests/            #   ingestion 專屬測試（見下方「測試分佈」）
@@ -73,7 +74,7 @@ ModuleNotFoundError。兩者現已歸位到 `src/llm/factory.py` 與 `src/locato
 | `intent` | 自然語言指令解析 | prompt 文字 | `IntentSpec`（JSON） |
 | `engine` | 數據智能解析、跨表關聯、指標計算 | xlsx + IntentSpec | `MetricStore`（JSON/parquet） |
 | `writer` | 敘事生成（洞察文案） | MetricStore + IntentSpec | `PageNarrative[]`（JSON） |
-| `renderer` | PPT/Excel 生成 | MetricStore + Narrative + 模板 | .pptx + .xlsx |
+| `renderer` | PPT/Excel 生成（實作在 `src/ppt_generation/`） | MetricStore + Narrative + 模板 | .pptx + .xlsx |
 | `validator` | 三方數值比對 | .pptx + .xlsx + MetricStore | 驗證報告（pass/fail） |
 | `mailer` | 自動寄送 | 檔案 + 收件人 | 寄送紀錄 |
 | `deckspec` | Spec 保存與 Refresh 重放 | 上述全部 | DeckSpec JSON；`replay(deckspec, new_data)` |

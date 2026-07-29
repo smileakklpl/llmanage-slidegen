@@ -72,7 +72,7 @@ llmanage-slidegen/
 │   │   ├── reader.py         #   SheetMap + xlsx → 表格資料
 │   │   ├── metrics.py        #   → MetricStore（市佔率、排名、YoY 可算性）
 │   │   └── summarize.py      #   MetricStore → 單頁摘要
-│   ├── renderer/             # 簡報生成
+│   ├── ppt_generation/       # 簡報生成（規格書 §4.3 的 renderer 模組）
 │   │   ├── chart_builder.py  #   ChartSpec / add_chart 封裝 + CHART_SKILLS registry
 │   │   └── verify_chart_consistency.py
 │   ├── backend/              # 檔案上傳與 ingestion 服務

@@ -31,7 +31,7 @@ LLM 只能做三件事：**意圖解析、洞察敘事、信件摘要**。三者
 
 - 一張原生圖表由三部分組成：Chart XML 快取值（畫面顯示用）、內嵌 workbook（右鍵編輯資料開啟）、圖表物件本身。
 - 正確做法：**所有圖表一律透過 `python-pptx` 的 `shapes.add_chart()` 單一入口生成**，讓 chart XML 快取與內嵌 workbook 自動保持一致，不手動操作底層 XML 寫入數值。
-- 完整設計說明見 `docs/圖表原生性與資料同步設計.md`，實作見 `src/renderer/chart_builder.py`。
+- 完整設計說明見 `docs/圖表原生性與資料同步設計.md`，實作見 `src/ppt_generation/chart_builder.py`。
 - 除非圖表類型 python-pptx 無高階 API 支援（如雙軸圖、散點標籤），才允許 fallback 到直接操作 `chart._chartSpace` 的底層 lxml，且必須驗證不破壞內嵌工作簿的自動同步。
 
 ### 3. 三份資料副本一致性
