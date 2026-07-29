@@ -9,5 +9,8 @@ __pycache__/
 source/*
 !source/template.pptx
 
+# 管線分階段除錯用的中間結果，可重生，不進版控
+outputs/stages/
+
 # MacOS file
 .DS_Store

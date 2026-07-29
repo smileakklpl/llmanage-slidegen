@@ -19,18 +19,30 @@ llmanage-slidegen/
 │   ├── 附件二_系統提示詞.docx           # 智匯數據簡報神器指令稿
 │   ├── 附件三_信用卡範例簡報及錯誤說明.pptx
 │   └── 附件四_預期修正參照資料.xlsx
-├── backend/                            # 後端服務（資料擷取 ingestion 等模組）
-│   ├── app/
-│   │   ├── main.py                     # FastAPI 進入點
-│   │   └── ingestion/                  # 資料擷取模組（分類/擷取/正規化/驗證等）
-│   ├── tests/                          # ingestion 模組對應測試
-│   ├── requirements.txt
-│   └── pytest.ini
 ├── src/                                # 原始碼
+│   ├── backend/                        # 後端服務（資料擷取 ingestion 等模組）
+│   │   ├── app/
+│   │   │   ├── main.py                 # FastAPI 進入點
+│   │   │   └── ingestion/              # 資料擷取（分類/擷取/正規化/驗證等）
+│   │   ├── tests/                      # ingestion 模組對應測試
+│   │   ├── requirements.txt
+│   │   └── pytest.ini
 │   ├── frontend/                       # 前端（尚未開發）
-│   └── ppt_generation/                  # 圖表生成模組
-│       ├── chart_builder.py             # ChartSpec / add_chart 封裝
-│       └── verify_chart_consistency.py  # 圖表與內嵌工作表一致性驗證腳本
-└── outputs/                            # 生成輸出結果（測試/示範用）
-    └── demo_chart.pptx
+│   └── ppt_generation/                 # 簡報生成模組（詳見其 Guide.md）
+│       ├── Guide.md                    # 模組說明：資料流、執行方式、相容性
+│       ├── run_pipeline.py             # 端到端 CLI（唯一入口，支援 --stage）
+│       ├── core/                       # 跨階段共用：設定/LLM 介面/佔位符
+│       ├── data/                       # 資料讀取與確定性指標計算
+│       ├── charts/                     # 圖表定義、add_chart 單一入口、防呆
+│       ├── agents/                     # 章節規劃/圖表/敘事/審查
+│       ├── output/                     # .pptx 與稽核 .xlsx 產出
+│       └── verification/               # 三方數值比對（T1）
+└── outputs/                            # 生成輸出結果（測試/示範用，可清空重生）
+    ├── deck.pptx                       # 生成的簡報
+    ├── deck_data.xlsx                  # 對應的稽核資料
+    ├── stages/                         # --stage 分階段中間結果 JSON（未進版控）
+    └── current_progress.md             # 開發進度報告
 ```
+
+簡報生成模組的使用方式、資料流與各檔案職責，見
+[`src/ppt_generation/Guide.md`](src/ppt_generation/Guide.md)。
