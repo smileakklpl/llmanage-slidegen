@@ -1,17 +1,35 @@
-# 主管線的相依（repo root 執行的一切：verify_all.py、main.py、evalh/、tools/、tests/）。
-#
-# ingestion 後端的相依另外放在 src/backend/requirements.txt——那批有
-# paddleocr / PyMuPDF / reportlab 等重量級套件，主管線一個都用不到，
-# 混在一起只會讓 CI 白裝好幾百 MB。
-# 兩份各自對應自己範圍內的程式碼，這是 .kiro/skills/update-requirements 的規定。
-boto3>=1.34
-botocore[crt]>=1.34    # `aws login` / SSO 憑證需要 CRT，否則連 STS 都打不通
+# 簡報生成模組（src/ppt_generation）與主管線依賴
+# 版本一律精確釘死，不使用開放範圍。
+# backend 資料讀取模組的依賴另見 src/backend/requirements.txt。
+
+# --- 核心：PPT 與 Excel 生成 ---
+python-pptx==1.0.2
 openpyxl==3.1.5
-pandas>=2.0
+
+# --- 核心：確定性指標計算 ---
+pandas==3.0.1
+numpy==1.26.4
+
+# --- 趨勢外推（缺此套件時 metric_engine 自動回退 numpy.polyfit）---
+scikit-learn==1.8.0
+
+# --- 資料契約（src/contracts 的 IntentSpec / SheetMap / MetricStore / PageNarrative）---
 pydantic==2.13.4
-pytest==9.1.1
-python-pptx>=0.6
+
+# --- LLM 後端（依 LLM_PROVIDER 擇一安裝即可）---
+# openai：涵蓋 OpenAI 與所有 OpenAI 相容端點（地端 vLLM / Ollama / LiteLLM）
+openai==2.49.0
+# boto3：AWS Bedrock Converse API
+boto3==1.43.57
+# botocore[crt]：`aws login` / SSO 憑證需要 CRT，否則連 STS 都打不通。
+# 不另外釘版，由上面的 boto3 決定，避免兩邊版本打架。
+botocore[crt]
+# requests：src/llm/ollama.py 直接打 Ollama 的 HTTP API
+# TODO 待有 .venv 後依實裝版本釘死
 requests>=2.28
+
+# --- 測試 ---
+pytest==9.1.1
 
 # 只有 tools/smoke_bedrock.py 需要（Mantle client）：
 # pip install "anthropic[bedrock]"

@@ -74,7 +74,7 @@ llmanage-slidegen/
 │   │   └── summarize.py      #   MetricStore → 單頁摘要
 │   ├── ppt_generation/       # 簡報生成（規格書 §4.3 的 renderer 模組）
 │   │   ├── chart_builder.py  #   ChartSpec / add_chart 封裝 + CHART_SKILLS registry
-│   │   └── verify_chart_consistency.py
+│   │   └── verification/     #   圖表與內嵌工作表一致性驗證
 │   ├── backend/              # 檔案上傳與 ingestion 服務
 │   │   ├── app/main.py       #   FastAPI 進入點
 │   │   ├── app/ingestion/    #   偵測 / 分類 / 擷取 / 正規化 / 驗證
