@@ -1,22 +1,41 @@
 from datetime import datetime, timezone
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from app.ingestion.router import (
     router as ingestion_router,
 )
+from app.api.router import router as api_router
+from app.core.config import settings
+from app.core.errors import register_error_handlers
 
 
 app = FastAPI(
     title="智匯數據簡報神器",
 )
 
+# CORS — 前端開發需要
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.cors_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
+# 全域錯誤處理
+register_error_handlers(app)
+
+# 原有的 ingestion 路由
 app.include_router(
     ingestion_router,
     prefix="/ingestion",
     tags=["ingestion"],
 )
+
+# Web UI 的 job 路由 (/api/v1/jobs/...)
+app.include_router(api_router)
 
 
 @app.get("/health")

@@ -1,0 +1,13 @@
+@import "tailwindcss";
+
+@theme {
+  --color-brand: #dc2626;
+  --color-brand-hover: #b91c1c;
+  --color-brand-light: #fca5a5;
+}
+
+@layer base {
+  body {
+    @apply font-sans text-gray-900 bg-gradient-to-br from-gray-50 to-gray-100 min-h-screen antialiased;
+  }
+}
