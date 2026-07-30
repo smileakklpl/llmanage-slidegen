@@ -22,6 +22,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Literal, Sequence
 
+from ..data.metric_engine import AXIS_TEMPORAL, is_total_category
 from ..data.metric_store import (
     MetricNotComputableError,
     MetricNotFoundError,
@@ -32,11 +33,27 @@ from .chart_builder import (
     CHART_SKILLS,
     CHART_TYPE_BY_SKILL,
     ChartSpec,
+    ComboSpec,
     ScatterSpec,
+)
+from .table_builder import (
+    MAX_TABLE_ROWS,
+    TABLE_SKILLS,
+    TableSpec,
 )
 
 
-ChartType = Literal["column", "bar", "line", "pie", "scatter"]
+ChartType = Literal[
+    "column", "bar", "line", "pie", "scatter", "combo", "table", "heatmap"
+]
+
+#: 圖表與表格的合併 registry。planner 對兩者做同一套防呆與查表，
+#: 差別只在最後產出的 spec 型別與落版的 API（add_chart / add_table）。
+VISUAL_SKILLS = {**CHART_SKILLS, **TABLE_SKILLS}
+
+#: 走原生表格而非原生圖表的 skill。這些沒有內嵌 workbook，
+#: 三方比對改以儲存格文字為①（見 verification 模組）。
+TABLE_LIKE_CHARTS = frozenset(TABLE_SKILLS)
 
 #: 只允許在時間序列軸上使用的圖表類型。
 #: 折線圖隱含「連續變化」語意，用在銀行名稱這種橫斷面軸上會誤導讀者。
@@ -142,6 +159,11 @@ class ResolvedChart:
     def is_scatter(self) -> bool:
         return isinstance(self.spec, ScatterSpec)
 
+    @property
+    def is_table(self) -> bool:
+        """True 代表落版走 ``add_table()``，沒有內嵌 workbook 可供右鍵編輯。"""
+        return isinstance(self.spec, TableSpec)
+
 
 # ---------------------------------------------------------------------------
 # 驗證
@@ -166,10 +188,10 @@ def validate_chart_plan(
     """
     errors: list[str] = []
 
-    if plan.chart_type not in CHART_SKILLS:
+    if plan.chart_type not in VISUAL_SKILLS:
         errors.append(
             f"chart_type {plan.chart_type!r} 不是已註冊的圖表 skill，"
-            f"可用選項：{sorted(CHART_SKILLS)}"
+            f"可用選項：{sorted(VISUAL_SKILLS)}"
         )
         # 圖表類型不合法時，後續類型相關檢查無從進行。
         return errors
@@ -276,6 +298,33 @@ def _validate_chart_type_limits(
             f"目前選了 {len(selected)} 組（{list(selected)}）。"
         )
 
+    if plan.chart_type == "combo" and len(selected) < 2:
+        # 只有一個系列的「雙軸圖」沒有次軸可掛，等於一張普通長條圖，
+        # 卻多帶了一組隱藏軸。這種圖應該一開始就用 column。
+        errors.append(
+            "雙軸圖需要至少兩個系列（第一個畫長條、其餘畫折線掛次軸），"
+            f"目前選了 {len(selected)} 組（{list(selected)}）。"
+            "單一系列請改用 column 或 line。"
+        )
+
+    if plan.chart_type in TABLE_LIKE_CHARTS:
+        if len(metric.categories) > MAX_TABLE_ROWS:
+            errors.append(
+                f"表格列數 {len(metric.categories)} 超過單頁可閱讀上限 "
+                f"{MAX_TABLE_ROWS}。請改用 bar 圖呈現排名，"
+                "或選一個類別數較少的指標。"
+            )
+
+        if not any(
+            value is not None
+            for name in selected
+            for value in metric.series.get(name, [])
+        ):
+            errors.append(
+                f"指標 {plan.metric_key!r} 在系列 {list(selected)} 中"
+                "沒有任何數值，表格會整片空白。"
+            )
+
     return errors
 
 
@@ -312,14 +361,41 @@ def resolve_chart_plan(
     if plan.chart_type == "scatter":
         spec = _build_scatter_spec(plan, metric, selected)
     else:
-        spec = ChartSpec(
-            title=plan.chart_title or metric.name,
-            categories=list(metric.categories),
-            series={
-                name: _fill_missing(metric.values_for(name)) for name in selected
-            },
-            chart_type=CHART_TYPE_BY_SKILL[plan.chart_type],
-        )
+        values = {
+            name: _fill_missing(metric.values_for(name)) for name in selected
+        }
+
+        if plan.chart_type in TABLE_LIKE_CHARTS:
+            spec = TableSpec(
+                title=plan.chart_title or metric.name,
+                categories=list(metric.categories),
+                series=values,
+                heatmap=plan.chart_type == "heatmap",
+                row_header=_row_header_for(metric),
+                unit=metric.unit,
+                emphasize_rows=tuple(
+                    label
+                    for label in metric.categories
+                    if is_total_category(label)
+                ),
+            )
+        elif plan.chart_type == "combo":
+            # 慣例：series_names 的第一個掛主軸畫長條，其餘畫折線掛次軸。
+            # 由順序決定而不另開欄位，是為了讓 LLM 少一個可填錯的參數。
+            spec = ComboSpec(
+                title=plan.chart_title or metric.name,
+                categories=list(metric.categories),
+                series=values,
+                chart_type=CHART_TYPE_BY_SKILL[plan.chart_type],
+                line_series_names=tuple(selected[1:]),
+            )
+        else:
+            spec = ChartSpec(
+                title=plan.chart_title or metric.name,
+                categories=list(metric.categories),
+                series=values,
+                chart_type=CHART_TYPE_BY_SKILL[plan.chart_type],
+            )
 
     return ResolvedChart(
         plan=plan,
@@ -328,6 +404,11 @@ def resolve_chart_plan(
         metric=metric,
         series_names=selected,
     )
+
+
+def _row_header_for(metric: MetricSeries) -> str:
+    """表格第一欄的表頭。時間軸的列是期間，橫斷面的列是實體。"""
+    return "期間" if metric.axis_kind == AXIS_TEMPORAL else "項目"
 
 
 def _build_scatter_spec(

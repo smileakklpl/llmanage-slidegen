@@ -31,11 +31,21 @@ clone 下來就能直接跑，不需要向任何人索取檔案。
     fixtures/data/金融業務資訊揭露/   原始月報（11301–11412）
     fixtures/data/fsc_114/           轉檔產出：單年，YoY 不可算
     fixtures/data/fsc_113_114/       轉檔產出：雙年，YoY 可算
+    fixtures/data/fsc_114_workbook.xlsx  同一份 114 年資料的單檔多表版型
 
 兩個資料集不是備份，是 FR-1.5 的兩半：同一段程式碼，資料決定年增率算不算得出來。
 
 轉檔器只輸出原始量，市佔率與排名一律由 engine 即時計算——衍生量落地就會有
 兩個真相來源。細節見 [fixtures/README.md](fixtures/README.md)。
+
+`fsc_114/`（多檔單表）與 `fsc_114_workbook.xlsx`（單檔多表）是**同一份資料的
+兩種版型**，數值逐格相同。兩者並存是為了驗證 ingestion 能吃這兩種真實世界都
+會遇到的擺法：
+
+```bash
+python -m tools.build_fsc_workbook --out fixtures/data/fsc_114_workbook.xlsx \
+    --periods 11401,11402,11403,11404,11405,11406,11407,11408,11409,11410,11411,11412
+```
 
 ## 目錄結構
 

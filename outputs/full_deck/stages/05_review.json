@@ -1,0 +1,76 @@
+{
+  "reviews": [
+    {
+      "page_number": 4,
+      "section_title": "關鍵指標總覽",
+      "status": "APPROVED",
+      "rule_issues": [],
+      "semantic_issues": [],
+      "target_agent": null
+    },
+    {
+      "page_number": 6,
+      "section_title": "市場規模趨勢",
+      "status": "APPROVED",
+      "rule_issues": [],
+      "semantic_issues": [],
+      "target_agent": null
+    },
+    {
+      "page_number": 7,
+      "section_title": "市場動能檢視",
+      "status": "APPROVED",
+      "rule_issues": [],
+      "semantic_issues": [],
+      "target_agent": null
+    },
+    {
+      "page_number": 9,
+      "section_title": "市占結構",
+      "status": "APPROVED",
+      "rule_issues": [],
+      "semantic_issues": [],
+      "target_agent": null
+    },
+    {
+      "page_number": 11,
+      "section_title": "有效卡數表現",
+      "status": "APPROVED",
+      "rule_issues": [],
+      "semantic_issues": [],
+      "target_agent": null
+    },
+    {
+      "page_number": 13,
+      "section_title": "循環信用與分期貢獻",
+      "status": "APPROVED",
+      "rule_issues": [],
+      "semantic_issues": [],
+      "target_agent": null
+    },
+    {
+      "page_number": 15,
+      "section_title": "轉銷呆帳分佈",
+      "status": "APPROVED",
+      "rule_issues": [],
+      "semantic_issues": [],
+      "target_agent": null
+    },
+    {
+      "page_number": 17,
+      "section_title": "市場規模外推",
+      "status": "APPROVED",
+      "rule_issues": [],
+      "semantic_issues": [],
+      "target_agent": null
+    },
+    {
+      "page_number": 19,
+      "section_title": "市占提升空間",
+      "status": "APPROVED",
+      "rule_issues": [],
+      "semantic_issues": [],
+      "target_agent": null
+    }
+  ]
+}

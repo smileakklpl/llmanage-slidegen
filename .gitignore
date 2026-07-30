@@ -28,6 +28,10 @@ fixtures/data/*
 !fixtures/data/fsc_114/
 !fixtures/data/fsc_113_114/
 !fixtures/data/金融業務資訊揭露/
+# 與 fsc_114/ 同一份資料的單檔多表版型（tools/build_fsc_workbook.py 產出）。
+# 它是 ingestion 兩種輸入版型的實測資料之一，README 與 Guide 都引用到，
+# 不進版控的話別人 clone 下來會找不到檔案。
+!fixtures/data/fsc_114_workbook.xlsx
 
 # .ods 與 .xlsx 是同一份資料的兩種格式，程式只讀 xlsx
 #（見 tools/ingest_fsc.py 的 _months()），.ods 純屬重複，不進版控

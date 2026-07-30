@@ -11,7 +11,24 @@
 2. **內建範例資料**：不需要 backend 輸出，直接用內建的信用卡市場範例跑完整流程
    ``python -m ppt_generation.run_pipeline --sample --prompt "..."``
 
-3. **真實 backend JSON**
+3. **直接讀 Excel**：由 backend ingestion 現場解析，支援兩種版型
+
+   單檔多表（一個 .xlsx，每張工作表一個指標）::
+
+       python -m ppt_generation.run_pipeline \
+           --excel fixtures/data/fsc_114_workbook.xlsx --prompt "..."
+
+   多檔單表（一個目錄，每個 .xlsx 一個指標）::
+
+       python -m ppt_generation.run_pipeline \
+           --excel fixtures/data/fsc_114 --prompt "..."
+
+   兩種版型走同一條路徑，版型判斷在 :mod:`data.backend_bridge` 裡完成，
+   下游拿到的 payload 形狀一致。ingestion 結果會落檔成
+   ``<output-dir>/stages/00_ingestion.json``，之後可用 ``--ingestion``
+   重跑同一份資料而不必再解析一次 Excel。
+
+4. **既有 backend JSON**
    ``python -m ppt_generation.run_pipeline --ingestion outputs/ingestion.json --prompt "..."``
 
 加上 ``--fake-llm`` 可完全不呼叫 LLM（用內建假回應），用來驗證非 LLM 的部分。
@@ -41,8 +58,9 @@ from pathlib import Path
 from typing import Any, Sequence
 
 from .agents import chart_agent, narrative_writer, reviewer, section_planner
+from .charts import chart_planner
 from .core import config, llm_client
-from .data import dataset_loader, metric_engine
+from .data import backend_bridge, dataset_loader, metric_engine
 from .output import excel_exporter, renderer
 from .verification import verify_chart_consistency as vcc
 
@@ -63,6 +81,10 @@ STAGE_SEQUENCE: tuple[str, ...] = (
     "render",
     "verify",
 )
+
+#: 封面標題預設值。用使用者的 prompt 原句當標題會在封面上出現
+#: 「幫我做一份…」這種指令句；標題該是簡報的名字，不是下單的話。
+DEFAULT_DECK_TITLE = "信用卡市場分析與經營洞察"
 
 STAGE_LABELS: dict[str, str] = {
     "metrics": "Stage 1-3 資料讀取與指標計算",
@@ -141,7 +163,7 @@ def _resolved_chart_payload(chart: Any) -> dict[str, Any]:
         "plan": chart.plan.to_dict(),
         "skill_name": chart.skill_name,
         "series_names": list(chart.series_names),
-        "metric_key": chart.metric.key,
+        "metric_key": chart.metric.metric_key,
         "spec": spec_payload,
     }
 
@@ -311,16 +333,19 @@ def _fake_json_call(prompt: str, schema: dict[str, Any], **_: Any) -> Any:
             "sections": [
                 {
                     "title": "市場整體概況",
+                    "chapter": "市場整體概況",
                     "intent": "呈現市場規模趨勢",
                     "suggested_metric_keys": ["market_cards.value"],
                 },
                 {
                     "title": "成長動能檢視",
+                    "chapter": "同業成長及競爭分析",
                     "intent": "檢視年增動能變化",
                     "suggested_metric_keys": ["market_cards.yoy"],
                 },
                 {
                     "title": "業者競爭態勢",
+                    "chapter": "同業成長及競爭分析",
                     "intent": "比較各銀行市占",
                     "suggested_metric_keys": ["bank_cards.share"],
                 },
@@ -335,6 +360,326 @@ def _fake_json_call(prompt: str, schema: dict[str, Any], **_: Any) -> Any:
 
     # 審查 Agent
     return {"status": reviewer.STATUS_APPROVED, "issues": []}
+
+
+# ---------------------------------------------------------------------------
+# 資料驅動的假 LLM
+# ---------------------------------------------------------------------------
+# 上面那組假回應寫死了內建範例的 metric_key（``market_cards.value`` 等），
+# 只有 ``--sample`` 能用。餵真實資料時那些 key 不存在於 MetricStore，
+# 防呆會正確地把每一頁都擋掉，於是 ``--fake-llm`` 無法用來驗證 render 與
+# 三方比對——偏偏那兩段才是最需要在不花 LLM 額度的前提下反覆驗的。
+#
+# 所以再提供一組「看得懂當前 MetricStore」的假回應：從 prompt 裡認出這一輪
+# 允許引用的 metric_key，再依指標語意與軸型挑圖表類型。這仍然不呼叫任何模型，
+# 但走的是與真實模型相同的契約與防呆路徑。
+def _pick_metric_keys(prompt: str, store: Any) -> list[str]:
+    """
+    找出 prompt 中出現、且存在於 MetricStore 的 metric_key。
+
+    只做子字串比對會出事：``流通卡數.value`` 是 ``流通卡數.value.top10``
+    的前綴，prompt 裡明明只允許 top10 那個，卻會連短的那個一起中，
+    敘事就會引用一個本頁不允許的指標而被審查退回（實測 10 頁掉 5 頁）。
+    所以命中後要剔除「本身是另一個命中鍵之前綴」的那些。
+    """
+    matched = [
+        key
+        for key in store.computable_metric_keys()
+        if key in prompt
+    ]
+
+    return [
+        key
+        for key in matched
+        if not any(
+            other != key and other.startswith(key) for other in matched
+        )
+    ]
+
+
+def _fake_chart_for_metric(metric: Any) -> dict[str, Any]:
+    """依指標語意與軸型挑一個一定過得了 chart_planner 防呆的圖表。"""
+    series_names = metric.series_names
+
+    if metric.semantic == "share":
+        # 圓餅圖只能一組系列（取最後一期＝最新狀態），且類別數不能太多——
+        # 33 家銀行畫成圓餅沒有人看得懂，chart_planner 會擋。超過上限就改用
+        # 橫條圖，這是真實模型收到防呆錯誤後也會被引導去做的選擇。
+        if len(metric.categories) > chart_planner.MAX_PIE_CATEGORIES:
+            return {
+                "tool_name": "bar",
+                "chart_title": f"{metric.name}：業者份額排序",
+                "series_names": series_names[-1:],
+            }
+
+        return {
+            "tool_name": "pie",
+            "chart_title": f"{metric.name}結構：前段業者掌握主要份額",
+            "series_names": series_names[-1:],
+        }
+
+    if metric.semantic == "rank":
+        return {
+            "tool_name": "bar",
+            "chart_title": f"{metric.name}：業者排序",
+            "series_names": series_names[-1:],
+        }
+
+    if metric.axis_kind == metric_engine.AXIS_TEMPORAL:
+        return {
+            "tool_name": "line",
+            "chart_title": f"{metric.name}走勢",
+            "series_names": series_names[:2],
+        }
+
+    return {
+        "tool_name": "column",
+        "chart_title": f"{metric.name}：業者間規模差異明顯",
+        "series_names": series_names[-1:],
+    }
+
+
+#: 假 LLM 的章節骨架：(章節, 頁標題模板, 要挑什麼指標, 用什麼圖)。
+#: 對齊 FR-2.6 的八章節與附件三的頁面型態。順序即簡報順序。
+_FAKE_DECK_BLUEPRINT: tuple[tuple[str, str, str, str], ...] = (
+    ("Executive Summary", "關鍵指標總覽", "top_value", "table"),
+    ("市場整體概況", "市場規模趨勢", "timeline", "combo"),
+    ("市場整體概況", "市場動能檢視", "timeline_growth", "line"),
+    ("同業成長及競爭分析", "業者規模排序", "top_value", "bar"),
+    ("同業成長及競爭分析", "市占結構", "top_share", "pie"),
+    ("客戶活躍度", "有效卡數表現", "top_value_2", "column"),
+    ("獲利能力", "循環信用與分期貢獻", "top_value_3", "column"),
+    ("風險與警訊", "轉銷呆帳分佈", "top_value_last", "heatmap"),
+    ("未來趨勢推測", "市場規模外推", "forecast", "line"),
+    ("對台新的策略建議", "市占提升空間", "share", "bar"),
+)
+
+
+def _select_fake_metric(store: Any, kind: str) -> str | None:
+    """依 blueprint 的 kind 從當前 MetricStore 挑一個指標鍵。"""
+    keys = store.computable_metric_keys()
+
+    def ends(suffix: str) -> list[str]:
+        return [key for key in keys if key.endswith(suffix)]
+
+    top_values = [key for key in ends(".top10") if ".value." in key]
+    top_shares = [key for key in ends(".top10") if ".share." in key]
+
+    table = {
+        "top_value": top_values[:1],
+        "top_value_2": top_values[1:2],
+        "top_value_3": top_values[2:3],
+        "top_value_last": top_values[-1:],
+        "top_share": top_shares[:1],
+        "share": [key for key in ends(".share") if ".top" not in key][:1],
+        "timeline": [key for key in ends("market_by_period.value")],
+        "timeline_growth": [key for key in ends("market_by_period.period_growth")],
+        "forecast": [key for key in ends(".forecast")],
+    }
+
+    candidates = table.get(kind) or []
+
+    return candidates[0] if candidates else None
+
+
+def _fake_deck_pages(store: Any) -> list[dict[str, Any]]:
+    """
+    依 blueprint 排出這份資料能產出的內容頁。
+
+    挑不到指標的頁面直接不排——寧可少一頁，也不要為了湊頁數硬塞一個
+    語意不合的指標。這也讓「資料不足時簡報會少哪幾頁」變得可預期。
+    """
+    pages: list[dict[str, Any]] = []
+    used: set[str] = set()
+
+    for chapter, title, kind, skill in _FAKE_DECK_BLUEPRINT:
+        key = _select_fake_metric(store, kind)
+
+        if key is None or key in used:
+            continue
+
+        used.add(key)
+        pages.append(
+            {
+                "chapter": chapter,
+                "title": title,
+                "metric_key": key,
+                "skill": skill,
+            }
+        )
+
+    if not pages:
+        # 完全對不上 blueprint 的資料（例如非交叉表），退回「有什麼畫什麼」。
+        for key in store.computable_metric_keys()[:3]:
+            pages.append(
+                {
+                    "chapter": "資料概況",
+                    "title": store.get(key).name,
+                    "metric_key": key,
+                    "skill": None,
+                }
+            )
+
+    return pages
+
+
+def _fake_chart_arguments(
+    store: Any,
+    metric_key: str,
+    skill: str | None,
+) -> dict[str, Any]:
+    """
+    把 blueprint 指定的圖型轉成工具參數，並依指標形狀挑系列。
+
+    blueprint 指定的圖型若與指標形狀不合（例如對時間軸要求 pie），
+    這裡不硬幹——退回 :func:`_fake_chart_for_metric` 的自動選擇，
+    讓 chart_planner 的防呆仍然是最後一道關卡而不是被繞過。
+    """
+    metric = store.get(metric_key)
+    auto = _fake_chart_for_metric(metric)
+
+    if skill is None:
+        return {
+            "tool_name": auto["tool_name"],
+            "metric_key": metric_key,
+            "chart_title": auto["chart_title"],
+            "series_names": auto["series_names"],
+        }
+
+    names = metric.series_names
+    is_temporal = metric.axis_kind == metric_engine.AXIS_TEMPORAL
+
+    if skill == "combo" and len(names) >= 2:
+        # 附件三 P.5 的形狀：規模走長條、金額走折線掛次軸。
+        series_names = [names[0], names[2] if len(names) > 2 else names[1]]
+        title = f"{metric.name}：規模與金額走勢並列"
+    elif skill == "line" and is_temporal:
+        series_names = names[:2]
+        title = f"{metric.name}走勢"
+    elif skill == "pie" and not is_temporal:
+        series_names = names[-1:]
+        title = f"{metric.name}：前段業者掌握主要份額"
+    elif skill in {"table", "heatmap"}:
+        # 表格欄位太多會擠成一片，取最後 6 期就夠看出強弱分佈。
+        series_names = names[-6:]
+        title = f"{metric.name}明細"
+    elif skill in {"bar", "column"} and not is_temporal:
+        series_names = names[-1:]
+        title = f"{metric.name}：業者間差異明顯"
+    else:
+        return {
+            "tool_name": auto["tool_name"],
+            "metric_key": metric_key,
+            "chart_title": auto["chart_title"],
+            "series_names": auto["series_names"],
+        }
+
+    return {
+        "tool_name": skill,
+        "metric_key": metric_key,
+        "chart_title": title,
+        "series_names": series_names,
+    }
+
+
+def _make_store_aware_fakes(store: Any):
+    """
+    產生一組認得當前 MetricStore 的假 LLM 呼叫。
+
+    Returns:
+        ``(json_call, tool_call)``，簽名與 :mod:`core.llm_client` 相同，
+        可直接餵給各 Agent 的 ``llm_call`` 參數。
+    """
+    keys = store.computable_metric_keys()
+    pages = _fake_deck_pages(store)
+
+    #: 頁標題 → 該頁的圖表參數。chart_agent 的 prompt 會帶入頁標題，
+    #: 所以靠標題就能認出「現在在規劃哪一頁」。
+    by_title = {page["title"]: page for page in pages}
+
+    def _page_for(prompt: str) -> dict[str, Any] | None:
+        for title, page in by_title.items():
+            if title in prompt:
+                return page
+
+        return None
+
+    def json_call(prompt: str, schema: dict[str, Any], **_: Any) -> Any:
+        properties = schema.get("properties", {})
+
+        if "sections" in properties:
+            return {
+                "status": section_planner.STATUS_READY,
+                "sections": [
+                    {
+                        "title": page["title"],
+                        "chapter": page["chapter"],
+                        "intent": (
+                            f"呈現 {store.get(page['metric_key']).name}"
+                        ),
+                        "suggested_metric_keys": [page["metric_key"]],
+                    }
+                    for page in pages
+                ],
+            }
+
+        if "headline" in properties:
+            found = _pick_metric_keys(prompt, store)
+
+            if not found:
+                return {
+                    "headline": "資料觀察",
+                    "bullets": ["本頁無可引用指標"],
+                }
+
+            key = found[0]
+            metric = store.get(key)
+            series = metric.series_names[-1]
+
+            # 數字一律走佔位符，由 renderer 代入——與真實模型受同一條規則約束。
+            return {
+                "headline": f"{metric.name}呈現明顯的業者集中態勢",
+                "bullets": [
+                    f"領先者 {{{{{key}|{series}|max_category}}}} 達 "
+                    f"{{{{{key}|{series}|max}}}}",
+                    f"末位者僅 {{{{{key}|{series}|min}}}}",
+                ],
+            }
+
+        if "tool_name" in properties:
+            payload = _resolve_fake_chart(prompt)
+
+            return {
+                "tool_name": payload.pop("tool_name"),
+                "arguments": payload,
+            }
+
+        return {"status": reviewer.STATUS_APPROVED, "issues": []}
+
+    def _resolve_fake_chart(prompt: str) -> dict[str, Any]:
+        page = _page_for(prompt)
+
+        if page is not None:
+            return _fake_chart_arguments(
+                store, page["metric_key"], page["skill"]
+            )
+
+        found = _pick_metric_keys(prompt, store)
+        key = found[0] if found else keys[0]
+
+        return _fake_chart_arguments(store, key, None)
+
+    def tool_call(
+        prompt: str,
+        tool_schemas: Sequence[dict[str, Any]],
+        **_: Any,
+    ) -> llm_client.ToolCall:
+        payload = _resolve_fake_chart(prompt)
+        name = payload.pop("tool_name")
+
+        return llm_client.ToolCall(name, payload)
+
+    return json_call, tool_call
 
 
 def _fake_narrative(prompt: str) -> dict[str, Any]:
@@ -486,6 +831,9 @@ def run(
     skip_semantic_review: bool,
     stop_after: str = STAGE_SEQUENCE[-1],
     dump_dir: Path | None = None,
+    excel_path: str | Path | None = None,
+    excel_sheet: str | None = None,
+    deck_title: str | None = None,
 ) -> int:
     """
     跑管線。``stop_after`` 指定跑到哪個階段為止（見 :data:`STAGE_SEQUENCE`）。
@@ -498,8 +846,11 @@ def run(
             f"未知階段 {stop_after!r}，可用：{', '.join(STAGE_SEQUENCE)}"
         )
 
-    json_call = _fake_json_call if use_fake_llm else None
-    tool_call = _fake_tool_call if use_fake_llm else None
+    # 內建範例用寫死的假回應（它同時也在驗那組固定期望值）；
+    # 真實資料的假回應要看得懂當前 MetricStore，等 store 建好後再產生。
+    uses_sample = excel_path is None and ingestion_path is None
+    json_call = _fake_json_call if (use_fake_llm and uses_sample) else None
+    tool_call = _fake_tool_call if (use_fake_llm and uses_sample) else None
     dump = StageDump(dump_dir)
     stop_index = STAGE_SEQUENCE.index(stop_after)
 
@@ -521,15 +872,53 @@ def run(
     print("Stage 1-3：資料讀取與指標計算")
     print("=" * 68)
 
-    if ingestion_path is None:
+    data_source: str
+
+    if excel_path is not None:
+        # 直接讀 Excel：由 backend ingestion 產生 payload。
+        # 單一檔案（多工作表）與目錄（多個單表檔）兩種版型都走這條，
+        # 版型判斷在 backend_bridge 裡，這裡不分支。
+        payload = backend_bridge.ingest_excel(
+            excel_path,
+            sheet_name=excel_sheet,
+        )
+
+        source_files = payload.get("source_files") or []
+        data_source = str(excel_path)
+
+        print(f"  資料來源：{excel_path}（經 backend ingestion）")
+        print(
+            f"  輸入檔案：{len(source_files)} 個"
+            f"（{'、'.join(source_files[:6])}"
+            f"{' …' if len(source_files) > 6 else ''}）"
+        )
+
+        for message in payload.get("warnings") or []:
+            print(f"    註：{message}")
+
+        # payload 落檔，之後可用 --ingestion 重跑同一份資料，
+        # 也是「數字可追溯」的稽核起點。
+        if dump_dir is not None:
+            saved = backend_bridge.save_payload(
+                payload,
+                Path(dump_dir) / "00_ingestion.json",
+            )
+            print(f"  [階段輸出] {saved}")
+
+    elif ingestion_path is None:
         payload = _sample_ingestion_payload()
+        data_source = "built-in sample"
         print("  資料來源：內建範例（--sample）")
     else:
         payload = json.loads(Path(ingestion_path).read_text(encoding="utf-8"))
+        data_source = str(ingestion_path)
         print(f"  資料來源：{ingestion_path}")
 
     loaded = dataset_loader.load_ingestion_result(payload)
     store, engine_report = metric_engine.build_metric_store(loaded)
+
+    if use_fake_llm and not uses_sample:
+        json_call, tool_call = _make_store_aware_fakes(store)
 
     print(f"  資料集：{len(loaded.datasets)} 個")
     print(f"  可用指標：{engine_report.metric_count} 個")
@@ -550,7 +939,7 @@ def run(
     if finish(
         "metrics",
         {
-            "source": str(ingestion_path) if ingestion_path else "built-in sample",
+            "source": data_source,
             "dataset_ids": [dataset.dataset_id for dataset in loaded.datasets],
             "engine_report": {
                 "metric_count": engine_report.metric_count,
@@ -586,7 +975,18 @@ def run(
         )
         return 2
 
+    # 把頁碼換成「在最終 .pptx 中的實際投影片序號」。必須在圖表決策之前，
+    # 因為稽核 Excel 的工作表名 P.{頁碼}_{指標} 是從 ChartPlan 帶下去的
+    # （FR-3.1），頁碼錯了主管照著 Excel 就會翻錯頁。
+    renderer.assign_page_numbers(plan.sections)
+
+    current_chapter: str | None = None
+
     for section in plan.sections:
+        if section.chapter and section.chapter != current_chapter:
+            print(f"    ── 章節：{section.chapter}")
+            current_chapter = section.chapter
+
         print(
             f"    P.{section.page_number} {section.title}"
             f"（指標：{section.suggested_metric_keys or '未指定'}）"
@@ -739,6 +1139,15 @@ def run(
     pptx_path = output_dir / "deck.pptx"
     xlsx_path = output_dir / "deck_data.xlsx"
 
+    # 重新指派頁碼。前面那次是在圖表決策之前算的，之後若有頁面因圖表或
+    # 敘事失敗而被剔除，頁碼就會留下空號（P.6、P.7、P.9…），稽核 Excel 的
+    # 工作表名也會跟著錯位。這裡以最終存留的頁面為準再算一次。
+    renderer.assign_page_numbers([section for section, _, _ in approved])
+
+    for section, chart, narrative in approved:
+        chart.plan.page_number = section.page_number
+        narrative.page_number = section.page_number
+
     bundles = [
         renderer.PageBundle(section, chart, narrative)
         for section, chart, narrative in approved
@@ -748,13 +1157,20 @@ def run(
         bundles,
         store,
         output_path=pptx_path,
-        deck_title=user_prompt[:40],
+        deck_title=deck_title or DEFAULT_DECK_TITLE,
     )
 
     print(
         f"  {render_report.output_path}"
-        f"（{render_report.page_count} 頁，{render_report.chart_count} 圖表）"
+        f"（共 {render_report.slide_count} 張投影片："
+        f"封面 1 + 目錄 {1 if render_report.chapters else 0}"
+        f" + 章節頁 {render_report.divider_count}"
+        f" + 內容頁 {render_report.page_count}"
+        f" + 結尾 1，圖表 {render_report.chart_count} 張）"
     )
+
+    if render_report.chapters:
+        print(f"  章節：{' / '.join(render_report.chapters)}")
 
     for warning in render_report.warnings:
         print(f"    註：{warning}")
@@ -774,6 +1190,9 @@ def run(
             "pptx": str(render_report.output_path),
             "xlsx": str(export_report.output_path),
             "page_count": render_report.page_count,
+            "slide_count": render_report.slide_count,
+            "divider_count": render_report.divider_count,
+            "chapters": list(render_report.chapters),
             "chart_count": render_report.chart_count,
             "warnings": render_report.warnings,
             "placeholder_errors": {
@@ -823,6 +1242,20 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="只檢查 LLM 設定與連線，不跑管線",
     )
     parser.add_argument(
+        "--excel",
+        default=None,
+        help=(
+            "Excel 輸入，交給 backend ingestion 讀取。"
+            "可以是單一 .xlsx（多工作表，每張表一個指標），"
+            "或含多個 .xlsx 的目錄（每檔一個指標）"
+        ),
+    )
+    parser.add_argument(
+        "--excel-sheet",
+        default=None,
+        help="只讀 --excel 指定檔案中的某一張工作表",
+    )
+    parser.add_argument(
         "--ingestion",
         default=None,
         help="backend ingestion 輸出的 JSON 路徑",
@@ -830,12 +1263,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument(
         "--sample",
         action="store_true",
-        help="使用內建範例資料（與 --ingestion 二選一）",
+        help="使用內建範例資料（與 --excel／--ingestion 三選一）",
     )
     parser.add_argument(
         "--prompt",
         default="幫我做一份 2026 信用卡市場分析簡報",
         help="使用者需求描述",
+    )
+    parser.add_argument(
+        "--title",
+        default=None,
+        help=f"封面標題（預設「{DEFAULT_DECK_TITLE}」）",
     )
     parser.add_argument(
         "--sections",
@@ -898,8 +1336,28 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.check_llm:
         return check_llm()
 
-    if not args.sample and args.ingestion is None:
-        parser.error("請指定 --ingestion <path> 或 --sample")
+    chosen_sources = [
+        name
+        for name, value in (
+            ("--excel", args.excel),
+            ("--ingestion", args.ingestion),
+            ("--sample", args.sample or None),
+        )
+        if value
+    ]
+
+    if not chosen_sources:
+        parser.error(
+            "請指定資料來源：--excel <path|dir>、--ingestion <path> 或 --sample"
+        )
+
+    if len(chosen_sources) > 1:
+        parser.error(
+            f"資料來源只能指定一個，目前給了：{'、'.join(chosen_sources)}"
+        )
+
+    if args.excel_sheet and args.excel is None:
+        parser.error("--excel-sheet 需要搭配 --excel 使用")
 
     output_dir = Path(args.output_dir)
 
@@ -910,16 +1368,34 @@ def main(argv: Sequence[str] | None = None) -> int:
     else:
         dump_dir = output_dir / "stages"
 
-    return run(
-        ingestion_path=args.ingestion,
-        user_prompt=args.prompt,
-        sections=args.sections,
-        output_dir=output_dir,
-        use_fake_llm=args.fake_llm,
-        skip_semantic_review=args.skip_semantic_review,
-        stop_after=args.stage,
-        dump_dir=dump_dir,
-    )
+    try:
+        return run(
+            ingestion_path=args.ingestion,
+            user_prompt=args.prompt,
+            sections=args.sections,
+            output_dir=output_dir,
+            use_fake_llm=args.fake_llm,
+            skip_semantic_review=args.skip_semantic_review,
+            stop_after=args.stage,
+            dump_dir=dump_dir,
+            excel_path=args.excel,
+            excel_sheet=args.excel_sheet,
+            deck_title=args.title,
+        )
+    except (
+        backend_bridge.BackendUnavailableError,
+        backend_bridge.NoExcelInputError,
+        dataset_loader.IngestionPayloadError,
+        ValueError,
+    ) as error:
+        # 輸入問題是使用者可以自己修的，印一行說明就好；
+        # traceback 對「檔名打錯」這種狀況沒有幫助，只會蓋掉訊息本身。
+        # --verbose 時仍完整拋出，方便查是不是程式的問題。
+        if args.verbose:
+            raise
+
+        print(f"\n{type(error).__name__}: {error}")
+        return 1
 
 
 if __name__ == "__main__":

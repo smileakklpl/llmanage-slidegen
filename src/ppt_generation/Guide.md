@@ -39,13 +39,15 @@ ppt_generation/
 │   └── placeholders.py    敘事佔位符語法：解析、查表代入、裸數字偵測
 │
 ├── data/                  Stage 1-3：資料 → 指標
+│   ├── backend_bridge.py  呼叫 backend ingestion 讀 Excel → backend JSON
 │   ├── dataset_loader.py  讀 backend JSON → pandas DataFrame + 來源證據
 │   ├── metric_engine.py   確定性指標計算（唯一允許產生數字的地方）
 │   └── metric_store.py    MetricStore：系統唯一真相來源
 │
 ├── charts/                圖表定義與防呆
 │   ├── chart_builder.py   ChartSpec + add_chart() 單一入口 + skill registry
-│   └── chart_planner.py   ChartPlan 驗證與查表組裝
+│   ├── table_builder.py   原生表格與熱力圖（走 add_table，無內嵌 workbook）
+│   └── chart_planner.py   ChartPlan 驗證與查表組裝（圖表與表格共用）
 │
 ├── agents/                Stage 4：多 Agent 協作
 │   ├── section_planner.py 章節規劃
@@ -72,7 +74,8 @@ src/backend ingestion 產出的 UnifiedIngestionResult JSON
    LoadedDataset[]（DataFrame + 每格 evidence）
         │        └─ 排除低信度、未經人工確認的資料集
         ▼  data/metric_engine.py          ← 唯一產生數字的地方
-   MetricStore（.value / .yoy / .share / .rank / .period_growth / .forecast）
+   MetricStore（.value / .yoy / .share / .rank / .period_growth / .forecast
+                / .top{N} 切片 / market_by_period.* 市場期間序列）
         │        └─ 防呆：算不出來的指標標記 computable=False 並記錄原因
         │
         ├─────── catalog_for_llm() ──→ 只有 metadata，無數值
@@ -147,7 +150,7 @@ export LLM_API_KEY=<你的 Google AI Studio 金鑰>
 
 ### 執行
 
-`run_pipeline.py` 是端到端 CLI，三種用法：
+`run_pipeline.py` 是端到端 CLI，四種用法：
 
 ```bash
 cd src
@@ -160,11 +163,57 @@ cd src
     --prompt "幫我做一份 2026 信用卡市場分析簡報" \
     --sections 市場整體概況 成長動能檢視 業者競爭態勢
 
-# 3. 用真實 backend ingestion JSON
+# 3. 直接讀 Excel，由 backend ingestion 現場解析（見下方「兩種輸入版型」）
 ../.venv/bin/python -m ppt_generation.run_pipeline \
-    --ingestion outputs/ingestion_result.json \
+    --excel ../fixtures/data/fsc_114_workbook.xlsx --prompt "..."
+
+# 4. 用既有的 backend ingestion JSON
+../.venv/bin/python -m ppt_generation.run_pipeline \
+    --ingestion ../outputs/stages/00_ingestion.json \
     --prompt "..."
 ```
+
+### 兩種輸入版型（`--excel`）
+
+`--excel` 同時吃兩種擺法，版型判斷在 `data/backend_bridge.py` 完成，
+下游拿到的 payload 形狀一致：
+
+| 版型 | 形狀 | 範例 |
+|---|---|---|
+| 單檔多表 | 一個 `.xlsx`，每張工作表一個指標 | `fixtures/data/fsc_114_workbook.xlsx`、`source/附件四_預期修正參照資料.xlsx` |
+| 多檔單表 | 一個目錄，每個 `.xlsx` 一個指標 | `fixtures/data/fsc_114/` |
+
+```bash
+cd src
+
+# 單檔多表
+../.venv/bin/python -m ppt_generation.run_pipeline \
+    --excel ../fixtures/data/fsc_114_workbook.xlsx --fake-llm --skip-semantic-review
+
+# 多檔單表（目錄）
+../.venv/bin/python -m ppt_generation.run_pipeline \
+    --excel ../fixtures/data/fsc_114 --fake-llm --skip-semantic-review
+
+# 只讀其中一張工作表
+../.venv/bin/python -m ppt_generation.run_pipeline \
+    --excel ../fixtures/data/fsc_114_workbook.xlsx --excel-sheet 流通卡數 --stage metrics
+```
+
+ingestion 結果會落檔成 `<output-dir>/stages/00_ingestion.json`，之後可用
+`--ingestion` 重跑同一份資料而不必再解析一次 Excel。這份 JSON 也是「數字可
+追溯」的起點——每一格都帶來源檔名、工作表與儲存格位置。
+
+`--excel`、`--ingestion`、`--sample` 三者互斥，只能指定一個。
+
+兩件容易誤解的事：
+
+- **metric_key 來自工作表名／檔名，不是 backend 的 UUID。** backend 的
+  `dataset_id` 是內容雜湊，指標會變成 `f47ac10b_....value` 這種 LLM 無從
+  判斷的字串。bridge 會換成可讀 slug（`流通卡數.value`），原 UUID 留在
+  `backend_dataset_id` 供追溯。
+- **`--fake-llm` 在真實資料上也能用。** 內建範例那組假回應寫死了範例的
+  metric_key；餵真實資料時會改用一組「看得懂當前 MetricStore」的假回應，
+  依指標語意與軸型挑圖表。不呼叫模型，但走的是與真實模型相同的契約與防呆。
 
 常用選項：
 
@@ -338,6 +387,21 @@ python -m ppt_generation.verification.verify_chart_consistency \
 被擋下的指標不會消失，而是以 `computable=False` 保留並記錄原因，
 呼叫端應該把 `engine_report.blocked` 回報給使用者。
 
+### 合計列不是一個類別
+
+來源報表常自帶「總計」列（金管會月報第 37 列就是）。
+`metric_engine.is_total_category()` 會認出它，讓占比與排名把它排除：
+
+- **占比**：分母只算各機構，合計列自身的占比是 `None` 而不是 100%。
+  不排除的話分母變成兩倍，每一家的市占率都剛好少一半。
+- **排名**：合計列一定最大，不排除會佔據第 1 名並使其後所有名次位移一位。
+
+認得的寫法有總計／合計／小計／總和／全體／全市場／`total`／`subtotal` 等，
+比對前會去空白並轉小寫。排除了哪幾列會記在該指標的 `notes` 裡。
+
+這條規則與 `config/metric_definitions.json` 的 `ranking` 定義一致，該處記錄了
+用錯定義的實測影響（簽帳金額有 7 家名次改變，含第 3、4 名對調）。
+
 ### 圖表類型也有防呆
 
 `chart_planner.validate_chart_plan()` 會擋掉：折線圖用在橫斷面軸、圓餅圖用在
@@ -378,7 +442,60 @@ plan = section_planner.plan_sections("...", store, llm_call=fake_llm)
 | 真實 LLM API 串接 | 契約與防呆都驗證過，但用的是注入假回應。真實模型能否穩定產出合規敘事需實測 |
 | 敘事平行化 | `write_narratives()` 目前序列執行，未依 `LLM_MAX_PARALLEL` 平行化 |
 | `orchestrator.py` | 串接全流程、處理章節確認中斷與退件重試，待實作 |
-| `table_builder.py` | 原生表格與熱力圖模擬，待實作 |
-| 雙軸圖 | python-pptx 無高階 API，需手動插入第二個 plot，且須驗證不破壞內嵌工作簿同步 |
 | 散點圖資料點標籤 | 銀行名稱標籤需操作 `c:dLbls` XML，`renderer.scatter_labels_pending()` 可查詢此限制 |
-| 熱力圖 | 無原生圖表類型，規劃以原生表格 + 儲存格底色模擬，右鍵不會有「編輯資料」 |
+| 雙軸圖的 PowerPoint 實機驗收 | XML 結構、軸配對、內嵌工作簿一致性都有測試守著，但「右鍵編輯資料」尚未在 PowerPoint 實機開啟確認 |
+| DeckSpec / Refresh（FR-A2） | 尚未實作 |
+
+---
+
+## 圖表與表格 skill
+
+| skill | 產出 | 右鍵「編輯資料」 | 備註 |
+|---|---|---|---|
+| `column` / `bar` / `line` | 原生 chart | 有 | 走 `add_category_chart()` |
+| `pie` | 原生 chart | 有 | 單一系列，類別數上限 `MAX_PIE_CATEGORIES`（12） |
+| `scatter` | 原生 chart | 有 | 資料點標籤尚未支援 |
+| `combo` | 原生 chart（雙軸） | 有 | 長條掛主軸、折線掛右側次軸。附件三 P.5/P.6 的圖型 |
+| `table` | 原生 table | **沒有** | PowerPoint 表格本來就沒有內嵌工作簿 |
+| `heatmap` | 原生 table + 儲存格底色 | **沒有** | 無原生熱力圖類型，FR-2.3 明訂的替代方案 |
+
+`combo` 的做法要特別記一下，因為只有一條路是對的：**先用 `add_chart()`
+把所有系列（含之後要變折線的）一次寫進去**，讓 python-pptx 把內嵌 workbook
+寫完整，再把後段 `<c:ser>` 節點搬到新建的 `<c:lineChart>` 並掛上次軸。
+搬的是「這個系列用什麼圖形畫」，沒有碰任何數值節點——三份副本的一致性
+仍由那一次 `add_chart()` 保證。自己組 chart XML 手填 `<c:numCache>` 會讓
+快取有值、內嵌 workbook 空白，那正是附件三的病灶本身。
+
+表格沒有第二份副本可比，所以它的數字改由另一條路守著：儲存格文字一律經
+`table_builder.format_value()` 產生，驗證時用 `parse_value()` 反向解析回來
+與稽核 Excel 比對（比對前會把稽核值套用同一套格式化規則，才不會被顯示
+精度的四捨五入誤判）。**沒有稽核 Excel 的表格一律視為「無法驗證」而非
+「通過」。**
+
+---
+
+## 簡報結構
+
+`render_deck()` 組出的版面順序：
+
+```
+封面（模板首頁，標題可用 --title 覆寫）
+目錄（由章節清單產生，不另外撰寫）
+├─ 章節分隔頁：Executive Summary
+│  └─ 內容頁…
+├─ 章節分隔頁：市場整體概況
+│  └─ 內容頁…
+…
+結尾頁
+```
+
+章節來自 `SectionPlan.chapter`；`chapter` 變化時自動插入分隔頁，為 None 的
+頁面不產生分隔頁。預設章節骨架見 `section_planner.DEFAULT_CHAPTERS`（FR-2.6
+的八章節）。
+
+`renderer.assign_page_numbers()` 把每頁的 `page_number` 換成**實際投影片
+序號**。這件事必須在圖表決策之前做完，而且頁面因失敗被剔除後要再算一次：
+稽核 Excel 的工作表名是 `P.{頁碼}_{指標名稱}`（FR-3.1），主管拿著 Excel
+對照簡報，封面、目錄與每張章節分隔頁都會造成偏移，差一頁就是翻錯頁。
+`tests/test_deck_structure.py` 有一條測試交叉驗證「算出來的頁碼 == 實際
+投影片位置」。

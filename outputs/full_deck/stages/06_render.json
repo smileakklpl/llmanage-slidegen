@@ -1,0 +1,34 @@
+{
+  "pptx": "../outputs/full_deck/deck.pptx",
+  "xlsx": "../outputs/full_deck/deck_data.xlsx",
+  "page_count": 9,
+  "slide_count": 20,
+  "divider_count": 8,
+  "chapters": [
+    "Executive Summary",
+    "市場整體概況",
+    "同業成長及競爭分析",
+    "客戶活躍度",
+    "獲利能力",
+    "風險與警訊",
+    "未來趨勢推測",
+    "對台新的策略建議"
+  ],
+  "chart_count": 9,
+  "warnings": [
+    "已移除模板中 4 張示範頁（保留首頁）"
+  ],
+  "placeholder_errors": {},
+  "sheet_names": [
+    "索引",
+    "P.4_循環信用餘額 Top 10",
+    "P.6_市場整體（各期）",
+    "P.7_市場整體（各期） 期間成長率",
+    "P.9_循環信用餘額 占比 Top 10",
+    "P.11_有效卡數 Top 10",
+    "P.13_未到期分期付款餘額 Top 10",
+    "P.15_當月轉銷呆帳金額 Top 10",
+    "P.17_市場整體（各期） 趨勢外推",
+    "P.19_循環信用餘額 占比"
+  ]
+}

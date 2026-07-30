@@ -8,7 +8,10 @@ from openpyxl.cell.cell import MergedCell
 from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.worksheet import Worksheet
 
-from app.ingestion.classifier import inspect_excel_content
+from app.ingestion.classifier import (
+    inspect_excel_content,
+    is_period_like_header,
+)
 from app.ingestion.schemas import (
     ColumnDataType,
     ExtractedCell,
@@ -190,6 +193,11 @@ def _header_value_is_plausible(value: Any) -> bool:
 
     表頭也可能是年份、日期或月份，
     所以不限制只能是字串。
+
+    期間型欄名的判斷與 classifier 共用
+    :func:`~app.ingestion.classifier.is_period_like_header`，
+    避免兩層對「什麼算表頭」有不同看法——分類器認得、抽取器卻不認，
+    工作表就會被分類成有表格卻抽不出東西。
     """
     if _is_empty(value):
         return False
@@ -197,13 +205,7 @@ def _header_value_is_plausible(value: Any) -> bool:
     if isinstance(value, str):
         return not value.startswith("=")
 
-    if isinstance(value, (date, datetime)):
-        return True
-
-    if isinstance(value, int):
-        return 1900 <= value <= 2200
-
-    return False
+    return is_period_like_header(value)
 
 
 def _detect_header_row(

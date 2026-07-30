@@ -24,6 +24,7 @@ from typing import Any, Callable
 
 from ..core import llm_client
 from ..charts.chart_builder import CHART_SKILL_TOOL_SCHEMAS
+from ..charts.table_builder import TABLE_SKILL_TOOL_SCHEMAS
 from ..charts.chart_planner import (
     ChartPlan,
     ChartPlanError,
@@ -40,6 +41,13 @@ logger = logging.getLogger(__name__)
 #: 驗證失敗後允許 LLM 重試的次數。
 MAX_PLAN_ATTEMPTS = 3
 
+#: 交給 LLM 的完整 skill 清單（圖表 + 表格）。模型只會從這裡挑名稱，
+#: 名稱之後還要過 chart_planner 的白名單，兩層都不放行未註冊的 skill。
+VISUAL_SKILL_TOOL_SCHEMAS = [
+    *CHART_SKILL_TOOL_SCHEMAS,
+    *TABLE_SKILL_TOOL_SCHEMAS,
+]
+
 SYSTEM_PROMPT = """你是一位資料視覺化專家，為銀行高階主管簡報挑選圖表。
 
 任務：為指定章節挑選最合適的圖表類型與指標，透過工具呼叫回傳。
@@ -55,6 +63,10 @@ SYSTEM_PROMPT = """你是一位資料視覺化專家，為銀行高階主管簡�
    - line 圖不可用於 categorical 指標；pie 圖不可用於 temporal 指標
    - pie 圖只能有一組系列，且數值不可為負
    - scatter 圖需要恰好兩組系列（分別為 x 軸與 y 軸）
+   - combo（雙軸圖）需要至少兩組系列，適合兩組量級差距大但要並列看的系列；
+     第一個系列畫長條掛主軸，其餘畫折線掛右側次軸
+   - table（原生表格）適合要精確讀出每一格的明細；heatmap 適合
+     多實體 × 多期間的強弱分佈。兩者列數上限 20，超過請改用 bar
 4. chart_title 要有商業洞察意涵，不要只寫指標名稱。"""
 
 
@@ -133,7 +145,7 @@ def plan_chart_for_section(
     for attempt in range(1, max_attempts + 1):
         tool_call = call(
             build_prompt(section, store, errors),
-            CHART_SKILL_TOOL_SCHEMAS,
+            VISUAL_SKILL_TOOL_SCHEMAS,
             system_prompt=SYSTEM_PROMPT,
             stage="chart",
         )

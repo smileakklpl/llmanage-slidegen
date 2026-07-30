@@ -98,6 +98,57 @@ def _is_number(value: Any) -> bool:
     )
 
 
+def is_period_like_header(value: Any) -> bool:
+    """
+    判斷某個值是否為「期間」型的欄名。
+
+    交叉表（entity × period）的表頭大多不是文字，例如金管會信用卡月報：
+
+        金融機構名稱 | 11401 | 11402 | ... | 11412
+
+    只有第一欄是文字，其餘 12 欄都是整數。若表頭偵測只認文字，
+    這種在金融報表裡極常見的版型會被判成「無法辨識結構」而整張跳過。
+
+    認得的寫法：
+    - 民國年月：11401（5 碼，前 3 碼為民國年 100–199，後 2 碼為月 01–12）
+    - 民國年：114（3 碼）
+    - 西元年：1900–2200
+    - 西元年月：202601（6 碼）
+    - 日期／時間物件
+    """
+    if isinstance(value, (date, datetime)):
+        return True
+
+    if isinstance(value, bool):
+        return False
+
+    if isinstance(value, float) and value.is_integer():
+        value = int(value)
+
+    if not isinstance(value, int):
+        return False
+
+    # 西元年
+    if 1900 <= value <= 2200:
+        return True
+
+    # 民國年（100–199，即 2011–2110 年）
+    if 100 <= value <= 199:
+        return True
+
+    # 民國年月：11401–19912
+    if 10001 <= value <= 19912:
+        month = value % 100
+        return 1 <= month <= 12
+
+    # 西元年月：190001–220012
+    if 190001 <= value <= 220012:
+        month = value % 100
+        return 1 <= month <= 12
+
+    return False
+
+
 def _count_non_empty_in_row(
     worksheet: Worksheet,
     row_number: int,
@@ -138,8 +189,12 @@ def _detect_header_row(
 
     判斷原則：
     1. 該列至少有兩個非空值。
-    2. 其中至少一半是文字。
+    2. 其中至少一半看起來像欄名——文字，或期間型欄名（年／年月／日期）。
     3. 後續至少有兩列具備足夠資料，並允許部分欄位缺失。
+
+    第 2 點把期間型欄名一併算進來，是為了支援 entity × period 交叉表
+    （見 :func:`is_period_like_header`）。只認文字的話，「名稱 + 12 個
+    月份欄」這種版型的文字比例只有 1/13，會被誤判為非表頭。
     """
     max_row = min(worksheet.max_row, scan_rows)
     max_column = min(worksheet.max_column, scan_columns)
@@ -167,13 +222,16 @@ def _detect_header_row(
         if len(non_empty_values) < 2:
             continue
 
-        text_count = sum(
-            isinstance(value, str)
-            and not value.startswith("=")
+        label_count = sum(
+            (
+                isinstance(value, str)
+                and not value.startswith("=")
+            )
+            or is_period_like_header(value)
             for value in non_empty_values
         )
 
-        text_ratio = text_count / len(non_empty_values)
+        text_ratio = label_count / len(non_empty_values)
 
         if text_ratio < 0.5:
             continue

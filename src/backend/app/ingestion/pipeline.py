@@ -5,13 +5,6 @@ from app.ingestion.security import (
 from app.ingestion.normalizer import (
     build_unified_datasets,
 )
-from app.ingestion.visual_parser import (
-    inspect_visual_input,
-)
-from app.ingestion.pdf_parser import (
-    extract_pdf_tables,
-    inspect_pdf_document,
-)
 from app.ingestion.delimited import (
     extract_delimited_table,
     inspect_delimited_content,
@@ -38,6 +31,38 @@ from app.ingestion.schemas import (
 from app.ingestion.validator import (
     validate_workbook_extraction,
 )
+
+
+# -------------------------------------------------------------
+# PDF 與影像剖析器改為延遲載入
+# -------------------------------------------------------------
+# pdf_parser 需要 pdfplumber、visual_parser 需要 pymupdf，
+# 兩者都只列在 src/backend/requirements.txt，不在 repo root 的
+# requirements.txt——專案刻意讓兩份相依不相交（見 README「四塊各自
+# 從自己的目錄執行」）。
+#
+# 若在 module 層 import，只想讀 xlsx 的呼叫端（例如 ppt_generation
+# 透過 data/backend_bridge.py 走進來）會在 import 這支模組時就因為缺
+# pymupdf 而 ModuleNotFoundError，即使它根本不碰 PDF 與影像。
+#
+# 改成在實際走到 PDF／影像分支時才載入：xlsx 與 CSV 路徑因此只需要
+# openpyxl + pydantic。visual_parser 對 paddleocr 已經是同樣的做法，
+# 這裡只是把同一個原則往外推一層。
+def _load_pdf_parser():
+    from app.ingestion.pdf_parser import (
+        extract_pdf_tables,
+        inspect_pdf_document,
+    )
+
+    return extract_pdf_tables, inspect_pdf_document
+
+
+def _load_visual_parser():
+    from app.ingestion.visual_parser import (
+        inspect_visual_input,
+    )
+
+    return inspect_visual_input
 
 
 def _duration_ms(start_time: float) -> float:
@@ -373,6 +398,11 @@ def run_ingestion_pipeline(
             == ContainerType.PDF
         ):
             (
+                _,
+                inspect_pdf_document,
+            ) = _load_pdf_parser()
+
+            (
                 classification,
                 document,
             ) = inspect_pdf_document(path)
@@ -389,6 +419,10 @@ def run_ingestion_pipeline(
                 not document.has_text_layer
                 or document.scanned_page_count > 0
             ):
+                inspect_visual_input = (
+                    _load_visual_parser()
+                )
+
                 (
                     visual_classification,
                     visual,
@@ -408,6 +442,10 @@ def run_ingestion_pipeline(
                     )
 
         else:
+            inspect_visual_input = (
+                _load_visual_parser()
+            )
+
             (
                 classification,
                 visual,
@@ -517,6 +555,11 @@ def run_ingestion_pipeline(
             inspection.detected_container_type
             == ContainerType.PDF
         ):
+            (
+                extract_pdf_tables,
+                _,
+            ) = _load_pdf_parser()
+
             extraction = extract_pdf_tables(
                 file_path=path,
                 sheet_name=sheet_name,

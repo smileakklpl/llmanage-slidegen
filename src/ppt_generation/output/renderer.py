@@ -30,8 +30,8 @@ from pptx.util import Emu, Inches, Pt
 from ..core import config, placeholders
 from ..agents.narrative_writer import PageNarrative
 from ..agents.section_planner import SectionPlan
-from ..charts.chart_builder import CHART_SKILLS, ScatterSpec
-from ..charts.chart_planner import ResolvedChart
+from ..charts.chart_builder import ScatterSpec
+from ..charts.chart_planner import VISUAL_SKILLS, ResolvedChart
 from ..data.metric_store import MetricStore
 
 
@@ -42,6 +42,17 @@ CONTENT_LAYOUT_NAME = "1_標題及內容"
 
 #: 模板中用於章節分隔頁的版面名稱。
 SECTION_LAYOUT_NAME = "2_章節標題"
+
+#: 模板中用於結尾頁的版面名稱（附件一模板第 5 頁用的就是這個）。
+CLOSING_LAYOUT_NAME = "3_標題投影片"
+
+#: 目錄頁標題與結尾頁文字。都可由呼叫端覆寫。
+AGENDA_TITLE = "目錄"
+CLOSING_MESSAGE = "感謝聆聽"
+
+#: 封面頁在模板中是第 1 張投影片，保留不刪；其後的示範頁移除。
+#: 「封面 + 目錄」共 2 張非內容頁，是頁碼推算的固定前綴。
+FRONT_MATTER_SLIDES = 2
 
 #: placeholder 索引（由模板結構決定，見 template.pptx 版面配置）。
 PH_TITLE = 0
@@ -74,6 +85,63 @@ class RenderReport:
     #: 佔位符代入失敗的訊息（頁碼 → 錯誤清單）
     placeholder_errors: dict[int, list[str]] = field(default_factory=dict)
     warnings: list[str] = field(default_factory=list)
+    #: 章節分隔頁數量
+    divider_count: int = 0
+    #: 最終 .pptx 的實際投影片總數（含封面、目錄、章節頁、結尾頁）
+    slide_count: int = 0
+    #: 依序的章節名稱
+    chapters: list[str] = field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
+# 頁碼指派
+# ---------------------------------------------------------------------------
+def chapter_order(bundles_or_sections: Sequence[Any]) -> list[str]:
+    """依出現順序取出章節名稱（跳過未歸章節者）。"""
+    chapters: list[str] = []
+
+    for item in bundles_or_sections:
+        section = item.section if isinstance(item, PageBundle) else item
+
+        if section.chapter and section.chapter not in chapters:
+            chapters.append(section.chapter)
+
+    return chapters
+
+
+def assign_page_numbers(
+    sections: Sequence[SectionPlan],
+    *,
+    include_agenda: bool = True,
+) -> list[SectionPlan]:
+    """
+    把每個內容頁的 ``page_number`` 改成它在最終 .pptx 中的實際投影片序號。
+
+    這件事必須在圖表決策**之前**做完：稽核 Excel 的工作表名是
+    ``P.{頁碼}_{指標名稱}``（FR-3.1），而頁碼是從 ChartPlan 帶下去的。
+    若這裡的頁碼是「第幾個內容頁」而不是「第幾張投影片」，主管拿著
+    Excel 對照簡報就會翻錯頁——封面、目錄與每張章節分隔頁都會造成偏移。
+
+    版面順序：封面 → 目錄 →（章節分隔頁 → 該章節內容頁…）× N → 結尾頁。
+
+    就地修改並回傳同一批物件，方便鏈式使用。
+    """
+    # 沒有任何頁面歸屬章節時 render_deck 不會產目錄頁（目錄會是空的），
+    # 這裡的推算必須跟著它，否則頁碼會整份差一頁。
+    has_chapters = any(section.chapter for section in sections)
+
+    number = 1 + (1 if (include_agenda and has_chapters) else 0)  # 封面（+ 目錄）
+    current_chapter: str | None = None
+
+    for section in sections:
+        if section.chapter and section.chapter != current_chapter:
+            number += 1  # 章節分隔頁
+            current_chapter = section.chapter
+
+        number += 1
+        section.page_number = number
+
+    return list(sections)
 
 
 # ---------------------------------------------------------------------------
@@ -204,6 +272,60 @@ def add_section_divider(presentation: Presentation, title: str) -> Any:
     return slide
 
 
+def add_agenda_page(
+    presentation: Presentation,
+    chapters: Sequence[str],
+    *,
+    title: str = AGENDA_TITLE,
+) -> Any:
+    """
+    新增目錄頁，逐條列出章節。
+
+    目錄的內容完全來自章節清單，不另外撰寫——目錄與章節分隔頁不一致
+    是簡報最容易出現、也最傷信任的瑕疵。
+    """
+    layout = _find_layout(presentation, CONTENT_LAYOUT_NAME)
+    slide = presentation.slides.add_slide(layout)
+
+    if slide.shapes.title is not None:
+        slide.shapes.title.text_frame.text = title
+
+    body = _body_placeholder(slide)
+
+    if body is None:
+        return slide
+
+    text_frame = body.text_frame
+    text_frame.clear()
+    text_frame.word_wrap = True
+
+    for index, chapter in enumerate(chapters):
+        paragraph = (
+            text_frame.paragraphs[0] if index == 0 else text_frame.add_paragraph()
+        )
+        paragraph.text = f"{index + 1:02d}　{chapter}"
+        paragraph.level = 0
+
+        for run in paragraph.runs:
+            run.font.size = Pt(16)
+
+    return slide
+
+
+def add_closing_page(
+    presentation: Presentation,
+    message: str = CLOSING_MESSAGE,
+) -> Any:
+    """新增結尾頁（模板第 5 頁用的版面）。"""
+    layout = _find_layout(presentation, CLOSING_LAYOUT_NAME)
+    slide = presentation.slides.add_slide(layout)
+
+    if slide.shapes.title is not None:
+        slide.shapes.title.text_frame.text = message
+
+    return slide
+
+
 def add_content_page(
     presentation: Presentation,
     bundle: PageBundle,
@@ -271,17 +393,18 @@ def _insert_chart(
     area: ContentArea,
 ) -> Any:
     """
-    透過 CHART_SKILLS registry 插入原生圖表。
+    透過 registry 插入原生圖表或原生表格。
 
-    這是全系統唯一的圖表落地路徑：``add_chart()`` 會同時寫入
-    chart XML 快取與內嵌 workbook，兩者天生一致。
+    圖表走 ``add_chart()``——這是全系統唯一的圖表落地路徑，會同時寫入
+    chart XML 快取與內嵌 workbook，兩者天生一致。表格走 ``add_table()``，
+    產出的是真正的 PPT table 物件（FR-2.4：禁止文字方塊拼貼）。
     """
-    skill = CHART_SKILLS.get(chart.skill_name)
+    skill = VISUAL_SKILLS.get(chart.skill_name)
 
     if skill is None:
         raise RenderError(
             f"圖表 skill {chart.skill_name!r} 未註冊，"
-            f"可用選項：{sorted(CHART_SKILLS)}"
+            f"可用選項：{sorted(VISUAL_SKILLS)}"
         )
 
     return skill(
@@ -305,6 +428,9 @@ def render_deck(
     template_path: str | Path | None = None,
     deck_title: str | None = None,
     keep_template_slides: bool = False,
+    include_agenda: bool = True,
+    include_closing: bool = True,
+    closing_message: str = CLOSING_MESSAGE,
 ) -> RenderReport:
     """
     組裝整份簡報。
@@ -314,9 +440,16 @@ def render_deck(
         store: 唯一真相來源，用於代入敘事佔位符。
         output_path: 輸出 .pptx 路徑，預設 ``outputs/deck.pptx``。
         template_path: 模板路徑，預設 ``source/template.pptx``。
-        deck_title: 有值時覆寫模板首頁標題。
+        deck_title: 有值時覆寫模板首頁（封面）標題。
         keep_template_slides: 是否保留模板原有的示範頁。預設 False，
             但模板頁的刪除需操作底層 XML，故目前僅保留首頁並記錄警告。
+        include_agenda: 是否在封面後插入目錄頁。
+        include_closing: 是否在最後插入結尾頁。
+        closing_message: 結尾頁文字。
+
+    版面順序：封面（模板首頁）→ 目錄 →（章節分隔頁 → 內容頁…）× N → 結尾頁。
+    章節分隔頁依 ``bundle.section.chapter`` 變化自動插入；``chapter`` 為 None
+    的頁面不產生分隔頁，可用來排非章節內容。
 
     Returns:
         :class:`RenderReport`。
@@ -343,7 +476,21 @@ def render_deck(
                 f"已移除模板中 {removed} 張示範頁（保留首頁）"
             )
 
+    report.chapters = chapter_order(bundles)
+
+    if include_agenda and report.chapters:
+        add_agenda_page(presentation, report.chapters)
+
+    current_chapter: str | None = None
+
     for bundle in bundles:
+        chapter = bundle.section.chapter
+
+        if chapter and chapter != current_chapter:
+            add_section_divider(presentation, chapter)
+            report.divider_count += 1
+            current_chapter = chapter
+
         try:
             _, errors = add_content_page(presentation, bundle, store)
         except RenderError as error:
@@ -359,6 +506,11 @@ def render_deck(
 
         if errors:
             report.placeholder_errors[bundle.section.page_number or 0] = errors
+
+    if include_closing:
+        add_closing_page(presentation, closing_message)
+
+    report.slide_count = len(presentation.slides._sldIdLst)
 
     target = Path(output_path or (config.OUTPUT_DIR / "deck.pptx"))
     target.parent.mkdir(parents=True, exist_ok=True)

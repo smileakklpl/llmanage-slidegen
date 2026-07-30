@@ -1,0 +1,124 @@
+{
+  "narratives": [
+    {
+      "page_number": 4,
+      "slide_title": "關鍵指標總覽",
+      "headline": "循環信用餘額 Top 10呈現明顯的業者集中態勢",
+      "bullets": [
+        "領先者 {{循環信用餘額.value.top10|11412|max_category}} 達 {{循環信用餘額.value.top10|11412|max}}",
+        "末位者僅 {{循環信用餘額.value.top10|11412|min}}"
+      ],
+      "cited_metric_keys": [
+        "循環信用餘額.value.top10"
+      ]
+    },
+    {
+      "page_number": 6,
+      "slide_title": "市場規模趨勢",
+      "headline": "市場整體（各期）呈現明顯的業者集中態勢",
+      "bullets": [
+        "領先者 {{market_by_period.value|當月轉銷呆帳金額|max_category}} 達 {{market_by_period.value|當月轉銷呆帳金額|max}}",
+        "末位者僅 {{market_by_period.value|當月轉銷呆帳金額|min}}"
+      ],
+      "cited_metric_keys": [
+        "market_by_period.value"
+      ]
+    },
+    {
+      "page_number": 7,
+      "slide_title": "市場動能檢視",
+      "headline": "市場整體（各期） 期間成長率呈現明顯的業者集中態勢",
+      "bullets": [
+        "領先者 {{market_by_period.period_growth|當月轉銷呆帳金額|max_category}} 達 {{market_by_period.period_growth|當月轉銷呆帳金額|max}}",
+        "末位者僅 {{market_by_period.period_growth|當月轉銷呆帳金額|min}}"
+      ],
+      "cited_metric_keys": [
+        "market_by_period.period_growth"
+      ]
+    },
+    {
+      "page_number": 9,
+      "slide_title": "市占結構",
+      "headline": "循環信用餘額 占比 Top 10呈現明顯的業者集中態勢",
+      "bullets": [
+        "領先者 {{循環信用餘額.share.top10|11412|max_category}} 達 {{循環信用餘額.share.top10|11412|max}}",
+        "末位者僅 {{循環信用餘額.share.top10|11412|min}}"
+      ],
+      "cited_metric_keys": [
+        "循環信用餘額.share.top10"
+      ]
+    },
+    {
+      "page_number": 11,
+      "slide_title": "有效卡數表現",
+      "headline": "有效卡數 Top 10呈現明顯的業者集中態勢",
+      "bullets": [
+        "領先者 {{有效卡數.value.top10|11412|max_category}} 達 {{有效卡數.value.top10|11412|max}}",
+        "末位者僅 {{有效卡數.value.top10|11412|min}}"
+      ],
+      "cited_metric_keys": [
+        "有效卡數.value.top10"
+      ]
+    },
+    {
+      "page_number": 13,
+      "slide_title": "循環信用與分期貢獻",
+      "headline": "未到期分期付款餘額 Top 10呈現明顯的業者集中態勢",
+      "bullets": [
+        "領先者 {{未到期分期付款餘額.value.top10|11412|max_category}} 達 {{未到期分期付款餘額.value.top10|11412|max}}",
+        "末位者僅 {{未到期分期付款餘額.value.top10|11412|min}}"
+      ],
+      "cited_metric_keys": [
+        "未到期分期付款餘額.value.top10"
+      ]
+    },
+    {
+      "page_number": 15,
+      "slide_title": "轉銷呆帳分佈",
+      "headline": "當月轉銷呆帳金額 Top 10呈現明顯的業者集中態勢",
+      "bullets": [
+        "領先者 {{當月轉銷呆帳金額.value.top10|11412|max_category}} 達 {{當月轉銷呆帳金額.value.top10|11412|max}}",
+        "末位者僅 {{當月轉銷呆帳金額.value.top10|11412|min}}"
+      ],
+      "cited_metric_keys": [
+        "當月轉銷呆帳金額.value.top10"
+      ]
+    },
+    {
+      "page_number": 17,
+      "slide_title": "市場規模外推",
+      "headline": "市場整體（各期） 趨勢外推呈現明顯的業者集中態勢",
+      "bullets": [
+        "領先者 {{market_by_period.forecast|當月轉銷呆帳金額|max_category}} 達 {{market_by_period.forecast|當月轉銷呆帳金額|max}}",
+        "末位者僅 {{market_by_period.forecast|當月轉銷呆帳金額|min}}"
+      ],
+      "cited_metric_keys": [
+        "market_by_period.forecast"
+      ]
+    },
+    {
+      "page_number": 19,
+      "slide_title": "市占提升空間",
+      "headline": "循環信用餘額 占比呈現明顯的業者集中態勢",
+      "bullets": [
+        "領先者 {{循環信用餘額.share|11412|max_category}} 達 {{循環信用餘額.share|11412|max}}",
+        "末位者僅 {{循環信用餘額.share|11412|min}}"
+      ],
+      "cited_metric_keys": [
+        "循環信用餘額.share"
+      ]
+    }
+  ],
+  "failures": {},
+  "attempts": {
+    "關鍵指標總覽": 1,
+    "市場規模趨勢": 1,
+    "市場動能檢視": 1,
+    "市占結構": 1,
+    "有效卡數表現": 1,
+    "循環信用與分期貢獻": 1,
+    "轉銷呆帳分佈": 1,
+    "市場規模外推": 1,
+    "市占提升空間": 1
+  }
+}

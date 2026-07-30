@@ -1,0 +1,88 @@
+{
+  "status": "READY",
+  "sections": [
+    {
+      "title": "關鍵指標總覽",
+      "chapter": "Executive Summary",
+      "intent": "呈現 循環信用餘額 Top 10",
+      "suggested_metric_keys": [
+        "循環信用餘額.value.top10"
+      ],
+      "page_number": 4
+    },
+    {
+      "title": "市場規模趨勢",
+      "chapter": "市場整體概況",
+      "intent": "呈現 市場整體（各期）",
+      "suggested_metric_keys": [
+        "market_by_period.value"
+      ],
+      "page_number": 6
+    },
+    {
+      "title": "市場動能檢視",
+      "chapter": "市場整體概況",
+      "intent": "呈現 市場整體（各期） 期間成長率",
+      "suggested_metric_keys": [
+        "market_by_period.period_growth"
+      ],
+      "page_number": 7
+    },
+    {
+      "title": "市占結構",
+      "chapter": "同業成長及競爭分析",
+      "intent": "呈現 循環信用餘額 占比 Top 10",
+      "suggested_metric_keys": [
+        "循環信用餘額.share.top10"
+      ],
+      "page_number": 9
+    },
+    {
+      "title": "有效卡數表現",
+      "chapter": "客戶活躍度",
+      "intent": "呈現 有效卡數 Top 10",
+      "suggested_metric_keys": [
+        "有效卡數.value.top10"
+      ],
+      "page_number": 11
+    },
+    {
+      "title": "循環信用與分期貢獻",
+      "chapter": "獲利能力",
+      "intent": "呈現 未到期分期付款餘額 Top 10",
+      "suggested_metric_keys": [
+        "未到期分期付款餘額.value.top10"
+      ],
+      "page_number": 13
+    },
+    {
+      "title": "轉銷呆帳分佈",
+      "chapter": "風險與警訊",
+      "intent": "呈現 當月轉銷呆帳金額 Top 10",
+      "suggested_metric_keys": [
+        "當月轉銷呆帳金額.value.top10"
+      ],
+      "page_number": 15
+    },
+    {
+      "title": "市場規模外推",
+      "chapter": "未來趨勢推測",
+      "intent": "呈現 市場整體（各期） 趨勢外推",
+      "suggested_metric_keys": [
+        "market_by_period.forecast"
+      ],
+      "page_number": 17
+    },
+    {
+      "title": "市占提升空間",
+      "chapter": "對台新的策略建議",
+      "intent": "呈現 循環信用餘額 占比",
+      "suggested_metric_keys": [
+        "循環信用餘額.share"
+      ],
+      "page_number": 19
+    }
+  ],
+  "question_to_user": null,
+  "dropped_metric_keys": {}
+}

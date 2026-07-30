@@ -31,6 +31,8 @@ from typing import Any, Sequence
 from openpyxl import load_workbook
 from pptx import Presentation
 
+from ..charts import table_builder
+
 #: 浮點比較容許誤差。三份副本理應完全相同，此值只用於吸收
 #: Excel 儲存 float 時的最後一位表示差異，不容許實質數值差異。
 TOLERANCE = 1e-9
@@ -41,17 +43,28 @@ _CATEGORY_HEADERS = ("類別", "標籤")
 
 @dataclass
 class SeriesComparison:
-    """單一系列的三方比對結果。"""
+    """
+    單一系列的三方比對結果。
+
+    原生表格沒有內嵌 workbook（PowerPoint 表格本來就沒有「編輯資料」），
+    此時 ``embedded`` 為 None，只比對①儲存格文字與③稽核 Excel。
+    這不是放寬標準——表格的畫面值就是它唯一的一份值，沒有第二份可比。
+    """
 
     slide_number: int
     chart_title: str
     series_name: str
     chart_cache: list[float | None]
-    embedded: list[float | None]
+    embedded: list[float | None] | None
     external: list[float | None] | None = None
+    #: 這一筆是原生表格（走 add_table）而非原生圖表（走 add_chart）。
+    is_table: bool = False
 
     @property
     def cache_matches_embedded(self) -> bool:
+        if self.embedded is None:
+            return True
+
         return _values_equal(self.chart_cache, self.embedded)
 
     @property
@@ -66,7 +79,18 @@ class SeriesComparison:
         if not self.cache_matches_embedded:
             return False
 
+        # 表格只有一份副本可比。沒有稽核 Excel 就等於這頁的數字沒有任何
+        # 獨立來源可以核對——那是「無法驗證」，不是「通過」。圖表不同，
+        # 它至少還有①②兩份可互相印證。
+        if self.is_table and self.external is None:
+            return False
+
         return self.cache_matches_external is not False
+
+    @property
+    def copies_compared(self) -> int:
+        """實際比對到的副本數。表格只有兩份（畫面 + 稽核 Excel）。"""
+        return 1 + (self.embedded is not None) + (self.external is not None)
 
     def describe_failure(self) -> str:
         parts: list[str] = []
@@ -188,6 +212,12 @@ class ExternalSheet:
     metric_key: str | None
     page_number: int | None
     series: dict[str, list[float | None]] = field(default_factory=dict)
+    #: 第一欄（類別／標籤）的內容。原生表格靠它做內容比對配對。
+    categories: list[str] = field(default_factory=list)
+    #: 稽核表記錄的圖表類型（column／table／heatmap…）。
+    chart_kind: str | None = None
+    #: 稽核表記錄的單位。表格比對要用它套用相同的顯示格式。
+    unit: str | None = None
 
 
 def read_external_workbook(path: str | Path) -> list[ExternalSheet]:
@@ -242,7 +272,23 @@ def read_external_workbook(path: str | Path) -> list[ExternalSheet]:
             page_number=(
                 int(page_number) if isinstance(page_number, (int, float)) else None
             ),
+            chart_kind=(
+                str(metadata["圖表類型"]).strip()
+                if metadata.get("圖表類型") is not None
+                else None
+            ),
+            unit=(
+                str(metadata["單位"]).strip()
+                if metadata.get("單位") is not None
+                else None
+            ),
         )
+
+        sheet.categories = [
+            str(value).strip()
+            for row_index in range(header_row + 1, worksheet.max_row + 1)
+            if (value := worksheet.cell(row=row_index, column=1).value) is not None
+        ]
 
         series_values: dict[str, list[float | None]] = {}
 
@@ -276,6 +322,66 @@ def read_external_workbook(path: str | Path) -> list[ExternalSheet]:
 
     workbook.close()
     return sheets
+
+
+def read_table_shape(shape: Any) -> tuple[list[str], list[str], dict[str, list[float | None]]]:
+    """
+    讀出原生表格的內容。
+
+    表格的數字是**文字**，所以要反向解析回數值才能比對。解析一律用
+    :func:`table_builder.parse_value`，與寫入時的 :func:`format_value`
+    成對——格式化規則只有一份，比對才有意義。
+
+    Returns:
+        (欄名清單, 列標籤清單, {欄名: 數值清單})。
+    """
+    table = shape.table
+    rows = list(table.rows)
+
+    if len(rows) < 2:
+        return [], [], {}
+
+    header_cells = list(rows[0].cells)
+    column_names = [cell.text.strip() for cell in header_cells[1:]]
+
+    row_labels: list[str] = []
+    values: dict[str, list[float | None]] = {name: [] for name in column_names}
+
+    for row in rows[1:]:
+        cells = list(row.cells)
+        row_labels.append(cells[0].text.strip())
+
+        for index, name in enumerate(column_names, start=1):
+            text = cells[index].text if index < len(cells) else ""
+            values[name].append(table_builder.parse_value(text))
+
+    return column_names, row_labels, values
+
+
+def _match_external_sheet_for_table(
+    sheets: Sequence[ExternalSheet],
+    column_names: Sequence[str],
+    row_labels: Sequence[str],
+) -> ExternalSheet | None:
+    """
+    為原生表格找出對應的稽核工作表。
+
+    表格沒有 chart_title 可用（title 在投影片標題上，與稽核表記的
+    「圖表標題」不是同一個字串），所以改以內容配對：欄名與列標籤同時
+    吻合的工作表就是它。內容配對比序號配對更穩——序號會因封面／章節頁
+    偏移而錯頁，曾實際造成誤判。
+    """
+    wanted_columns = [name for name in column_names]
+    wanted_rows = list(row_labels)
+
+    for sheet in sheets:
+        if list(sheet.series) != wanted_columns:
+            continue
+
+        if sheet.categories[: len(wanted_rows)] == wanted_rows:
+            return sheet
+
+    return None
 
 
 def _match_external_sheet(
@@ -333,6 +439,10 @@ def verify(
 
     for slide_number, slide in enumerate(presentation.slides, start=1):
         for shape in slide.shapes:
+            if getattr(shape, "has_table", False):
+                _verify_table_shape(shape, slide_number, external, report)
+                continue
+
             if not shape.has_chart:
                 continue
 
@@ -367,61 +477,143 @@ def verify(
                         "在稽核 Excel 中找不到對應工作表，僅比對①②"
                     )
 
-            plot = chart.plots[0]
+            # 走遍**所有** plot，不只 plots[0]。雙軸圖是兩個 plot
+            #（c:barChart + c:lineChart），只看第一個會讓折線那一軸的系列
+            # 靜默漏驗——而次軸系列正是量級差異大、最需要核對的那組。
+            series_ordinal = -1
 
-            for series in plot.series:
-                cache_values = [_to_float(value) for value in series.values]
+            for plot in chart.plots:
+                for series in plot.series:
+                    series_ordinal += 1
+                    cache_values = [_to_float(value) for value in series.values]
 
-                embedded_values = embedded.get(series.name)
+                    embedded_values = embedded.get(series.name)
 
-                if embedded_values is None:
-                    # 系列名稱對不上時，退回按順序取，避免整筆漏驗。
-                    ordered = list(embedded.values())
-                    index = list(plot.series).index(series)
-                    embedded_values = (
-                        ordered[index] if index < len(ordered) else []
-                    )
-                    report.warnings.append(
-                        f"slide {slide_number} 圖表 {title!r} 系列 "
-                        f"{series.name!r} 在內嵌工作簿中找不到同名欄，"
-                        "已按欄位順序比對"
-                    )
-
-                external_values = None
-
-                if external_sheet is not None:
-                    external_values = _external_values_for(
-                        external_sheet, series.name
-                    )
-
-                    if external_values is None:
+                    if embedded_values is None:
+                        # 系列名稱對不上時，退回按順序取，避免整筆漏驗。
+                        # 序號跨 plot 連續計算：內嵌 workbook 的欄序是
+                        # add_chart() 當下的系列順序，與 plot 切分無關。
+                        ordered = list(embedded.values())
+                        embedded_values = (
+                            ordered[series_ordinal]
+                            if series_ordinal < len(ordered)
+                            else []
+                        )
                         report.warnings.append(
                             f"slide {slide_number} 圖表 {title!r} 系列 "
-                            f"{series.name!r} 在稽核 Excel 工作表 "
-                            f"{external_sheet.sheet_name!r} 中找不到對應欄位"
+                            f"{series.name!r} 在內嵌工作簿中找不到同名欄，"
+                            "已按欄位順序比對"
                         )
 
-                # 內嵌工作簿的列數可能多於實際資料（python-pptx 不會裁掉
-                # 空白列），比對前先對齊長度。
-                embedded_values = _trim_to(embedded_values, len(cache_values))
+                    external_values = None
 
-                if external_values is not None:
-                    external_values = _trim_to(
-                        external_values, len(cache_values)
+                    if external_sheet is not None:
+                        external_values = _external_values_for(
+                            external_sheet, series.name
+                        )
+
+                        if external_values is None:
+                            report.warnings.append(
+                                f"slide {slide_number} 圖表 {title!r} 系列 "
+                                f"{series.name!r} 在稽核 Excel 工作表 "
+                                f"{external_sheet.sheet_name!r} 中找不到對應欄位"
+                            )
+
+                    # 內嵌工作簿的列數可能多於實際資料（python-pptx 不會裁掉
+                    # 空白列），比對前先對齊長度。
+                    embedded_values = _trim_to(
+                        embedded_values, len(cache_values)
                     )
 
-                report.comparisons.append(
-                    SeriesComparison(
-                        slide_number=slide_number,
-                        chart_title=title,
-                        series_name=series.name,
-                        chart_cache=cache_values,
-                        embedded=embedded_values,
-                        external=external_values,
+                    if external_values is not None:
+                        external_values = _trim_to(
+                            external_values, len(cache_values)
+                        )
+
+                    report.comparisons.append(
+                        SeriesComparison(
+                            slide_number=slide_number,
+                            chart_title=title,
+                            series_name=series.name,
+                            chart_cache=cache_values,
+                            embedded=embedded_values,
+                            external=external_values,
+                        )
                     )
-                )
 
     return report
+
+
+def _verify_table_shape(
+    shape: Any,
+    slide_number: int,
+    external: Sequence[ExternalSheet],
+    report: VerificationReport,
+) -> None:
+    """
+    比對原生表格的儲存格文字與稽核 Excel。
+
+    表格沒有內嵌 workbook，因此這裡只有兩份副本可比。少一份副本不等於
+    可以不驗——表格上的數字一樣是主管會照著唸的數字。
+    """
+    column_names, row_labels, values = read_table_shape(shape)
+
+    if not column_names:
+        report.warnings.append(
+            f"slide {slide_number} 的表格沒有可解析的表頭，未納入比對"
+        )
+        return
+
+    title = f"(原生表格 @slide {slide_number})"
+    sheet = None
+
+    if external:
+        sheet = _match_external_sheet_for_table(
+            external, column_names, row_labels
+        )
+
+        if sheet is None:
+            report.warnings.append(
+                f"slide {slide_number} 的原生表格在稽核 Excel 中"
+                "找不到內容相符的工作表，無法比對"
+            )
+    else:
+        report.warnings.append(
+            f"slide {slide_number} 的原生表格沒有內嵌工作簿可比對，"
+            "需提供稽核 Excel 才能驗證其數值"
+        )
+
+    for name in column_names:
+        cell_values = values[name]
+        external_values = None
+
+        if sheet is not None:
+            external_values = sheet.series.get(name)
+
+            if external_values is not None:
+                # 儲存格文字是四捨五入後的顯示值（如 15.6369% → "15.64%"），
+                # 直接跟稽核 Excel 的完整精度比一定不等。所以把稽核值套用
+                # **同一套** format_value 規則再解析回來，比的才是同一個
+                # 數字的同一種寫法。若差異大於顯示精度，這樣仍然抓得到。
+                external_values = [
+                    table_builder.parse_value(
+                        table_builder.format_value(value, sheet.unit),
+                        sheet.unit,
+                    )
+                    for value in _trim_to(external_values, len(cell_values))
+                ]
+
+        report.comparisons.append(
+            SeriesComparison(
+                slide_number=slide_number,
+                chart_title=title,
+                series_name=name,
+                chart_cache=cell_values,
+                embedded=None,
+                external=external_values,
+                is_table=True,
+            )
+        )
 
 
 def _external_values_for(
@@ -469,11 +661,18 @@ def print_report(report: VerificationReport) -> None:
 
     for comparison in report.comparisons:
         status = "PASS" if comparison.passed else "FAIL"
-        external_note = (
-            "含外部稽核 Excel"
-            if comparison.external is not None
-            else "未比對外部 Excel"
-        )
+        if comparison.is_table:
+            external_note = (
+                "原生表格：儲存格文字 ↔ 稽核 Excel"
+                if comparison.external is not None
+                else "原生表格：無可比對副本"
+            )
+        else:
+            external_note = (
+                "含外部稽核 Excel"
+                if comparison.external is not None
+                else "未比對外部 Excel"
+            )
 
         print(
             f"[{status}] slide {comparison.slide_number} "
