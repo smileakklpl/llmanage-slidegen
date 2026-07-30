@@ -106,10 +106,16 @@
 
 ### 下一步（依「離可 Demo 最近」排序）
 
-- [ ] **A1 真實 API 未實跑**（commit message 已標明）。provider 抽換與 Gemma 降級路徑
-      都寫好且有測試，但至今所有端到端都走 `--fake-llm`。這件事會決定後續所有 prompt
-      的調整方向——現在的敘事與選圖都是 blueprint 寫死的，模型接上後章節數、圖型選擇、
-      文案品質都會變
+- [x] **A1 真實 API 已實跑**（2026-07-30）。Gemini（`gemini-3.5-flash-lite` 敘事 /
+      `gemini-3.1-flash-lite` 章節與圖表），端到端產出 `outputs/real_llm/deck.pptx`：
+      20 投影片 / 8 章節 / 8 圖表，敘事 8 頁全數一次過規則檢查，T1 71/71 PASS。
+      首跑抓到三個假 LLM 永遠測不到的契約問題（schema 沒送進 prompt → 模型把
+      `sections` 猜成 `pages`；非必填欄位的 null 被當型別錯誤；429 限流沒有重試），
+      已修並有 `tests/test_llm_client_contract.py` 守著。
+      註：免費額度是 per-model per-day（約 20 次），全流程要靠 per-stage 模型路由分散
+- [ ] **真實模型的 prompt 迭代**。目前敘事品質已可用，但仍有 selector 語意誤用
+      （把 `max` 用在「何時」的位置）。`narrative_writer._label_hints()` 已針對
+      民國年月代碼與 `max_category` 補了提示，實測有效；剩下的要靠 `evalh/` 跑 N 次看比率
 - [ ] **F4 自動寄送完全未做**。`src/` 下沒有 mailer 模組，也沒有 MailHog 的
       docker compose。做起來最快、Demo 效果明顯
 - [ ] **F5.3 非同步 job API 未做**。`src/backend/app/main.py` 只有 `/health`、`/ready`
@@ -152,7 +158,7 @@
 
 | 測試 | 結果 | 備註 |
 |:---|:---|:---|
-| root `pytest` | ✅ 180 passed | 前一輪為 29 |
+| root `pytest` | ✅ 202 passed | 前一輪為 180；新增 `test_deck_style.py`（14）與 `test_llm_client_contract.py`（8） |
 | `src/backend` `pytest` | ✅ 66 passed | 前一輪為 36；PDF／影像 2 支因本機缺 reportlab／pymupdf 無法 collect，與本次改動無關 |
 | `scripts/verify_all.py` | ✅ 8 項全綠 | 含分層依賴、golden 辨識器、FR-1.5 開關、writer fixture 漂移 |
 
@@ -165,7 +171,23 @@
 | `fsc_113_114/` | ✅ exit 0，T1 22/22 PASS | 20 投影片 / 8 章節 |
 | `source/附件四` | ✅ exit 0，T1 全 PASS | 20 投影片；13 指標被防呆擋下（單年資料，符合預期） |
 | `--sample`（回歸） | ✅ exit 0，T1 PASS | 8 投影片 / 2 章節 |
-| 真實 LLM | ⏳ 尚未執行 | 下一步 |
+
+（含結論頁後，`fsc_114_workbook.xlsx` 的投影片數由 20 增為 21。）
+
+### 端到端（真實 LLM，Gemini）
+
+| 輸入 | 結果 | 產出 |
+|:---|:---|:---|
+| `fsc_114_workbook.xlsx` | ✅ exit 0，T1 71/71 PASS | `outputs/real_llm/`：20 投影片 / 8 章節 / 8 圖表 |
+
+模型路由：`LLM_MODEL_INTENT` 與 `LLM_MODEL_CHART` 走 `gemini-3.1-flash-lite`，
+`LLM_MODEL_WRITER` 走 `gemini-3.5-flash-lite`（免費額度是 per-model per-day，
+分散才跑得完）。8 頁敘事全數第一次就通過規則檢查，無退件。
+
+註：`outputs/real_llm/` 產出於 `narrative_writer._label_hints()` 與正文
+`normAutofit` 兩項改動之前，因此該檔仍有一句「規模於 60,485,911 達到波段高點」
+（selector 語意誤用）。改動後另跑 4 頁小樣驗證，模型已正確寫出
+「114 年 12 月」與 `max_category`。
 
 ### 產出簡報結構（`outputs/full_deck/deck.pptx`）
 

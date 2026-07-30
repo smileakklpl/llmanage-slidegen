@@ -1,0 +1,68 @@
+{
+  "reviews": [
+    {
+      "page_number": 4,
+      "section_title": "信用卡市場年度回顧與展望",
+      "status": "APPROVED",
+      "rule_issues": [],
+      "semantic_issues": [],
+      "target_agent": null
+    },
+    {
+      "page_number": 6,
+      "section_title": "市場整體規模與成長趨勢",
+      "status": "APPROVED",
+      "rule_issues": [],
+      "semantic_issues": [],
+      "target_agent": null
+    },
+    {
+      "page_number": 8,
+      "section_title": "同業競爭版圖分析",
+      "status": "APPROVED",
+      "rule_issues": [],
+      "semantic_issues": [],
+      "target_agent": null
+    },
+    {
+      "page_number": 10,
+      "section_title": "客戶活躍度指標檢視",
+      "status": "APPROVED",
+      "rule_issues": [],
+      "semantic_issues": [],
+      "target_agent": null
+    },
+    {
+      "page_number": 12,
+      "section_title": "獲利能力結構分析",
+      "status": "APPROVED",
+      "rule_issues": [],
+      "semantic_issues": [],
+      "target_agent": null
+    },
+    {
+      "page_number": 14,
+      "section_title": "風險體質與資產品質監控",
+      "status": "APPROVED",
+      "rule_issues": [],
+      "semantic_issues": [],
+      "target_agent": null
+    },
+    {
+      "page_number": 16,
+      "section_title": "市場未來趨勢預測",
+      "status": "APPROVED",
+      "rule_issues": [],
+      "semantic_issues": [],
+      "target_agent": null
+    },
+    {
+      "page_number": 18,
+      "section_title": "策略行動建議",
+      "status": "APPROVED",
+      "rule_issues": [],
+      "semantic_issues": [],
+      "target_agent": null
+    }
+  ]
+}

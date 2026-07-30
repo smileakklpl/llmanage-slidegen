@@ -1,0 +1,33 @@
+{
+  "pptx": "../outputs/real_llm/deck.pptx",
+  "xlsx": "../outputs/real_llm/deck_data.xlsx",
+  "page_count": 8,
+  "slide_count": 20,
+  "divider_count": 8,
+  "chapters": [
+    "Executive Summary",
+    "市場整體概況",
+    "同業成長及競爭分析",
+    "客戶活躍度",
+    "獲利能力",
+    "風險與警訊",
+    "未來趨勢推測",
+    "對台新的策略建議"
+  ],
+  "chart_count": 8,
+  "warnings": [
+    "已移除模板中 4 張示範頁（保留首頁）"
+  ],
+  "placeholder_errors": {},
+  "sheet_names": [
+    "索引",
+    "P.4_市場整體（各期）",
+    "P.6_市場整體（各期）",
+    "P.8_流通卡數 占比 Top 10",
+    "P.10_有效卡數 占比 Top 10",
+    "P.12_循環信用餘額 占比 Top 10",
+    "P.14_當月轉銷呆帳金額 占比 Top 10",
+    "P.16_市場整體（各期） 趨勢外推",
+    "P.18_當月簽帳金額 Top 10"
+  ]
+}

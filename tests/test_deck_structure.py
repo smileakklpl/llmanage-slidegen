@@ -181,10 +181,11 @@ def test_deck_has_cover_agenda_dividers_and_closing(tmp_path):
         deck_title="信用卡市場分析",
     )
 
-    # 封面 1 + 目錄 1 + 章節頁 2 + 內容頁 2 + 結尾 1
-    assert report.slide_count == 7
+    # 封面 1 + 目錄 1 + 章節頁 2 + 內容頁 2 + 結論 1 + 結尾 1
+    assert report.slide_count == 8
     assert report.page_count == 2
     assert report.divider_count == 2
+    assert report.conclusion_page is True
     assert report.chapters == ["市場整體概況", "風險與警訊"]
 
 
@@ -245,7 +246,8 @@ def test_dividers_use_the_template_section_layout(tmp_path):
     divider = presentation.slides[2]
 
     assert divider.slide_layout.name == renderer.SECTION_LAYOUT_NAME
-    assert divider.shapes.title.text_frame.text == "市場整體概況"
+    # 章節頁除了章節名，還帶一行 CHAPTER 編號（對齊附件三）。
+    assert divider.shapes.title.text_frame.text == "CHAPTER 01\n市場整體概況"
 
 
 @pytest.mark.skipif(not TEMPLATE.exists(), reason="找不到 source/template.pptx")
@@ -273,11 +275,13 @@ def test_agenda_and_closing_can_be_turned_off(tmp_path):
         _store(),
         output_path=output,
         include_agenda=False,
+        include_conclusion=False,
         include_closing=False,
     )
 
     # 封面 1 + 章節頁 1 + 內容頁 1
     assert report.slide_count == 3
+    assert report.conclusion_page is False
 
 
 @pytest.mark.skipif(not TEMPLATE.exists(), reason="找不到 source/template.pptx")
@@ -292,5 +296,6 @@ def test_pages_without_chapter_get_no_divider(tmp_path):
 
     assert report.divider_count == 0
     assert report.chapters == []
-    # 封面 1 + 內容頁 1 + 結尾 1（無章節即無目錄）
+    # 封面 1 + 內容頁 1 + 結尾 1（無章節即無目錄，也無結論頁可收）
     assert report.slide_count == 3
+    assert report.conclusion_page is False

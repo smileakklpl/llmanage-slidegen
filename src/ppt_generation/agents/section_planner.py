@@ -47,6 +47,14 @@ DEFAULT_CHAPTERS: tuple[str, ...] = (
 #: writer 不得自行推測數值。這裡記下對應關係供 prompt 使用。
 FORECAST_CHAPTER = "未來趨勢推測"
 
+#: 結論章節名稱。renderer 會在所有內容頁之後加一張結論頁，把每個章節的
+#: 結論句收攏成一頁；這裡定義它的標題，讓目錄與頁面標題共用同一個字串。
+#:
+#: 為什麼不放進 DEFAULT_CHAPTERS：那組章節是 FR-2.6 明訂的骨架（附件二），
+#: 動它等於改規格。結論是**簡報結構**的一部分，不是資料章節——它不引用
+#: 新指標，只回收既有頁面的結論，所以由 renderer 確定性產生。
+CONCLUSION_CHAPTER = "結論與後續行動"
+
 SYSTEM_PROMPT = """你是一位金融業管理顧問，負責規劃給銀行高階主管閱讀的簡報骨架。
 
 任務：依使用者需求與可用指標目錄，規劃簡報的內容頁。
@@ -64,6 +72,13 @@ SYSTEM_PROMPT = """你是一位金融業管理顧問，負責規劃給銀行高�
 8. 「{forecast_chapter}」章節的頁面只能引用 forecast 類指標
    （metric_key 結尾為 .forecast）；若目錄中沒有這類指標，就不要規劃此章節。
 9. 撰寫風格為商業洞察導向（類 McKinsey / BCG 顧問報告），而非數字整理。
+10. **最後一個章節必須是收斂性的結論章節**（預設骨架中的
+    「{closing_chapter}」即扮演此角色）：它不再引入新主題，而是把前面各章
+    的發現收成「所以我們該做什麼」。這一章的 intent 要寫明它要回答的
+    決策問題，不要只寫「呈現某指標」。
+11. 每一頁的 intent 都要寫成一個問句或一句結論主張（例如「市場成長的
+    驅動力來自簽帳金額而非發卡量」），不要寫成「展示 X 指標的趨勢」——
+    intent 是下游撰寫敘事的依據，寫成資料描述會得到資料描述的文案。
 
 只輸出 JSON，不要加任何說明文字。"""
 
@@ -102,7 +117,12 @@ SECTION_PLAN_SCHEMA: dict[str, Any] = {
             },
         },
     },
-    "required": ["status", "sections"],
+    # 只有 status 是必填。``sections`` 刻意不列入必填：模型回
+    # NEEDS_CONFIRMATION 時本來就沒有章節可給，強制要求它同時附一個空陣列
+    # 會讓每次「需要確認」都變成 schema 驗證失敗、重試三次後整條管線中斷
+    # （實測 gemini-3.6-flash 就是這樣掛掉的）。缺欄位由下游視為空清單，
+    # 而 READY 但無章節的情況已有另一道防呆會轉回 NEEDS_CONFIRMATION。
+    "required": ["status"],
 }
 
 
@@ -322,6 +342,7 @@ def plan_sections(
             max_sections=MAX_SECTIONS,
             default_chapters="、".join(DEFAULT_CHAPTERS),
             forecast_chapter=FORECAST_CHAPTER,
+            closing_chapter=DEFAULT_CHAPTERS[-1],
         ),
         stage="intent",
     )

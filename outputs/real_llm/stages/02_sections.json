@@ -1,0 +1,80 @@
+{
+  "status": "READY",
+  "sections": [
+    {
+      "title": "信用卡市場年度回顧與展望",
+      "chapter": "Executive Summary",
+      "intent": "市場整體規模與成長動能是否足以支撐本年度業務目標？",
+      "suggested_metric_keys": [
+        "market_by_period.value",
+        "market_by_period.period_growth"
+      ],
+      "page_number": 4
+    },
+    {
+      "title": "市場整體規模與成長趨勢",
+      "chapter": "市場整體概況",
+      "intent": "信用卡市場各項業務指標的總體成長路徑為何？",
+      "suggested_metric_keys": [
+        "market_by_period.value"
+      ],
+      "page_number": 6
+    },
+    {
+      "title": "同業競爭版圖分析",
+      "chapter": "同業成長及競爭分析",
+      "intent": "台新在流通卡數與簽帳金額的市場份額中，處於何種競爭位階？",
+      "suggested_metric_keys": [
+        "流通卡數.share.top10",
+        "當月簽帳金額.share.top10"
+      ],
+      "page_number": 8
+    },
+    {
+      "title": "客戶活躍度指標檢視",
+      "chapter": "客戶活躍度",
+      "intent": "從有效卡數的市場占比來看，台新的客戶黏著度是否優於同業？",
+      "suggested_metric_keys": [
+        "有效卡數.share.top10"
+      ],
+      "page_number": 10
+    },
+    {
+      "title": "獲利能力結構分析",
+      "chapter": "獲利能力",
+      "intent": "循環信用餘額與分期付款餘額的市場分布，反映了台新在利息收入上的競爭優勢嗎？",
+      "suggested_metric_keys": [
+        "循環信用餘額.share.top10",
+        "未到期分期付款餘額.share.top10"
+      ],
+      "page_number": 12
+    },
+    {
+      "title": "風險體質與資產品質監控",
+      "chapter": "風險與警訊",
+      "intent": "台新的轉銷呆帳金額占比是否顯示出潛在的信用風險惡化跡象？",
+      "suggested_metric_keys": [
+        "當月轉銷呆帳金額.share.top10"
+      ],
+      "page_number": 14
+    },
+    {
+      "title": "市場未來趨勢預測",
+      "chapter": "未來趨勢推測",
+      "intent": "基於當前市場數據，未來各項業務指標的預期走勢為何？",
+      "suggested_metric_keys": [
+        "market_by_period.forecast"
+      ],
+      "page_number": 16
+    },
+    {
+      "title": "策略行動建議",
+      "chapter": "對台新的策略建議",
+      "intent": "綜合競爭力與風險分析，台新應優先採取何種策略以提升市場份額並優化獲利結構？",
+      "suggested_metric_keys": [],
+      "page_number": 18
+    }
+  ],
+  "question_to_user": null,
+  "dropped_metric_keys": {}
+}

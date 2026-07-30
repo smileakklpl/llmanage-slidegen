@@ -615,7 +615,8 @@ def _make_store_aware_fakes(store: Any):
                         "title": page["title"],
                         "chapter": page["chapter"],
                         "intent": (
-                            f"呈現 {store.get(page['metric_key']).name}"
+                            f"回答 {store.get(page['metric_key']).name}"
+                            "的分佈是否已形成穩定的競爭格局"
                         ),
                         "suggested_metric_keys": [page["metric_key"]],
                     }
@@ -636,13 +637,24 @@ def _make_store_aware_fakes(store: Any):
             metric = store.get(key)
             series = metric.series_names[-1]
 
+            def cite(selector: str) -> str:
+                return f"{{{{{key}|{series}|{selector}}}}}"
+
             # 數字一律走佔位符，由 renderer 代入——與真實模型受同一條規則約束。
+            # 條數與字數也刻意寫到 narrative_writer 的下限之上：假 LLM 若寫得比
+            # 規則允許的更短，端到端就會在敘事階段掉頁，測不到 render 與比對。
             return {
-                "headline": f"{metric.name}呈現明顯的業者集中態勢",
+                "headline": (
+                    f"{metric.name}呈現明顯的業者集中態勢，"
+                    "規模差距短期內難以收斂"
+                ),
                 "bullets": [
-                    f"領先者 {{{{{key}|{series}|max_category}}}} 達 "
-                    f"{{{{{key}|{series}|max}}}}",
-                    f"末位者僅 {{{{{key}|{series}|min}}}}",
+                    f"領先者 {cite('max_category')} 達 {cite('max')}，"
+                    "明顯拉開與其餘業者的距離，反映規模效應仍在累積",
+                    f"末位業者僅 {cite('min')}，與領先者之間的落差顯示"
+                    "中小型業者在此指標上缺乏可持續的規模優勢",
+                    f"全體平均為 {cite('avg')}，位於平均之下的業者"
+                    "需重新檢視資源配置是否與市場競爭強度相稱",
                 ],
             }
 
@@ -685,21 +697,27 @@ def _make_store_aware_fakes(store: Any):
 def _fake_narrative(prompt: str) -> dict[str, Any]:
     if "market_cards.yoy" in prompt:
         return {
-            "headline": "年增動能逐季轉強，成長並未趨緩",
+            "headline": "年增動能逐季轉強，成長並未出現趨緩跡象",
             "bullets": [
-                "年增率由 {{market_cards.yoy|2026 vs 2025|first}} 提升至 "
-                "{{market_cards.yoy|2026 vs 2025|latest}}",
-                "全年平均年增 {{market_cards.yoy|2026 vs 2025|avg}}",
+                "年增率由年初 {{market_cards.yoy|2026 vs 2025|first}} 提升至 "
+                "{{market_cards.yoy|2026 vs 2025|latest}}，動能逐季累積",
+                "全年平均年增 {{market_cards.yoy|2026 vs 2025|avg}}，"
+                "高於市場對成熟市場的一般預期，滲透率仍有推進空間",
+                "高點落在 {{market_cards.yoy|2026 vs 2025|max_category}}，"
+                "達 {{market_cards.yoy|2026 vs 2025|max}}，反映季節性促銷效果",
             ],
         }
 
     if "bank_cards.share" in prompt:
         return {
-            "headline": "市場集中度偏高，龍頭優勢穩固",
+            "headline": "市場集中度偏高，龍頭業者優勢短期穩固",
             "bullets": [
                 "龍頭 {{bank_cards.share|流通卡數|max_category}} 市占達 "
-                "{{bank_cards.share|流通卡數|max}}",
-                "末位業者市占僅 {{bank_cards.share|流通卡數|min}}",
+                "{{bank_cards.share|流通卡數|max}}，領先幅度短期難被追上",
+                "末位業者市占僅 {{bank_cards.share|流通卡數|min}}，"
+                "在缺乏差異化定位的情況下更難累積規模",
+                "前段業者合計掌握主要份額，後段業者若要突圍，"
+                "需從單卡消費力而非發卡量切入",
             ],
         }
 
@@ -707,9 +725,11 @@ def _fake_narrative(prompt: str) -> dict[str, Any]:
         "headline": "市場規模穩健擴張，全年未見動能衰退",
         "bullets": [
             "流通卡數自年初 {{market_cards.value|2026年|first}} 增至 "
-            "{{market_cards.value|2026年|latest}}",
+            "{{market_cards.value|2026年|latest}}，全年維持正成長",
             "全年高點 {{market_cards.value|2026年|max}} 出現於 "
-            "{{market_cards.value|2026年|max_category}}",
+            "{{market_cards.value|2026年|max_category}}，之後未見明顯回落",
+            "全年平均為 {{market_cards.value|2026年|avg}}，"
+            "顯示規模擴張是全年常態而非單月異常",
         ],
     }
 
@@ -1166,6 +1186,7 @@ def run(
         f"封面 1 + 目錄 {1 if render_report.chapters else 0}"
         f" + 章節頁 {render_report.divider_count}"
         f" + 內容頁 {render_report.page_count}"
+        f" + 結論 {1 if render_report.conclusion_page else 0}"
         f" + 結尾 1，圖表 {render_report.chart_count} 張）"
     )
 

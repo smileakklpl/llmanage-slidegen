@@ -366,6 +366,51 @@ python -m ppt_generation.verification.verify_chart_consistency \
 
 `reviewer.py` 會攔截沒用佔位符的裸數字。年份、季度、Top N 這類結構性數字屬白名單。
 
+### 視覺風格與「黃色重點」
+
+顏色、字體、幾何常數集中在 `output/theme.py`，對齊 `source/附件三` 的版面
+語彙（實測解析結果寫在該檔的 docstring 裡）。要用顏色或字級一律從那裡取，
+不要在各模組硬編——同一份簡報出現兩種灰、兩種字級是最沒必要的瑕疵。
+
+內容頁的元件順序：
+
+```
+標題（左上、22pt、深灰 1A1A1A）
+重點訊息帶（淡黃底 + 左緣純黃標示條，放該頁 headline，前綴 ◆）
+原生圖表（左 60%）              要點條列（右 40%，前綴 ▸，項目符號用台新紅）
+頁尾註記（圖表頁：右鍵編輯資料／表格頁：指向稽核 Excel）
+```
+
+黃色的分工：
+
+- **重點訊息帶**＝該頁結論句的載體（附件三每頁都有這條）
+- **`a:highlight` 螢光標示**＝只標由 MetricStore 代入的數值
+
+第二項同時是可視化的稽核線索：螢光筆標到的每個字元都來自查表，不是 LLM
+寫出來的；沒被標到的數字就是漏網之魚。實作走
+`placeholders.render_segments()`（與 `render_text()` 共用同一組查表函式，
+所以兩者串起來逐字相同），再由 `renderer._write_segments()` 逐段建立 run——
+黃色標示是 run 級屬性，整段套用會把敘事文字也一起塗黃。
+
+台新紅 `C12026` 保留給品牌與結構性強調（`CHAPTER 0N` 編號、章節頁底線、
+項目符號），不與黃色搶。
+
+### 敘事的份量下限
+
+`narrative_writer` 除了擋裸數字，也擋「寫太少」：條列數 3–5 條，
+headline 與每條要點都有**代入數值後**的字數區間
+（`MIN_HEADLINE_CHARS` / `MIN_BULLET_CHARS` / `MIN_TOTAL_CHARS`）。
+
+為什麼以代入後計字：`{{cards.value|流通卡數|latest}}` 有 30 個字元，在簡報上
+只佔「6,049」五個字。用原文計字會讓一句「卡數 {{…}}」被當成長句放行，
+實際頁面上只有七個字，右半邊空掉一大塊。
+
+另外要求整頁至少引用一個佔位符——一頁完全沒有指標引用，文字與圖表之間
+就沒有任何可驗證的連結。
+
+`renderer` 這一側還有第二道防線：正文文字框設 `normAutofit`
+（溢出時縮小文字），寧可字小一點也不要讓文字流到投影片外面被裁掉。
+
 ### 「內嵌工作簿」不是「連結外部 Excel」
 
 右鍵「編輯資料」開啟的是 `.pptx` 內部的一份工作簿，不是外部檔案連結。
@@ -439,12 +484,45 @@ plan = section_planner.plan_sections("...", store, llm_call=fake_llm)
 
 | 項目 | 狀態 |
 |---|---|
-| 真實 LLM API 串接 | 契約與防呆都驗證過，但用的是注入假回應。真實模型能否穩定產出合規敘事需實測 |
+| 真實 LLM API 串接 | **已實跑**（Gemini `gemini-3.5-flash-lite` / `gemini-3.1-flash-lite`，8 頁全數一次過規則檢查，T1 71/71 PASS）。首跑抓到三個只有真實模型才會浮現的問題，見下方「真實模型實跑抓到的三件事」 |
 | 敘事平行化 | `write_narratives()` 目前序列執行，未依 `LLM_MAX_PARALLEL` 平行化 |
 | `orchestrator.py` | 串接全流程、處理章節確認中斷與退件重試，待實作 |
 | 散點圖資料點標籤 | 銀行名稱標籤需操作 `c:dLbls` XML，`renderer.scatter_labels_pending()` 可查詢此限制 |
 | 雙軸圖的 PowerPoint 實機驗收 | XML 結構、軸配對、內嵌工作簿一致性都有測試守著，但「右鍵編輯資料」尚未在 PowerPoint 實機開啟確認 |
 | DeckSpec / Refresh（FR-A2） | 尚未實作 |
+| per-stage 模型的能力降級 | `config._capability_defaults()` 只看 `LLM_MODEL_DEFAULT` 推斷 tool/json/system 模式。若把 Gemma 掛在單一 stage、default 仍是 OpenAI 系模型，那個 stage 不會自動降級，需手動設 `LLM_TOOL_MODE` / `LLM_JSON_MODE` / `LLM_SYSTEM_MODE` |
+
+---
+
+## 真實模型實跑抓到的三件事
+
+全部是走假 LLM 永遠不會發生的——假回應天生符合 schema、不會限流。
+現在有 `tests/test_llm_client_contract.py` 守著，換模型時不必再用真實額度
+重新發現一次。
+
+1. **schema 必須送進 prompt。** `response_format={"type":"json_object"}` 只保證
+   「是一個 JSON」，**不保證欄位名稱**。實測模型把 `sections` 寫成 `pages`，
+   結構完全正確但驗證後成了空清單，整份簡報靜默少了十頁。要求模型滿足一份
+   它沒看過的 schema，本來就不成立——現在 schema 一律附在 prompt 裡，
+   與 `json_mode` 無關。
+2. **非必填欄位給 null 等同沒給。** 模型很常把不適用的欄位明確寫成
+   `"question_to_user": null`。把它當型別錯誤，會讓一個完全合法的回應重試
+   三次後中斷管線。同理 `SECTION_PLAN_SCHEMA` 的 `sections` 已移出必填：
+   回 `NEEDS_CONFIRMATION` 時本來就沒有章節可給。
+3. **限流一定要重試。** `_with_retry()` 原本只重試 schema 與 JSON 解析失敗，
+   429 會直接往上拋。限流是現場 Demo 最容易遇到的失敗，一次就讓簡報生不
+   出來是不能接受的。現在依 `_is_transient()` 判斷（429/408/5xx、逾時、
+   throttling），並優先照上游給的 retry-after 秒數等待。
+
+實跑時的 per-stage 模型路由（免費額度是 per-model per-day，分散開才跑得完）：
+
+```bash
+export LLM_PROVIDER=google
+export LLM_MODEL_DEFAULT=gemini-3.5-flash-lite
+export LLM_MODEL_INTENT=gemini-3.1-flash-lite   # 章節規劃
+export LLM_MODEL_CHART=gemini-3.1-flash-lite    # 圖表決策
+export LLM_MODEL_WRITER=gemini-3.5-flash-lite   # 敘事
+```
 
 ---
 
@@ -480,18 +558,25 @@ plan = section_planner.plan_sections("...", store, llm_call=fake_llm)
 
 ```
 封面（模板首頁，標題可用 --title 覆寫）
-目錄（由章節清單產生，不另外撰寫）
-├─ 章節分隔頁：Executive Summary
+目錄（由章節清單產生，不另外撰寫；最後一項是結論頁）
+├─ 章節分隔頁：CHAPTER 01 Executive Summary
 │  └─ 內容頁…
-├─ 章節分隔頁：市場整體概況
+├─ 章節分隔頁：CHAPTER 02 市場整體概況
 │  └─ 內容頁…
 …
+結論頁（每個章節一行，由該章首頁的 headline 收攏而成）
 結尾頁
 ```
 
 章節來自 `SectionPlan.chapter`；`chapter` 變化時自動插入分隔頁，為 None 的
 頁面不產生分隔頁。預設章節骨架見 `section_planner.DEFAULT_CHAPTERS`（FR-2.6
 的八章節）。
+
+**結論頁**（`add_conclusion_page()`，標題見 `section_planner.CONCLUSION_CHAPTER`）
+是確定性產生的：每個章節取其首頁的 headline，不另外呼叫 LLM 重寫。多一次
+LLM 呼叫就多一次「結論與內文不一致」的機會，而且每一行都帶 `（P.N）`
+指回出處，主管問「這句從哪來的」答案就在簡報裡。沒有章節時不產這一頁——
+一張收不到任何結論的空白頁比沒有這一頁更糟。
 
 `renderer.assign_page_numbers()` 把每頁的 `page_number` 換成**實際投影片
 序號**。這件事必須在圖表決策之前做完，而且頁面因失敗被剔除後要再算一次：

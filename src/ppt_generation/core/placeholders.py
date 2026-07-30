@@ -336,6 +336,70 @@ def render_text(
     return rendered, errors
 
 
+@dataclass(frozen=True)
+class TextSegment:
+    """
+    代入後的一段文字，並記錄它是不是查表得來的值。
+
+    renderer 依 ``from_metric`` 決定要不要加黃色標示：被標到的每個字元
+    都來自 MetricStore，這讓「哪些字是系統算的、哪些是敘事」在簡報上
+    肉眼可辨，也是 FR-3.4 溯源的第一層線索。
+    """
+
+    text: str
+    from_metric: bool = False
+    #: 來源指標鍵（``from_metric`` 為 True 時才有值），供溯源使用。
+    metric_key: str | None = None
+
+
+def render_segments(
+    text: str,
+    store: MetricStore,
+    *,
+    strict: bool = False,
+) -> tuple[list[TextSegment], list[str]]:
+    """
+    與 :func:`render_text` 相同的代入邏輯，但保留「哪一段是值」的資訊。
+
+    Returns:
+        (片段清單, 錯誤訊息清單)。串接所有片段的 ``text`` 等於
+        :func:`render_text` 的輸出——兩者共用同一組解析與查表函式，
+        不會出現兩種代入結果。
+    """
+    segments: list[TextSegment] = []
+    errors: list[str] = []
+    cursor = 0
+
+    def push_literal(chunk: str) -> None:
+        if chunk:
+            segments.append(TextSegment(chunk))
+
+    for match in PLACEHOLDER_PATTERN.finditer(text):
+        push_literal(text[cursor : match.start()])
+        cursor = match.end()
+        raw = match.group(1)
+
+        try:
+            placeholder = parse_placeholder(raw)
+            value = resolve_placeholder(placeholder, store)
+        except PlaceholderError as error:
+            if strict:
+                raise
+
+            errors.append(str(error))
+            # 代入失敗時保留原佔位符，讓錯誤在簡報上看得見而不是靜默消失。
+            push_literal(match.group(0))
+            continue
+
+        segments.append(
+            TextSegment(value, from_metric=True, metric_key=placeholder.metric_key)
+        )
+
+    push_literal(text[cursor:])
+
+    return segments, errors
+
+
 # ---------------------------------------------------------------------------
 # 裸數字偵測（Reviewer 規則層）
 # ---------------------------------------------------------------------------

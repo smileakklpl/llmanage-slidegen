@@ -2,7 +2,7 @@
   "pptx": "../outputs/full_deck/deck.pptx",
   "xlsx": "../outputs/full_deck/deck_data.xlsx",
   "page_count": 9,
-  "slide_count": 20,
+  "slide_count": 21,
   "divider_count": 8,
   "chapters": [
     "Executive Summary",

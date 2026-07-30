@@ -22,6 +22,7 @@ from __future__ import annotations
 import json
 import logging
 import random
+import re
 import time
 from dataclasses import dataclass
 from typing import Any, Callable, Sequence
@@ -116,11 +117,22 @@ def validate_against_schema(
                     f"{path}: 缺少必填欄位 {required_key!r}"
                 )
 
+        required = set(schema.get("required", []))
+
         for key, value in payload.items():
             sub_schema = properties.get(key)
 
-            if sub_schema is not None:
-                validate_against_schema(value, sub_schema, f"{path}.{key}")
+            if sub_schema is None:
+                continue
+
+            # 非必填欄位給 null 等同於沒給。模型很常把「這次不適用的欄位」
+            # 明確寫成 null（實測 gemini 回 sections 時附帶
+            # ``"question_to_user": null``），若把它當成型別錯誤，
+            # 一個完全合法的回應會重試三次後讓整條管線中斷。
+            if value is None and key not in required:
+                continue
+
+            validate_against_schema(value, sub_schema, f"{path}.{key}")
 
     if expected_type == "array":
         item_schema = schema.get("items")
@@ -383,13 +395,75 @@ def _dispatch_backend(
     )
 
 
+def _is_transient(error: BaseException) -> bool:
+    """
+    判斷是否為值得重試的暫時性失敗（限流、逾時、上游 5xx）。
+
+    不 import openai 的例外型別來判斷：這個模組要能在只裝 boto3 的環境下
+    運作，而且 Bedrock 的 throttling 例外名稱又是另一套。改看類別名稱與
+    HTTP 狀態碼，兩邊都涵蓋得到。
+    """
+    name = type(error).__name__
+
+    if name in {
+        "RateLimitError",
+        "APITimeoutError",
+        "APIConnectionError",
+        "InternalServerError",
+        "APIStatusError",
+        "ThrottlingException",
+        "ServiceUnavailableError",
+        "ModelTimeoutException",
+    }:
+        return True
+
+    status = getattr(error, "status_code", None)
+
+    return status in {408, 409, 425, 429, 500, 502, 503, 504}
+
+
+def _retry_after(error: BaseException) -> float | None:
+    """
+    取出上游建議的等待秒數。
+
+    限流回應通常會附「幾秒後再試」，照它給的等，比我們自己猜指數退避
+    更快恢復也更不容易再次撞牆。
+    """
+    match = re.search(r"retry in (\d+(?:\.\d+)?)\s*s", str(error), re.IGNORECASE)
+
+    if match:
+        return float(match.group(1))
+
+    headers = getattr(getattr(error, "response", None), "headers", None)
+
+    if headers:
+        raw = headers.get("retry-after")
+
+        if raw:
+            try:
+                return float(raw)
+            except ValueError:
+                return None
+
+    return None
+
+
 def _with_retry(
     operation: Callable[[], Any],
     max_retries: int,
     backoff_base: float,
 ) -> Any:
-    """指數退避重試。schema 驗證失敗也重試，因為多半是模型當次輸出不穩。"""
-    last_error: Exception | None = None
+    """
+    指數退避重試。
+
+    重試三類失敗：
+    1. schema 驗證失敗——多半是模型當次輸出不穩
+    2. JSON 解析失敗——同上
+    3. 暫時性 API 失敗（429 限流、逾時、5xx）——**這類一定要重試**。
+       限流是現場 Demo 最容易遇到的失敗，一次 429 就讓整份簡報生不出來
+       是不能接受的；上游有給 retry-after 就照它等。
+    """
+    last_error: BaseException | None = None
 
     for attempt in range(max_retries + 1):
         try:
@@ -402,6 +476,21 @@ def _with_retry(
 
             # 加入抖動，避免多個平行呼叫同時重試造成尖峰。
             delay = backoff_base * (2**attempt) + random.uniform(0, 0.3)
+        except Exception as error:  # noqa: BLE001 - 需依內容判斷是否可重試
+            if not _is_transient(error):
+                raise
+
+            last_error = error
+
+            if attempt == max_retries:
+                break
+
+            suggested = _retry_after(error)
+            delay = (
+                suggested + random.uniform(0, 0.5)
+                if suggested is not None
+                else backoff_base * (2**attempt) + random.uniform(0, 0.3)
+            )
             logger.warning(
                 "LLM 呼叫失敗（第 %d/%d 次），%.1f 秒後重試：%s",
                 attempt + 1,
@@ -451,18 +540,28 @@ def complete_json(
     if system_prompt:
         messages.append({"role": "system", "content": system_prompt})
 
-    user_content = prompt
+    # schema 一律附在 prompt 裡，與 json_mode 無關。
+    #
+    # 原本只有 ``json_mode == "prompt"`` 時才附：native 模式下
+    # ``response_format={"type": "json_object"}`` 只保證「是一個 JSON」，
+    # **不保證欄位名稱**——模型看不到 schema 就只能從提示詞猜欄位名。
+    # 實測 gemini-3.6-flash 把 ``sections`` 猜成 ``pages``，結構完全正確
+    # 但驗證後成了空清單，整條管線靜默地少了十頁。要求模型滿足一份它
+    # 沒看過的 schema，本來就不成立。
+    instruction = (
+        "只輸出符合下列 JSON Schema 的 JSON。"
+        "欄位名稱必須與 schema 完全一致，不可改名或另創欄位。"
+    )
 
     if resolved.json_mode == "prompt":
-        # 沒有 response_format 可用時，改由提示詞約束輸出格式，
-        # 並附上 schema 讓模型知道要填哪些欄位。
-        user_content = (
-            f"{prompt}\n\n---\n\n"
-            "## 輸出要求\n"
-            "只輸出符合下列 JSON Schema 的 JSON，"
-            "不要加任何說明文字、不要用 markdown 圍籬。\n"
-            f"{json.dumps(schema, ensure_ascii=False, indent=2)}"
-        )
+        instruction += "不要加任何說明文字、不要用 markdown 圍籬。"
+
+    user_content = (
+        f"{prompt}\n\n---\n\n"
+        "## 輸出要求\n"
+        f"{instruction}\n"
+        f"{json.dumps(schema, ensure_ascii=False, indent=2)}"
+    )
 
     messages.append({"role": "user", "content": user_content})
 

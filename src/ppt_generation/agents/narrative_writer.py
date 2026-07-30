@@ -30,16 +30,43 @@ logger = logging.getLogger(__name__)
 
 MAX_NARRATIVE_ATTEMPTS = 3
 
-#: 每頁條列數上限。顧問簡報一頁三到四個要點最易閱讀。
-MAX_BULLETS = 4
+#: 每頁條列數上下限。顧問簡報一頁三到五個要點最易閱讀；
+#: 下限存在的理由是實測發現模型很願意只寫一兩句就交差，
+#: 那樣的頁面右半邊會空掉一大塊，看起來像沒做完。
+MAX_BULLETS = 5
+MIN_BULLETS = 3
 
-SYSTEM_PROMPT = """你是一位資深金融業管理顧問，為銀行高階主管撰寫簡報洞察文字。
+#: 代入數值後的字數區間。長度以**代入後**的字數計算——佔位符本身很長
+#: （``{{a.b|系列|latest}}`` 二十幾個字元），用原文計數會把一句短話誤判成長句。
+MIN_HEADLINE_CHARS = 16
+MAX_HEADLINE_CHARS = 60
+MIN_BULLET_CHARS = 30
+MAX_BULLET_CHARS = 120
+
+#: 整頁敘事（headline + 要點）代入後的總字數下限。
+#: 逐句都達標但整頁仍偏薄的情況存在，這條守住頁面的實際份量。
+MIN_TOTAL_CHARS = 140
+
+#: system prompt 分兩段拼接：前半段有 ``{}`` 需要代入上下限常數，
+#: 後半段含 ``{{metric_key}}`` 佔位符語法，經過 ``format`` 會被吃掉一層大括號。
+#: 分開處理比在字串裡寫 ``{{{{`` 好讀，也不會有人下次改動時踩到。
+_STYLE_RULES = """你是一位資深金融業管理顧問，為銀行高階主管撰寫簡報洞察文字。
 
 風格要求：
 - 商業洞察導向（類 McKinsey / BCG / Deloitte 報告），不是數字整理
-- 每個要點先講結論，再用數據支撐
+- 每個要點先講結論，再用數據支撐，最後點出「所以要注意什麼／該做什麼」
 - 語氣專業精簡，不使用驚嘆號與誇飾
 
+篇幅要求（會被程式檢查，不足會退回重寫）：
+- headline：一句結論，代入數值後約 20-55 字，必須是主張而非描述
+  好：「市場成長由簽帳金額驅動，發卡量已進入存量競爭」
+  壞：「本頁呈現流通卡數與簽帳金額的月度趨勢」
+- 要點：{min_bullets} 到 {max_bullets} 條，每條代入數值後 35-110 字，
+  是完整的句子而不是標籤，寫出比較、幅度或原因，不要只重述圖表讀數
+- 每條要點都要有實質資訊量：至少包含一個數據引用，或一個明確的判斷／建議
+"""
+
+_PLACEHOLDER_RULES = """
 **最重要的規則：你絕對不可以寫出任何實際數字。**
 所有數字必須以佔位符引用，格式為：
 
@@ -58,6 +85,11 @@ SYSTEM_PROMPT = """你是一位資深金融業管理顧問，為銀行高階主�
 年份、季度、Top N 這類結構性數字可以直接寫（如「2026 年」、「前 5 大」）。
 
 只輸出 JSON，不要加任何說明文字。"""
+
+SYSTEM_PROMPT = (
+    _STYLE_RULES.format(min_bullets=MIN_BULLETS, max_bullets=MAX_BULLETS)
+    + _PLACEHOLDER_RULES
+)
 
 NARRATIVE_SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -160,8 +192,18 @@ def build_prompt(
         "## 可引用的指標與佔位符（僅 metadata，無實際數值）",
         json.dumps(available, ensure_ascii=False, indent=2),
         "",
-        f"請撰寫 1 個 headline 與最多 {MAX_BULLETS} 個要點。",
+        (
+            f"請撰寫 1 個 headline 與 {MIN_BULLETS}-{MAX_BULLETS} 個要點。"
+            f"headline 代入數值後需 {MIN_HEADLINE_CHARS}-{MAX_HEADLINE_CHARS} 字，"
+            f"每個要點需 {MIN_BULLET_CHARS}-{MAX_BULLET_CHARS} 字。"
+            "字數不足會被程式退回重寫，請直接寫足。"
+        ),
     ]
+
+    label_hints = _label_hints(chart)
+
+    if label_hints:
+        parts.extend(["", "## 標籤讀法（寫錯會讓整句話語意不通）", *label_hints])
 
     if metric.notes:
         parts.extend(
@@ -182,6 +224,120 @@ def build_prompt(
         )
 
     return "\n".join(parts)
+
+
+def _rendered_length(text: str, store: MetricStore) -> int:
+    """
+    計算代入數值後的字數。
+
+    以代入後為準的理由：``{{cards.value|流通卡數|latest}}`` 有 30 個字元，
+    但在簡報上只佔「6,049」五個字。用原文計字會讓一句「卡數 {{…}}」被
+    當成長句放行，實際頁面上只有七個字。
+    """
+    rendered, _ = placeholders.render_text(text, store, strict=False)
+    return len(rendered.strip())
+
+
+def _check_length(
+    narrative: PageNarrative,
+    store: MetricStore,
+) -> list[str]:
+    """檢查敘事份量。長度是「文字夠不夠多」唯一能自動判斷的代理指標。"""
+    issues: list[str] = []
+    total = 0
+
+    if narrative.headline.strip():
+        length = _rendered_length(narrative.headline, store)
+        total += length
+
+        if length < MIN_HEADLINE_CHARS:
+            issues.append(
+                f"headline 代入數值後僅 {length} 字，"
+                f"低於下限 {MIN_HEADLINE_CHARS} 字，請寫成完整的結論句"
+            )
+        elif length > MAX_HEADLINE_CHARS:
+            issues.append(
+                f"headline 代入數值後 {length} 字，"
+                f"超過上限 {MAX_HEADLINE_CHARS} 字（重點訊息帶只有一行），"
+                "請濃縮成一句"
+            )
+
+    for index, bullet in enumerate(narrative.bullets, start=1):
+        length = _rendered_length(bullet, store)
+        total += length
+
+        if length < MIN_BULLET_CHARS:
+            issues.append(
+                f"第 {index} 個要點代入數值後僅 {length} 字，"
+                f"低於下限 {MIN_BULLET_CHARS} 字，"
+                "請補上比較基準、幅度或影響"
+            )
+        elif length > MAX_BULLET_CHARS:
+            issues.append(
+                f"第 {index} 個要點代入數值後 {length} 字，"
+                f"超過上限 {MAX_BULLET_CHARS} 字，請拆句或精簡"
+            )
+
+    if total and total < MIN_TOTAL_CHARS:
+        issues.append(
+            f"整頁敘事代入數值後共 {total} 字，"
+            f"低於下限 {MIN_TOTAL_CHARS} 字，頁面會顯得空洞"
+        )
+
+    return issues
+
+
+def _roc_label_text(label: str) -> str | None:
+    """把民國年月代碼轉成人看得懂的寫法：``11412`` → ``114 年 12 月``。"""
+    text = str(label).strip()
+
+    if not (text.isdigit() and len(text) == 5):
+        return None
+
+    month = int(text[3:])
+
+    if not 1 <= month <= 12:
+        return None
+
+    return f"{int(text[:3])} 年 {month} 月"
+
+
+def _label_hints(chart: ResolvedChart) -> list[str]:
+    """
+    提示 LLM 怎麼讀這一頁的標籤，避免寫出語意不通的句子。
+
+    兩個實測踩到的坑：
+
+    1. 金管會月報的期間欄名是民國年月代碼（``11412``）。直接照抄會在簡報上
+       出現「規模在 11412 達到波段高峰」，讀者要自己翻譯。
+    2. 「什麼時候達到高點」要用 ``max_category``（回傳類別名稱），
+       用 ``max`` 會把數值代進「時間」的位置——實測出現過
+       「市場規模於 60,485,911 達到波段高點」。
+    """
+    hints: list[str] = []
+    labels = [*chart.metric.categories, *chart.series_names]
+    samples = [
+        (str(label), readable)
+        for label in labels
+        if (readable := _roc_label_text(label)) is not None
+    ]
+
+    if samples:
+        listed = "、".join(
+            f"{code} 指「{readable}」" for code, readable in samples[:3]
+        )
+        hints.append(
+            f"- 期間標籤是民國年月代碼：{listed}。"
+            "文字中請寫成「114 年 12 月」這種讀得懂的形式，不要照抄代碼。"
+        )
+
+    hints.append(
+        "- 要講「何時」達到高／低點時，selector 用 max_category / min_category"
+        "（回傳類別名稱）；用 max / min 會把數值代進時間的位置，"
+        "產生「規模於 60,485,911 達到高點」這種句子。"
+    )
+
+    return hints
 
 
 def check_narrative(
@@ -214,6 +370,14 @@ def check_narrative(
             f"要點數 {len(narrative.bullets)} 超過上限 {MAX_BULLETS}"
         )
 
+    if narrative.bullets and len(narrative.bullets) < MIN_BULLETS:
+        issues.append(
+            f"要點數 {len(narrative.bullets)} 少於下限 {MIN_BULLETS}，"
+            "請補足到足以支撐一頁的資訊量"
+        )
+
+    issues.extend(_check_length(narrative, store))
+
     bare = placeholders.find_bare_numbers(text)
 
     if bare:
@@ -224,6 +388,13 @@ def check_narrative(
 
     allowed = allowed_metric_keys or set(store.computable_metric_keys())
     cited = placeholders.cited_metric_keys(text)
+
+    if not cited:
+        issues.append(
+            "整頁沒有引用任何指標佔位符。敘事必須以 "
+            "{{metric_key|series_name|selector}} 引用本頁指標，"
+            "否則這一頁的文字與圖表沒有任何可驗證的連結。"
+        )
 
     unknown = [key for key in cited if key not in allowed]
 

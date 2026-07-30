@@ -25,14 +25,17 @@ from pathlib import Path
 from typing import Any, Sequence
 
 from pptx import Presentation
+from pptx.enum.shapes import MSO_SHAPE
+from pptx.enum.text import MSO_AUTO_SIZE, PP_ALIGN
 from pptx.util import Emu, Inches, Pt
 
 from ..core import config, placeholders
 from ..agents.narrative_writer import PageNarrative
-from ..agents.section_planner import SectionPlan
+from ..agents.section_planner import CONCLUSION_CHAPTER, SectionPlan
 from ..charts.chart_builder import ScatterSpec
-from ..charts.chart_planner import VISUAL_SKILLS, ResolvedChart
+from ..charts.chart_planner import TABLE_LIKE_CHARTS, VISUAL_SKILLS, ResolvedChart
 from ..data.metric_store import MetricStore
+from . import theme
 
 
 logger = logging.getLogger(__name__)
@@ -91,6 +94,8 @@ class RenderReport:
     slide_count: int = 0
     #: 依序的章節名稱
     chapters: list[str] = field(default_factory=list)
+    #: 是否產出了結論頁
+    conclusion_page: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -205,13 +210,49 @@ def _find_layout(presentation: Presentation, name: str) -> Any:
 # ---------------------------------------------------------------------------
 # 文字填充
 # ---------------------------------------------------------------------------
+def _write_segments(
+    paragraph: Any,
+    segments: Sequence[placeholders.TextSegment],
+    *,
+    size: Any,
+    color: Any,
+    bold: bool = False,
+) -> None:
+    """
+    把代入後的片段寫成一連串 run，來自 MetricStore 的值加黃色標示。
+
+    一段文字為什麼要拆成多個 run：黃色標示是 run 級屬性。整段套用會把
+    敘事文字也一起標黃，那就不是「重點」而是塗滿；只標值的話，讀者一眼
+    看到的黃色字元恰好等於系統算出來的數字。
+    """
+    for segment in segments:
+        if not segment.text:
+            continue
+
+        run = paragraph.add_run()
+        run.text = segment.text
+
+        theme.apply_font(
+            run,
+            size=size,
+            bold=bold or segment.from_metric,
+            color=theme.TITLE_COLOR if segment.from_metric else color,
+            highlight=theme.HIGHLIGHT if segment.from_metric else None,
+        )
+
+
 def _fill_narrative(
     placeholder: Any,
     narrative: PageNarrative,
     store: MetricStore,
+    *,
+    include_headline: bool = False,
 ) -> list[str]:
     """
-    把敘事填入文字框，佔位符在此代入實際數值。
+    把敘事要點填入文字框，佔位符在此代入實際數值。
+
+    ``include_headline=False``：headline 已由重點訊息帶呈現（附件三的版面
+    語彙），這裡只放要點，避免同一句話在一頁裡出現兩次。
 
     ``strict=False``：單一佔位符失敗不應讓整份簡報生不出來，
     改為保留原佔位符並回報錯誤，讓使用者一眼看出哪裡沒接上。
@@ -221,33 +262,180 @@ def _fill_narrative(
     text_frame.clear()
     text_frame.word_wrap = True
 
-    headline, headline_errors = placeholders.render_text(
-        narrative.headline, store, strict=False
-    )
-    errors.extend(headline_errors)
+    # 「溢出時縮小文字」的保險。字數上限由 narrative_writer 守著，這裡是
+    # 第二道防線：真實模型偶爾會寫出貼著上限的長句，寧可字小一點，
+    # 也不要讓文字流到投影片外面被裁掉。
+    text_frame.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
 
-    first_paragraph = text_frame.paragraphs[0]
-    first_paragraph.text = headline
-    first_paragraph.level = 0
+    lines: list[tuple[str, bool]] = []
 
-    for run in first_paragraph.runs:
-        run.font.bold = True
-        run.font.size = Pt(16)
+    if include_headline:
+        lines.append((narrative.headline, True))
 
-    for bullet in narrative.bullets:
-        rendered, bullet_errors = placeholders.render_text(
-            bullet, store, strict=False
+    lines.extend((bullet, False) for bullet in narrative.bullets)
+
+    first = True
+
+    for text, is_headline in lines:
+        segments, segment_errors = placeholders.render_segments(
+            text, store, strict=False
         )
-        errors.extend(bullet_errors)
+        errors.extend(segment_errors)
 
-        paragraph = text_frame.add_paragraph()
-        paragraph.text = rendered
-        paragraph.level = 1
+        paragraph = (
+            text_frame.paragraphs[0] if first else text_frame.add_paragraph()
+        )
+        first = False
+        paragraph.level = 0
 
-        for run in paragraph.runs:
-            run.font.size = Pt(12)
+        if not is_headline:
+            # 項目符號自己寫，不依賴版面的 buChar：模板的內容版面在不同
+            # 縮排層級會給出不同符號，一頁裡混用兩種符號很難看。
+            marker = paragraph.add_run()
+            marker.text = theme.ACTION_BULLET_PREFIX
+            theme.apply_font(
+                marker,
+                size=theme.BULLET_FONT_SIZE,
+                bold=True,
+                color=theme.ACCENT,
+            )
+
+        _write_segments(
+            paragraph,
+            segments,
+            size=(
+                theme.HEADLINE_FONT_SIZE
+                if is_headline
+                else theme.BULLET_FONT_SIZE
+            ),
+            color=theme.TITLE_COLOR if is_headline else theme.BODY_COLOR,
+            bold=is_headline,
+        )
+
+        paragraph.space_after = Pt(8)
 
     return errors
+
+
+def _style_title(slide: Any, text: str) -> None:
+    """標題一律左上、22pt、深灰，與附件三一致。"""
+    if slide.shapes.title is None:
+        return
+
+    text_frame = slide.shapes.title.text_frame
+    text_frame.clear()
+    paragraph = text_frame.paragraphs[0]
+    paragraph.alignment = PP_ALIGN.LEFT
+
+    run = paragraph.add_run()
+    run.text = text
+
+    theme.apply_font(
+        run,
+        size=theme.TITLE_FONT_SIZE,
+        bold=False,
+        color=theme.TITLE_COLOR,
+    )
+
+
+def add_key_message_bar(
+    slide: Any,
+    text: str,
+    store: MetricStore,
+    area: ContentArea,
+) -> tuple[Any, list[str]]:
+    """
+    在內容區頂端加一條重點訊息帶，放本頁的結論句。
+
+    這是附件三每一頁都有的元件（「◆ 市場總流通卡數穩定成長至…」），
+    也是顧問簡報「一頁一結論」的載體：讀者只看這一行就該知道本頁結論。
+    底色為淡黃、左緣一條純黃標示條，句中的數值再加黃色螢光標示。
+
+    Returns:
+        (訊息帶 shape, 佔位符錯誤清單)。
+    """
+    marker = slide.shapes.add_shape(
+        MSO_SHAPE.RECTANGLE,
+        Emu(area.left),
+        Emu(area.top),
+        theme.KEY_BAR_MARKER_WIDTH,
+        theme.KEY_BAR_HEIGHT,
+    )
+    marker.fill.solid()
+    marker.fill.fore_color.rgb = theme.KEY_BAR_MARKER
+    marker.line.fill.background()
+    marker.shadow.inherit = False
+
+    bar = slide.shapes.add_shape(
+        MSO_SHAPE.RECTANGLE,
+        Emu(area.left + theme.KEY_BAR_MARKER_WIDTH),
+        Emu(area.top),
+        Emu(area.width - theme.KEY_BAR_MARKER_WIDTH),
+        theme.KEY_BAR_HEIGHT,
+    )
+    bar.fill.solid()
+    bar.fill.fore_color.rgb = theme.KEY_BAR_FILL
+    bar.line.fill.background()
+    bar.shadow.inherit = False
+
+    text_frame = bar.text_frame
+    text_frame.word_wrap = True
+    text_frame.margin_left = theme.KEY_BAR_TEXT_INSET
+    text_frame.margin_right = Emu(91440)
+    text_frame.margin_top = Emu(45720)
+    text_frame.margin_bottom = Emu(45720)
+
+    paragraph = text_frame.paragraphs[0]
+    paragraph.alignment = PP_ALIGN.LEFT
+
+    prefix = paragraph.add_run()
+    prefix.text = theme.KEY_MESSAGE_PREFIX
+    theme.apply_font(
+        prefix,
+        size=theme.KEY_MESSAGE_FONT_SIZE,
+        bold=True,
+        color=theme.ACCENT,
+    )
+
+    segments, errors = placeholders.render_segments(text, store, strict=False)
+    _write_segments(
+        paragraph,
+        segments,
+        size=theme.KEY_MESSAGE_FONT_SIZE,
+        color=theme.TITLE_COLOR,
+        bold=True,
+    )
+
+    return bar, errors
+
+
+def add_footnote(slide: Any, text: str, area: ContentArea) -> Any:
+    """
+    在頁尾加一行小字註記。
+
+    圖表頁用它寫出驗收動作（右鍵編輯資料），表格頁改指向稽核 Excel——
+    表格沒有內嵌工作簿，沿用同一句話等於在簡報上寫下不成立的承諾。
+    """
+    box = slide.shapes.add_textbox(
+        Emu(area.left),
+        theme.FOOTNOTE_TOP,
+        Emu(area.width),
+        theme.FOOTNOTE_HEIGHT,
+    )
+    text_frame = box.text_frame
+    text_frame.word_wrap = False
+
+    run = text_frame.paragraphs[0].add_run()
+    run.text = text
+
+    theme.apply_font(
+        run,
+        size=theme.FOOTNOTE_FONT_SIZE,
+        bold=False,
+        color=theme.MUTED_COLOR,
+    )
+
+    return box
 
 
 def _place_text_area(placeholder: Any, area: ContentArea) -> None:
@@ -261,13 +449,62 @@ def _place_text_area(placeholder: Any, area: ContentArea) -> None:
 # ---------------------------------------------------------------------------
 # 頁面組裝
 # ---------------------------------------------------------------------------
-def add_section_divider(presentation: Presentation, title: str) -> Any:
-    """新增章節分隔頁。"""
+def add_section_divider(
+    presentation: Presentation,
+    title: str,
+    *,
+    index: int | None = None,
+) -> Any:
+    """
+    新增章節分隔頁：``CHAPTER 0N``（紅）+ 章節名 + 紅色底線。
+
+    ``index`` 是章節序號（1 起算）。附件三的章節頁靠這個編號讓聽眾知道
+    「講到第幾段了」，沒有編號的章節頁只是一張大字報。
+    """
     layout = _find_layout(presentation, SECTION_LAYOUT_NAME)
     slide = presentation.slides.add_slide(layout)
+    title_shape = slide.shapes.title
 
-    if slide.shapes.title is not None:
-        slide.shapes.title.text_frame.text = title
+    if title_shape is None:
+        return slide
+
+    text_frame = title_shape.text_frame
+    text_frame.clear()
+
+    if index is not None:
+        label_paragraph = text_frame.paragraphs[0]
+        label_run = label_paragraph.add_run()
+        label_run.text = f"CHAPTER {index:02d}"
+        theme.apply_font(
+            label_run,
+            size=theme.CHAPTER_LABEL_FONT_SIZE,
+            bold=False,
+            color=theme.ACCENT,
+        )
+        title_paragraph = text_frame.add_paragraph()
+    else:
+        title_paragraph = text_frame.paragraphs[0]
+
+    title_run = title_paragraph.add_run()
+    title_run.text = title
+    theme.apply_font(
+        title_run,
+        size=theme.CHAPTER_TITLE_FONT_SIZE,
+        bold=True,
+        color=theme.BODY_COLOR,
+    )
+
+    rule = slide.shapes.add_shape(
+        MSO_SHAPE.RECTANGLE,
+        Emu(title_shape.left),
+        Emu(title_shape.top + title_shape.height),
+        theme.CHAPTER_RULE_WIDTH,
+        theme.CHAPTER_RULE_HEIGHT,
+    )
+    rule.fill.solid()
+    rule.fill.fore_color.rgb = theme.ACCENT
+    rule.line.fill.background()
+    rule.shadow.inherit = False
 
     return slide
 
@@ -286,9 +523,7 @@ def add_agenda_page(
     """
     layout = _find_layout(presentation, CONTENT_LAYOUT_NAME)
     slide = presentation.slides.add_slide(layout)
-
-    if slide.shapes.title is not None:
-        slide.shapes.title.text_frame.text = title
+    _style_title(slide, title)
 
     body = _body_placeholder(slide)
 
@@ -303,13 +538,118 @@ def add_agenda_page(
         paragraph = (
             text_frame.paragraphs[0] if index == 0 else text_frame.add_paragraph()
         )
-        paragraph.text = f"{index + 1:02d}　{chapter}"
         paragraph.level = 0
+        paragraph.space_after = Pt(10)
 
-        for run in paragraph.runs:
-            run.font.size = Pt(16)
+        number = paragraph.add_run()
+        number.text = f"{index + 1:02d}　"
+        theme.apply_font(
+            number,
+            size=theme.AGENDA_FONT_SIZE,
+            bold=True,
+            color=theme.ACCENT,
+        )
+
+        label = paragraph.add_run()
+        label.text = chapter
+        theme.apply_font(
+            label,
+            size=theme.AGENDA_FONT_SIZE,
+            bold=False,
+            color=theme.TITLE_COLOR,
+        )
 
     return slide
+
+
+def add_conclusion_page(
+    presentation: Presentation,
+    bundles: Sequence[PageBundle],
+    store: MetricStore,
+    *,
+    title: str = CONCLUSION_CHAPTER,
+) -> tuple[Any, list[str]]:
+    """
+    新增結論頁：把各章節的結論句收攏成一頁。
+
+    做法刻意是**確定性**的——每個章節取其首頁的 headline，不另外呼叫 LLM
+    重寫。理由有兩個：多一次 LLM 呼叫就多一次「結論與內文不一致」的機會；
+    而且結論頁的每一句都能指回它出自哪一頁，主管問「這句從哪來的」時
+    答案就在簡報裡。數值仍由佔位符代入，黃色標示照樣成立。
+
+    Returns:
+        (slide, 佔位符錯誤清單)。
+    """
+    layout = _find_layout(presentation, CONTENT_LAYOUT_NAME)
+    slide = presentation.slides.add_slide(layout)
+    _style_title(slide, title)
+
+    errors: list[str] = []
+    body = _body_placeholder(slide)
+
+    if body is None:
+        return slide, errors
+
+    seen: set[str] = set()
+    picked: list[tuple[str, PageNarrative]] = []
+
+    for bundle in bundles:
+        chapter = bundle.section.chapter
+
+        if not chapter or chapter in seen or bundle.narrative is None:
+            continue
+
+        seen.add(chapter)
+        picked.append((chapter, bundle.narrative))
+
+    area = _content_area(layout)
+    _place_text_area(body, area)
+
+    text_frame = body.text_frame
+    text_frame.clear()
+    text_frame.word_wrap = True
+
+    if not picked:
+        return slide, errors
+
+    for index, (chapter, narrative) in enumerate(picked):
+        paragraph = (
+            text_frame.paragraphs[0] if index == 0 else text_frame.add_paragraph()
+        )
+        paragraph.level = 0
+        paragraph.space_after = Pt(6)
+
+        label = paragraph.add_run()
+        label.text = f"{theme.ACTION_BULLET_PREFIX}{chapter}｜"
+        theme.apply_font(
+            label,
+            size=theme.BULLET_FONT_SIZE,
+            bold=True,
+            color=theme.ACCENT,
+        )
+
+        segments, segment_errors = placeholders.render_segments(
+            narrative.headline, store, strict=False
+        )
+        errors.extend(segment_errors)
+
+        _write_segments(
+            paragraph,
+            segments,
+            size=theme.BULLET_FONT_SIZE,
+            color=theme.BODY_COLOR,
+        )
+
+        source = paragraph.add_run()
+        source.text = f"（P.{narrative.page_number}）"
+        theme.apply_font(
+            source,
+            size=theme.FOOTNOTE_FONT_SIZE,
+            bold=False,
+            color=theme.MUTED_COLOR,
+        )
+
+    return slide, errors
 
 
 def add_closing_page(
@@ -321,7 +661,16 @@ def add_closing_page(
     slide = presentation.slides.add_slide(layout)
 
     if slide.shapes.title is not None:
-        slide.shapes.title.text_frame.text = message
+        text_frame = slide.shapes.title.text_frame
+        text_frame.clear()
+        run = text_frame.paragraphs[0].add_run()
+        run.text = message
+        theme.apply_font(
+            run,
+            size=theme.CHAPTER_TITLE_FONT_SIZE,
+            bold=True,
+            color=theme.BODY_COLOR,
+        )
 
     return slide
 
@@ -345,14 +694,30 @@ def add_content_page(
         bundle.chart.plan.chart_title if bundle.chart else ""
     )
 
-    if slide.shapes.title is not None:
-        slide.shapes.title.text_frame.text = title_text
+    _style_title(slide, title_text)
 
-    area = _content_area(layout)
+    full_area = _content_area(layout)
     body = _body_placeholder(slide)
 
+    # 重點訊息帶吃掉內容區頂端一條，其餘才是圖表與要點的空間。
+    area = full_area
+
+    if bundle.narrative is not None and bundle.narrative.headline.strip():
+        _, bar_errors = add_key_message_bar(
+            slide, bundle.narrative.headline, store, full_area
+        )
+        errors.extend(bar_errors)
+
+        offset = int(theme.KEY_BAR_HEIGHT) + int(theme.KEY_BAR_GAP)
+        area = ContentArea(
+            left=full_area.left,
+            top=full_area.top + offset,
+            width=full_area.width,
+            height=full_area.height - offset,
+        )
+
     if bundle.chart is None:
-        # 無圖表的純文字頁，文字占滿內容區。
+        # 無圖表的純文字頁，要點占滿剩餘內容區。
         if body is not None and bundle.narrative is not None:
             _place_text_area(body, area)
             errors.extend(_fill_narrative(body, bundle.narrative, store))
@@ -375,6 +740,16 @@ def add_content_page(
         )
 
     _insert_chart(slide, bundle.chart, chart_area)
+
+    add_footnote(
+        slide,
+        (
+            theme.TABLE_FOOTNOTE
+            if bundle.chart.skill_name in TABLE_LIKE_CHARTS
+            else theme.CHART_FOOTNOTE
+        ),
+        full_area,
+    )
 
     return slide, errors
 
@@ -429,6 +804,7 @@ def render_deck(
     deck_title: str | None = None,
     keep_template_slides: bool = False,
     include_agenda: bool = True,
+    include_conclusion: bool = True,
     include_closing: bool = True,
     closing_message: str = CLOSING_MESSAGE,
 ) -> RenderReport:
@@ -444,10 +820,12 @@ def render_deck(
         keep_template_slides: 是否保留模板原有的示範頁。預設 False，
             但模板頁的刪除需操作底層 XML，故目前僅保留首頁並記錄警告。
         include_agenda: 是否在封面後插入目錄頁。
+        include_conclusion: 是否在內容頁之後插入結論頁。
         include_closing: 是否在最後插入結尾頁。
         closing_message: 結尾頁文字。
 
-    版面順序：封面（模板首頁）→ 目錄 →（章節分隔頁 → 內容頁…）× N → 結尾頁。
+    版面順序：封面（模板首頁）→ 目錄 →（章節分隔頁 → 內容頁…）× N
+    → 結論頁 → 結尾頁。
     章節分隔頁依 ``bundle.section.chapter`` 變化自動插入；``chapter`` 為 None
     的頁面不產生分隔頁，可用來排非章節內容。
 
@@ -466,7 +844,16 @@ def render_deck(
         first_slide = presentation.slides[0]
 
         if first_slide.shapes.title is not None:
-            first_slide.shapes.title.text_frame.text = deck_title
+            text_frame = first_slide.shapes.title.text_frame
+            text_frame.clear()
+            run = text_frame.paragraphs[0].add_run()
+            run.text = deck_title
+            theme.apply_font(
+                run,
+                size=theme.CHAPTER_TITLE_FONT_SIZE,
+                bold=True,
+                color=theme.BODY_COLOR,
+            )
 
     if not keep_template_slides:
         removed = _remove_template_placeholder_slides(presentation)
@@ -478,16 +865,33 @@ def render_deck(
 
     report.chapters = chapter_order(bundles)
 
+    # 沒有章節就不產結論頁：結論是「每個章節的結論句」收攏而成，
+    # 沒有章節可收的話那一頁會是空白，比沒有這一頁更糟。
+    has_conclusion = (
+        include_conclusion
+        and bool(report.chapters)
+        and any(bundle.narrative is not None for bundle in bundles)
+    )
+
+    # 結論頁列在目錄最後一項，但不另設章節分隔頁——一張頁面的章節
+    # 配一張分隔頁，讀者翻兩頁才看到一句結論。
+    agenda_items = list(report.chapters)
+
+    if has_conclusion:
+        agenda_items.append(CONCLUSION_CHAPTER)
+
     if include_agenda and report.chapters:
-        add_agenda_page(presentation, report.chapters)
+        add_agenda_page(presentation, agenda_items)
 
     current_chapter: str | None = None
+    chapter_index = 0
 
     for bundle in bundles:
         chapter = bundle.section.chapter
 
         if chapter and chapter != current_chapter:
-            add_section_divider(presentation, chapter)
+            chapter_index += 1
+            add_section_divider(presentation, chapter, index=chapter_index)
             report.divider_count += 1
             current_chapter = chapter
 
@@ -506,6 +910,13 @@ def render_deck(
 
         if errors:
             report.placeholder_errors[bundle.section.page_number or 0] = errors
+
+    if has_conclusion:
+        _, conclusion_errors = add_conclusion_page(presentation, bundles, store)
+        report.conclusion_page = True
+
+        if conclusion_errors:
+            report.placeholder_errors.setdefault(0, []).extend(conclusion_errors)
 
     if include_closing:
         add_closing_page(presentation, closing_message)
