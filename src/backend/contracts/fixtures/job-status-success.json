@@ -1,0 +1,14 @@
+{
+  "job_id": "550e8400-e29b-41d4-a716-446655440000",
+  "status": "succeeded",
+  "stage": "completed",
+  "progress": 100,
+  "message": "簡報生成完成",
+  "created_at": "2024-01-15T10:30:00Z",
+  "updated_at": "2024-01-15T10:32:00Z",
+  "artifacts": [
+    {"type": "pptx", "filename": "presentation.pptx", "download_url": "/api/v1/downloads/abc123"},
+    {"type": "xlsx", "filename": "chart-data.xlsx", "download_url": "/api/v1/downloads/def456"}
+  ],
+  "error": null
+}

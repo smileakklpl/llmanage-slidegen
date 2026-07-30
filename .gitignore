@@ -42,3 +42,7 @@ fixtures/data/*
 
 # Python
 .pytest_cache/
+
+# Frontend
+node_modules/
+src/frontend/.env

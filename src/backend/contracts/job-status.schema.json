@@ -1,0 +1,131 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "job-status.schema.json",
+  "title": "JobStatus",
+  "description": "Job status response shared between frontend and backend.",
+  "type": "object",
+  "required": [
+    "job_id",
+    "status",
+    "stage",
+    "progress",
+    "message",
+    "created_at",
+    "updated_at",
+    "artifacts",
+    "error"
+  ],
+  "properties": {
+    "job_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Unique identifier for the job."
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "queued",
+        "running",
+        "succeeded",
+        "failed"
+      ],
+      "description": "Current high-level status of the job."
+    },
+    "stage": {
+      "type": "string",
+      "enum": [
+        "queued",
+        "parsing_intent",
+        "analyzing_data",
+        "writing_insights",
+        "rendering",
+        "validating",
+        "completed",
+        "failed"
+      ],
+      "description": "Current processing stage."
+    },
+    "progress": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 100,
+      "description": "Progress percentage (0-100)."
+    },
+    "message": {
+      "type": "string",
+      "description": "Human-readable message describing current activity."
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO-8601 timestamp when the job was created."
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO-8601 timestamp of the last status update."
+    },
+    "artifacts": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Artifact"
+      },
+      "description": "List of output artifacts available after job completion."
+    },
+    "error": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/Error"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Error details if the job failed, null otherwise."
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "Artifact": {
+      "type": "object",
+      "required": [
+        "type",
+        "filename",
+        "download_url"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "description": "Artifact type identifier (e.g. pptx, xlsx)."
+        },
+        "filename": {
+          "type": "string",
+          "description": "Display filename for the artifact."
+        },
+        "download_url": {
+          "type": "string",
+          "description": "URL to download the artifact."
+        }
+      },
+      "additionalProperties": false
+    },
+    "Error": {
+      "type": "object",
+      "required": [
+        "code",
+        "message"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "description": "Machine-readable error code."
+        },
+        "message": {
+          "type": "string",
+          "description": "Human-readable error message."
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}
