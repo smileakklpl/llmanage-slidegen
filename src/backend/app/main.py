@@ -51,29 +51,23 @@ async def health_check() -> dict:
 @app.get("/ready")
 async def readiness_check() -> dict:
     checks = {
-        "schemas": False,
-        "pipeline": False,
+        "ingestion_schema": False,
+        "ingestion_pipeline": False,
+        "generation_pipeline": False,
+        "s3_configuration": False,
     }
 
     try:
-        from app.ingestion.schemas import (
-            UnifiedIngestionResult,
-        )
+        from app.ingestion.schemas import UnifiedIngestionResult
+        from app.ingestion.pipeline import run_ingestion_pipeline
+        from core.generation_orchestrator import generate_deck
 
-        checks["schemas"] = (
-            UnifiedIngestionResult
-            is not None
+        checks["ingestion_schema"] = UnifiedIngestionResult is not None
+        checks["ingestion_pipeline"] = run_ingestion_pipeline is not None
+        checks["generation_pipeline"] = generate_deck is not None
+        checks["s3_configuration"] = bool(
+            settings.s3_bucket.strip() and settings.aws_region.strip()
         )
-
-        from app.ingestion.pipeline import (
-            run_ingestion_pipeline,
-        )
-
-        checks["pipeline"] = (
-            run_ingestion_pipeline
-            is not None
-        )
-
     except Exception as error:
         return {
             "status": "not_ready",
@@ -81,11 +75,13 @@ async def readiness_check() -> dict:
             "error": str(error),
         }
 
-    return {
-        "status": (
-            "ready"
-            if all(checks.values())
-            else "not_ready"
-        ),
+    ready = all(checks.values())
+    payload = {
+        "status": "ready" if ready else "not_ready",
         "checks": checks,
     }
+
+    if not checks["s3_configuration"]:
+        payload["error"] = "S3_BUCKET 與 AWS_REGION 必須設定後才能接受生成工作"
+
+    return payload

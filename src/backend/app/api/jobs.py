@@ -1,38 +1,52 @@
 """Job generation, status, and email send endpoints."""
 
-import os
-import tempfile
+import asyncio
+import mimetypes
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import APIRouter, File, Form, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 
-from app.api.deps import get_job_service
+from app.api.deps import get_job_service, get_object_storage
 from app.core.errors import NotFoundError
+from app.ingestion.settings import MAX_UPLOAD_BYTES
 from app.schemas.jobs import (
     JobCreateResponse,
     JobStatusResponse,
     SendEmailResponse,
 )
+from core.contracts.generation import StoredObjectRef
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
 
-# Temp directory for uploaded files (persists across requests until cleanup)
-_UPLOAD_DIR = Path(tempfile.gettempdir()) / "slidegen_uploads"
-_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+
+def _stream_size(stream: object) -> int:
+    """Measure the actual upload stream without trusting multipart metadata."""
+    tell = getattr(stream, "tell")
+    seek = getattr(stream, "seek")
+    current = tell()
+    try:
+        seek(0, 2)
+        return int(tell())
+    finally:
+        seek(current)
 
 
-async def _save_upload(file: UploadFile, job_id: str) -> Path:
-    """Save an uploaded file to a job-specific temp directory."""
-    job_dir = _UPLOAD_DIR / job_id
-    job_dir.mkdir(parents=True, exist_ok=True)
+async def _load_job(job_id: str):
+    """Load a durable job and translate dependency/S3 failures to HTTP 503."""
+    try:
+        service = get_job_service()
+        job = await service.get_job(job_id)
+    except Exception as error:
+        raise HTTPException(
+            status_code=503,
+            detail="暫時無法讀取工作狀態",
+        ) from error
 
-    filename = file.filename or "unknown.xlsx"
-    dest = job_dir / filename
+    if job is None:
+        raise NotFoundError(code="JOB_NOT_FOUND", message="找不到指定的工作")
 
-    content = await file.read()
-    dest.write_bytes(content)
-    return dest
+    return job
 
 
 @router.post("/generate", response_model=JobCreateResponse, status_code=202)
@@ -40,16 +54,75 @@ async def generate_job(
     files: Annotated[list[UploadFile], File(...)],
     prompt: str = Form(...),
 ) -> JobCreateResponse:
-    """Accept a multipart form with one or more Excel files and create a new job.
+    """Persist Excel uploads in S3 and queue the real generation pipeline."""
 
-    Returns HTTP 202 immediately; the runner progresses the job
-    in the background.
-    """
-    service = get_job_service()
-    filenames = [f.filename or "unknown.xlsx" for f in files]
+    normalized_prompt = prompt.strip()
 
-    # Create job first to get job_id, then save files
-    job = await service.create_job(prompt=prompt, filenames=filenames, files=files)
+    if not normalized_prompt:
+        raise HTTPException(status_code=422, detail="prompt 不可為空")
+
+    if not files:
+        raise HTTPException(status_code=422, detail="至少需要一個 Excel 檔案")
+
+    filenames = [Path(file.filename or "upload.xlsx").name for file in files]
+
+    for file, filename in zip(files, filenames):
+        if Path(filename).suffix.lower() != ".xlsx":
+            raise HTTPException(
+                status_code=415,
+                detail=f"目前生成管線只接受 .xlsx：{filename}",
+            )
+
+        actual_size = await asyncio.to_thread(_stream_size, file.file)
+        if actual_size > MAX_UPLOAD_BYTES:
+            raise HTTPException(
+                status_code=413,
+                detail=f"上傳檔案超過 {MAX_UPLOAD_BYTES} bytes 限制：{filename}",
+            )
+
+    try:
+        service = get_job_service()
+        storage = get_object_storage()
+    except RuntimeError as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
+
+    job_id = service.generate_job_id()
+    uploaded: list[StoredObjectRef] = []
+
+    try:
+        for index, (file, filename) in enumerate(zip(files, filenames), start=1):
+            await file.seek(0)
+            content_type = file.content_type or mimetypes.guess_type(filename)[0]
+            stored = await asyncio.to_thread(
+                storage.upload_fileobj,
+                file.file,
+                key=f"uploads/{job_id}/{index:02d}_{filename}",
+                filename=filename,
+                content_type=content_type,
+            )
+            uploaded.append(stored)
+
+        job = await service.create_job(
+            job_id=job_id,
+            prompt=normalized_prompt,
+            input_objects=uploaded,
+        )
+    except HTTPException:
+        raise
+    except Exception as error:
+        for item in uploaded:
+            try:
+                await asyncio.to_thread(storage.delete, item.key)
+            except Exception:
+                pass
+
+        raise HTTPException(
+            status_code=503,
+            detail=f"無法保存上傳或建立工作：{type(error).__name__}",
+        ) from error
+    finally:
+        for file in files:
+            await file.close()
 
     return JobCreateResponse(
         job_id=job.job_id,
@@ -61,11 +134,7 @@ async def generate_job(
 @router.get("/{job_id}", response_model=JobStatusResponse)
 async def get_job_status(job_id: str) -> JobStatusResponse:
     """Get the current status of a job."""
-    service = get_job_service()
-    job = await service.get_job(job_id)
-
-    if job is None:
-        raise NotFoundError(code="JOB_NOT_FOUND", message="找不到指定的工作")
+    job = await _load_job(job_id)
 
     return JobStatusResponse(
         job_id=job.job_id,
@@ -97,11 +166,7 @@ async def send_job_email(
     optional file attachments. This is a mock implementation — no actual
     email is sent in this phase.
     """
-    service = get_job_service()
-    job = await service.get_job(job_id)
-
-    if job is None:
-        raise NotFoundError(code="JOB_NOT_FOUND", message="找不到指定的工作")
+    job = await _load_job(job_id)
 
     if job.status != "succeeded":
         from fastapi import HTTPException

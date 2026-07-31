@@ -1,48 +1,52 @@
-"""File download endpoint for job artifacts."""
+"""Download endpoint for generated artifacts stored in S3."""
 
-import tempfile
-from pathlib import Path
+from fastapi import APIRouter, HTTPException
+from fastapi.responses import RedirectResponse
 
-from fastapi import APIRouter
-from fastapi.responses import FileResponse
-
+from app.api.deps import get_job_service, get_object_storage
 from app.core.errors import NotFoundError
+from app.services.job_service import is_authorized_artifact_key
 
 router = APIRouter(prefix="/downloads", tags=["downloads"])
 
-# Must match the output dir used in job_runner.py
-_OUTPUT_BASE = Path(tempfile.gettempdir()) / "slidegen_outputs"
-
-# Allowed filenames to prevent path traversal
-_ALLOWED_FILENAMES = {"deck.pptx", "deck_data.xlsx"}
-
 
 @router.get("/{job_id}/{filename}")
-async def download_artifact(job_id: str, filename: str) -> FileResponse:
-    """Download a generated artifact file.
+async def download_artifact(job_id: str, filename: str) -> RedirectResponse:
+    """Authorize an artifact and redirect to a newly signed S3 URL."""
 
-    Args:
-        job_id: The job that produced the artifact.
-        filename: The artifact filename (deck.pptx or deck_data.xlsx).
-    """
-    # Security: only allow known filenames
-    if filename not in _ALLOWED_FILENAMES:
-        raise NotFoundError(code="FILE_NOT_FOUND", message="找不到指定的檔案")
+    try:
+        service = get_job_service()
+        storage = get_object_storage()
+        job = await service.get_job(job_id, refresh_download_urls=False)
+    except Exception as error:
+        raise HTTPException(
+            status_code=503,
+            detail="暫時無法讀取工作或產生下載連結",
+        ) from error
 
-    file_path = _OUTPUT_BASE / job_id / filename
+    if job is None:
+        raise NotFoundError(code="JOB_NOT_FOUND", message="找不到指定的工作")
 
-    if not file_path.exists():
-        raise NotFoundError(code="FILE_NOT_FOUND", message="檔案尚未生成或已過期")
-
-    # Determine media type
-    media_type = (
-        "application/vnd.openxmlformats-officedocument.presentationml.presentation"
-        if filename.endswith(".pptx")
-        else "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    artifact = next(
+        (item for item in job.artifacts if item.filename == filename),
+        None,
     )
+    object_key = artifact.object_key if artifact is not None else None
 
-    return FileResponse(
-        path=file_path,
-        filename=filename,
-        media_type=media_type,
-    )
+    if not is_authorized_artifact_key(job_id, filename, object_key):
+        raise NotFoundError(
+            code="FILE_NOT_FOUND",
+            message="檔案尚未生成、已過期或不屬於此工作",
+        )
+
+    assert object_key is not None  # narrowed by is_authorized_artifact_key
+
+    try:
+        download_url = storage.presigned_download_url(object_key)
+    except Exception as error:
+        raise HTTPException(
+            status_code=503,
+            detail="暫時無法產生下載連結",
+        ) from error
+
+    return RedirectResponse(url=download_url, status_code=307)

@@ -161,9 +161,10 @@ def convert(
 def main() -> None:
     import argparse
 
-    from paths import FSC_RAW
+    repo_root = Path(__file__).resolve().parent.parent
+    default_source = repo_root / "fixtures" / "data" / "金融業務資訊揭露"
     ap = argparse.ArgumentParser()
-    ap.add_argument("--src", default=str(FSC_RAW))
+    ap.add_argument("--src", default=str(default_source))
     ap.add_argument("--out", required=True, help="輸出目錄，如 fixtures/data/fsc_114")
     ap.add_argument("--periods", default=None, help="逗號分隔，如 11401,11402,…；省略為全部")
     args = ap.parse_args()

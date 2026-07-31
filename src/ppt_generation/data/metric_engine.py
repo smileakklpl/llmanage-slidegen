@@ -79,6 +79,7 @@ class EngineReport:
 # 工具
 # ---------------------------------------------------------------------------
 _YEAR_PATTERN = re.compile(r"(19|20)\d{2}")
+_ROC_YEAR_PATTERN = re.compile(r"^\s*(1\d{2})\s*年?\s*$")
 
 #: 時間軸類別的常見寫法：民國/西元年、季、月、日期、Q1、FY 等。
 _TEMPORAL_PATTERNS = (
@@ -170,7 +171,13 @@ def _clean_values(raw: Sequence[object]) -> list[float | None]:
 
 def _detect_year(label: str) -> int | None:
     match = _YEAR_PATTERN.search(label)
-    return int(match.group()) if match else None
+    if match:
+        return int(match.group())
+
+    # 民國年只接受完整三位年度標籤（113、114年）；11401 是年月，
+    # 不可誤判成年度系列，否則會把相鄰月份拿來計算 YoY。
+    roc_match = _ROC_YEAR_PATTERN.fullmatch(label)
+    return int(roc_match.group(1)) if roc_match else None
 
 
 def _category_column(dataset: LoadedDataset) -> ColumnMeta | None:
@@ -298,8 +305,10 @@ def build_base_metric(dataset: LoadedDataset) -> MetricSeries | None:
         name=dataset.name,
         categories=categories,
         series=series,
-        # 各欄位單位不一致時不猜測，留空由敘事層依欄位名說明。
+        # 各欄位單位不一致時不猜測，metric-wide unit 留空；每個系列的
+        # 原始單位仍保存在 series_units，供 chart planner 做量綱防呆。
         unit=units.pop() if len(units) == 1 else None,
+        series_units={meta.label: meta.unit for meta in numeric_columns},
         semantic="value",
         axis_kind=detect_axis_kind(categories, category_column),
         evidence=_evidence_map(dataset, numeric_columns, categories),
@@ -694,6 +703,7 @@ def build_market_timeline(
 
     periods = usable[0].series_names
     series: dict[str, list[float | None]] = {}
+    series_units: dict[str, str | None] = {}
     notes: list[str] = []
     evidence: dict[str, SourceRef] = {}
 
@@ -727,9 +737,12 @@ def build_market_timeline(
             if source is not None:
                 evidence[f"{metric.name}|{period}"] = source
 
+        source_units = {metric.unit_for(period) for period in periods}
+        series_unit = source_units.pop() if len(source_units) == 1 else None
         series[metric.name] = totals
+        series_units[metric.name] = series_unit
         notes.append(
-            f"{metric.name}（{metric.unit or '未標示單位'}）"
+            f"{metric.name}（{series_unit or '未標示單位'}）"
             f"每期總量取自：{'、'.join(sorted(sources))}"
         )
 
@@ -742,6 +755,7 @@ def build_market_timeline(
         categories=list(periods),
         series=series,
         unit=None,
+        series_units=series_units,
         semantic="value",
         axis_kind=AXIS_TEMPORAL,
         formula="各期市場總量（優先取來源報表總計列，否則為各機構加總）",
@@ -836,6 +850,9 @@ def derive_top(
             for name, values in metric.series.items()
         },
         unit=metric.unit,
+        series_units={
+            name: metric.unit_for(name) for name in metric.series_names
+        },
         semantic=metric.semantic,
         axis_kind=metric.axis_kind,
         formula=(
@@ -936,6 +953,7 @@ def derive_forecast(base: MetricSeries, periods: int = 3) -> MetricSeries:
         categories=categories,
         series=forecast,
         unit=base.unit,
+        series_units={name: base.unit_for(name) for name in forecast},
         semantic="forecast",
         axis_kind=base.axis_kind,
         formula="最小平方法線性回歸 y = ax + b，外推後續期數",

@@ -4,155 +4,102 @@ inclusion: always
 
 # 專案結構與模組切分
 
+## 唯一正式流程
+
+```text
+Excel + Prompt
+  → backend FastAPI / S3 / async worker
+  → core.generation_orchestrator（可呼叫邊界）
+  → ppt_generation.run_pipeline
+  → backend ingestion bridge
+  → ppt_generation.data deterministic engine / MetricStore
+  → agents（section / chart / narrative / reviewer）
+  → renderer（native PPT chart/table）+ audit XLSX
+  → T1 validator
+  → artifacts + generation manifest 回存 S3
+```
+
+不得新增第二套 pipeline、MetricStore、engine 或 LLM adapter。CLI、API、worker、測試與模型比較都必須呼叫上述正式實作。
+
 ## 目錄結構
 
-```
+```text
 llmanage-slidegen/
-├── .github/workflows/        # CI：每次 push / PR 跑 scripts/verify_all.py
-├── .kiro/
-│   ├── steering/             # 專案級指導文件（本檔所在）
-│   └── skills/               # 開發輔助 skill（progress、update-requirements）
-├── main.py                   # 程式進入點（根目錄唯一程式檔）→ src/core/pipeline.py
-├── requirements.txt
-├── pytest.ini                # 主管線測試設定，必須留在 repo root（見檔內註解）
-│
-├── scripts/                  # 開發輔助腳本
-│   ├── bootstrap.py          #   import 路徑設定：一律從 repo root 執行
-│   └── verify_all.py         #   驗收關卡（CI 入口，對應規格書 §7）
-│
-├── config/                   # 業務規則設定
-│   └── metric_definitions.json  # 指標定義（外部化，對應通用性風險對策）
-│
-├── src/                      # 產品碼，依管線階段分四塊
-│   ├── backend/              # 【輸入】FR-A2 檔案上傳與 ingestion（FastAPI）
-│   │   ├── app/ingestion/    #   偵測、分類、擷取、正規化、驗證管線
-│   │   └── tests/            #   ingestion 專屬測試（見下方「測試分佈」）
-│   ├── core/                 # 【計算與 LLM】scripts/bootstrap.py 掛的 import 根目錄
-│   │   ├── contracts/        #   跨模組 JSON 契約（§5）；改動需知會所有下游模組
-│   │   ├── llm/              #   FR-A1 統一介面 + adapter + factory + repair + fallback
-│   │   ├── engine/           #   FR-1 資料解析與指標計算（確定性，不碰 LLM）
-│   │   ├── locator.py        #   結構定位（LLM）：profiler 文字 → SheetSpec
-│   │   ├── validator.py      #   NFR-2 / T8 敘事一致性
-│   │   ├── pipeline.py       #   端到端串接
-│   │   └── paths.py          #   專案路徑的唯一權威
-│   ├── ppt_generation/       # 【輸出】FR-2/FR-3 簡報生成（chart_builder / 一致性驗證）
-│   │                         #   = 規格書 §4.3 的 renderer 模組，目錄名沿用團隊既有慣例
-│   └── frontend/             # 前端（尚為空殼）
-│
-├── prompts/                  # system prompt 外部化（§6.3）
-├── evalh/                    # eval harness 與計分器
-├── tools/                    # 轉檔、spike、多模型比較
-├── tests/                    # 以附件四為標準答案的斷言測試
-├── fixtures/                 # 固定輸入、golden、資料集
-│                             #   data/ 僅金管會月報進版控，附件四不進
-│
-├── docs/                     # 規格書（設計決策的唯一真相來源）
-│   ├── 智匯數據簡報神器_開發規格書_v0.3.md   # 規格的唯一真相來源
-│   ├── 圖表原生性與資料同步設計.md          # PPT 圖表與 Excel 資料同步機制設計
-│   └── current_progress.md                # 進度快照
-├── source/                   # 命題原始素材（唯讀，不進版控）
-│   ├── template.pptx         #   台新新光金控簡報模板（renderer 的 base file）
-│   ├── 附件二_系統提示詞.docx            #   智匯數據簡報神器指令稿
-│   ├── 附件三_信用卡範例簡報及錯誤說明.pptx  #   錯誤範例，對應 T7 測試斷言
-│   └── 附件四_預期修正參照資料.xlsx        #   正確數值參照，對應 T1/T7 測試資料
-└── outputs/                  # 生成結果（可清空重生）
+├── .github/workflows/verify.yml
+├── .kiro/                    steering、skills、hooks
+├── config/metric_definitions.json
+├── scripts/
+│   ├── bootstrap.py          只將 repo/src 加入 import path
+│   └── verify_all.py         合併前唯一驗收入口
+├── src/
+│   ├── backend/              FastAPI、S3、job repository/worker、ingestion
+│   ├── core/
+│   │   ├── contracts/generation.py
+│   │   └── generation_orchestrator.py
+│   ├── ppt_generation/
+│   │   ├── agents/           section/chart/narrative/reviewer
+│   │   ├── core/             LLM abstraction/config/placeholders
+│   │   ├── data/             ingestion bridge/MetricStore/engine
+│   │   ├── charts/           原生圖表規格與 builder
+│   │   ├── output/           PPTX 與稽核 XLSX
+│   │   ├── verification/     三方數值一致性 T1
+│   │   └── run_pipeline.py
+│   └── frontend/
+├── tests/                    core/ppt_generation 正式測試
+├── src/backend/tests/        backend 專屬測試
+├── tools/                    公開資料轉檔與 full-pipeline 模型比較
+├── fixtures/data/            可重現公開資料
+├── prompts/                  agent system prompts
+├── docs/                     規格與設計文件
+├── source/                   template 與命題素材；唯讀
+└── outputs/                  使用者保留成果；不得擅自清理或覆寫
 ```
 
-## 分層依賴方向（單向，不可逆）
+## 分層依賴
 
-`evalh/`、`tools/`、`tests/` → `src/`，**反過來禁止**。
+正式呼叫方向：
 
-`src/` 是要能單獨出貨的東西；`tools/` 下的 spike 照定義是可以隨時砍掉的，
-量測骨架也不該成為產品的必要相依。曾經破過一次：`pipeline.py` 為了拿
-`load_provider`（原在 evalh）和 `locate_one`（原在 tools/spike_a）而反向 import，
-形成 `src → evalh → src` 的循環，副作用是 README 寫的執行指令直接
-ModuleNotFoundError。兩者現已歸位到 `src/core/llm/factory.py` 與 `src/core/locator.py`。
-
-要在 `src/` 用到某個東西，就把那個東西搬進 `src/`，不要反向 import。
-這條規則由 `scripts/verify_all.py` 的「分層依賴方向」檢查靜態掃描守著。
-
-### `src/` 四塊之間的方向
-
-順著管線走，不回頭：
-
-    backend ──→ core ──→ ppt_generation
-    （輸入）    （計算與 LLM）  （輸出）
-
-`core` 是共用核心：MetricStore、指標計算、LLM 統一介面都只有這一份，
-`ppt_generation` 消費它，不自己再實作一套。這條邊界尚未與全體成員確認，
-`docs/圖表原生性與資料同步設計.md` v0.3 規劃的 `ppt_generation/data/`
-與 `ppt_generation/llm_client.py` 與本規則衝突，需先議定歸屬。
-
-## 模組切分（依開發規格書 §4.3）
-
-系統管線分為 8 個模組，彼此僅以 JSON 契約溝通，任何模組不得跨模組直接取值：
-
-| 模組 | 負責功能 | 輸入 | 輸出 |
-|---|---|---|---|
-| `intent` | 自然語言指令解析 | prompt 文字 | `IntentSpec`（JSON） |
-| `engine` | 數據智能解析、跨表關聯、指標計算 | xlsx + IntentSpec | `MetricStore`（JSON/parquet） |
-| `writer` | 敘事生成（洞察文案） | MetricStore + IntentSpec | `PageNarrative[]`（JSON） |
-| `renderer` | PPT/Excel 生成（實作在 `src/ppt_generation/`） | MetricStore + Narrative + 模板 | .pptx + .xlsx |
-| `validator` | 三方數值比對 | .pptx + .xlsx + MetricStore | 驗證報告（pass/fail） |
-| `mailer` | 自動寄送 | 檔案 + 收件人 | 寄送紀錄 |
-| `deckspec` | Spec 保存與 Refresh 重放 | 上述全部 | DeckSpec JSON；`replay(deckspec, new_data)` |
-| `llm` | LLM 呼叫統一介面 | — | `complete_json(prompt, schema)` |
-
-管線資料流向：
-
-```
-使用者 Prompt + Excel 上傳
-        │
-        ▼
-[1] Intent Parser（LLM）→ IntentSpec
-        ▼
-[2] Data Engine（pandas，確定性）→ MetricStore（含來源追溯）
-        ▼
-[3] Insight Writer（LLM，平行）→ PageNarrative（只能引用 MetricStore 之值）
-        ▼
-[4] Renderer（python-pptx / openpyxl，確定性）→ .pptx + .xlsx
-        ▼
-[5] Validator（確定性）→ 三方比對
-        ▼
-[6] Mailer（模擬信箱）
-        ▼
-DeckSpec 落地保存（供 Refresh 重放）
+```text
+backend → core.generation_orchestrator → ppt_generation
 ```
 
-## 命名慣例
-- Excel 工作表命名規則：`P.{頁碼}_{指標名稱}`（對齊附件四），例如 `P.5_流通卡數`。
-  此規則用於 **renderer 的輸出**；讀取端不得假設來源檔遵循它
-- MetricStore key：`{實體slug}_{指標}_{期間}`，衍生值加後綴 `_share` / `_rank` / `_yoy_{期間}`；
-  合計列用 `market_total_` 前綴（對齊規格書 §5.2 範例）
-- 環境變數以 `LLM_` 前綴統一管理模型路由與平行度設定
+`core` 現在只保存跨 backend/生成模組的 versioned generation contract 與 callable orchestration boundary；確定性 MetricStore/engine 和 LLM thin wrapper 位於 `ppt_generation`，不得再於 `core` 複製。
 
-## 敘事慣例
-文件與註解一律以**模組名**指稱職責（intent / engine / writer / renderer / validator / llm），
-不使用開發者代號。分工是暫時的，模組邊界才是規格的一部分。
+`tools/`、`tests/` 可 import `src/`；`src/` 禁止反向 import `tools/` 或其他量測碼。`scripts/verify_all.py` 以靜態掃描守住此界線。
 
-## 檔案處理原則
-- `source/` 下的檔案是命題方提供的原始素材，**唯讀不修改**，所有解析/生成邏輯以它們為輸入
-- `docs/` 下的規格文件是設計決策的唯一真相來源，程式實作若與文件衝突，先確認是否需要更新文件再動程式碼
-- 新增模組時先決定它屬於哪一塊（`backend` 輸入 / `core` 計算 / `ppt_generation` 輸出），
-  再依模組切分表命名（如 `src/core/engine/`、`src/core/writer/`），避免所有邏輯塞在單一檔案
+## 模組契約
 
-## 測試與驗證慣例
-- `python scripts/verify_all.py` 是合併前的關卡：全部走確定性路徑、不呼叫模型、秒級跑完。
-  紅燈就不要合併。每次 push / PR 由 GitHub Actions 自動跑
-- 金管會月報進版控（公開資料，其他模組也要用），附件四不進（主辦方素材、repo 公開）。
-  CI 上要用附件四的項目會顯示 `⊘ 跳過`，屬正常；
-  CI 綠燈 ≠ 完整驗收，合併前仍要把附件四放進 `source/` 跑一次全綠
-- `verify_*.py` 命名對應規格書 §7 的 T1–T8，回答「通過與否」
-- `evalh/` 是量測骨架，回答「品質分佈與趨勢」——跑 N 次看比率，供 prompt 迭代使用。
-  兩者角色不同，不要混用
-- 紀律：**輸入固定，prompt 演進。** `fixtures/inputs*/` 定案後凍結；
-  同時改動輸入與 prompt 就無法歸因品質變化
-- 任何新增的圖表生成邏輯，必須有對應的一致性驗證（chart cache vs 內嵌 workbook）
+跨模組只傳 schema 驗證後的 JSON/模型契約，不跨模組直接抓內部狀態：
 
-### 測試分佈
-測試目前落在兩處，各有自己的執行方式，尚未整併：
+| 邊界 | 契約/資料 |
+|---|---|
+| API → worker | S3 refs + persisted job model |
+| worker → core | `GenerationRequest` |
+| core → worker | `GenerationResult` + four artifacts |
+| ingestion → engine | normalized ingestion JSON |
+| engine → agents/renderer | serialized `MetricStore` / catalog |
+| agents → renderer | section/chart/narrative/review schemas |
+| renderer → validator | PPTX + audit XLSX + resolved chart specs |
 
-| 位置 | 範圍 | 執行方式 |
-|---|---|---|
-| `tests/` | 主管線（engine / recognize / ingest / 指標定義） | repo root 跑 `pytest`（`conftest.py` 已設好路徑） |
-| `src/backend/tests/` | ingestion 管線 | `src/backend/` 下跑 `pytest`（該層有自己的 `pytest.ini`） |
+LLM 僅產生結構化意圖/規劃、洞察敘事與信件摘要；數值只能由 deterministic engine 產生。敘事數字只能使用 MetricStore placeholder，由 renderer 代入。
+
+## 檔案處理
+
+- `source/` 是命題方原始素材，唯讀。
+- `outputs/` 是使用者保留成果；驗收一律用系統 temp，不得擅自刪除、搬移或覆寫。
+- `docs/` 是設計決策來源；實作與文件衝突時先釐清並同步更新。
+- renderer 輸出的 Excel 工作表使用 `P.{頁碼}_{指標名稱}`；ingestion 不得假設來源遵循此命名。
+- 所有 AWS SDK client 必須顯式指定 `AWS_REGION`。
+
+## 測試與驗證
+
+`python scripts/verify_all.py` 是合併前唯一關卡，必須：
+
+1. 執行 root tests。
+2. 在 `src/backend/` 執行 backend tests。
+3. 靜態檢查 `src/` 不反向依賴工具碼。
+4. 以版控內真 Excel + store-aware fake LLM 呼叫 `GenerationRequest → generate_deck()`。
+5. 斷言 PPTX、XLSX、verification JSON、generation manifest 四項 artifacts。
+6. 斷言 reviewer fail-closed、無 unresolved placeholders、T1 `external_checked == series_checked > 0`。
+
+新增任何圖表生成邏輯，都必須有 chart cache、embedded workbook、外部稽核 XLSX 的一致性驗證。模型品質另用 `python -m tools.compare_models` 跑正式 full-pipeline A/B，不得阻擋 deterministic CI。

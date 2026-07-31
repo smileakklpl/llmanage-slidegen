@@ -1,81 +1,69 @@
-"""Service layer for job orchestration.
+"""Service layer for durable asynchronous generation jobs."""
 
-JobService is responsible for creating jobs, generating unique IDs, and
-coordinating with the repository. It does NOT depend on FastAPI.
-"""
+from __future__ import annotations
 
 import asyncio
-import tempfile
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import PurePosixPath
 from uuid import uuid4
-
-from fastapi import UploadFile
 
 from app.repositories.job_repository import JobModel, JobRepository
 from app.schemas.jobs import JobStage, JobStatus
-from app.worker.job_runner import run_job
+from app.storage.s3_storage import S3ObjectStorage
+from app.worker.generation_job_runner import run_generation_job
+from core.contracts.generation import StoredObjectRef
 
-# Temp directory for uploaded files
-_UPLOAD_DIR = Path(tempfile.gettempdir()) / "slidegen_uploads"
-_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+
+def is_authorized_artifact_key(
+    job_id: str,
+    filename: str,
+    object_key: str | None,
+) -> bool:
+    """Return whether an S3 key belongs to this job and artifact filename."""
+    if not object_key:
+        return False
+
+    key_path = PurePosixPath(object_key)
+    return (
+        key_path.parts[:2] == ("outputs", job_id)
+        and ".." not in key_path.parts
+        and key_path.name == filename
+    )
 
 
 class JobService:
-    """Handles job creation and lifecycle management.
+    """Create jobs and dispatch the real generation worker."""
 
-    Dependencies are injected via the constructor so the service remains
-    decoupled from specific repository implementations.
-    """
-
-    def __init__(self, repository: JobRepository) -> None:
+    def __init__(
+        self,
+        repository: JobRepository,
+        storage: S3ObjectStorage,
+        *,
+        use_fake_llm: bool = False,
+        skip_semantic_review: bool = False,
+    ) -> None:
         self._repository = repository
+        self._storage = storage
+        self._use_fake_llm = use_fake_llm
+        self._skip_semantic_review = skip_semantic_review
 
     @staticmethod
     def generate_job_id() -> str:
-        """Generate a unique job identifier using UUID4."""
         return str(uuid4())
 
-    async def _save_uploads(self, job_id: str, files: list[UploadFile]) -> list[str]:
-        """Save uploaded files to a job-specific temp directory.
-
-        Returns:
-            List of absolute file paths where files were saved.
-        """
-        job_dir = _UPLOAD_DIR / job_id
-        job_dir.mkdir(parents=True, exist_ok=True)
-
-        paths: list[str] = []
-        for file in files:
-            filename = file.filename or "unknown.xlsx"
-            dest = job_dir / filename
-            content = await file.read()
-            dest.write_bytes(content)
-            paths.append(str(dest))
-
-        return paths
-
     async def create_job(
-        self, prompt: str, filenames: list[str], files: list[UploadFile] | None = None
+        self,
+        *,
+        job_id: str,
+        prompt: str,
+        input_objects: list[StoredObjectRef],
     ) -> JobModel:
-        """Create a new job in queued state and persist it.
+        """Persist a queued job and start its non-blocking worker task."""
 
-        Args:
-            prompt: The user-provided prompt describing desired output.
-            filenames: Names of the uploaded Excel files.
-            files: The actual uploaded file objects to save to disk.
+        if not input_objects:
+            raise ValueError("至少需要一個已保存的輸入物件")
 
-        Returns:
-            The persisted JobModel with a unique job_id.
-        """
         now = datetime.now(timezone.utc)
-        job_id = self.generate_job_id()
-
-        # Save files to disk if provided
-        file_paths: list[str] = []
-        if files:
-            file_paths = await self._save_uploads(job_id, files)
-
         job = JobModel(
             job_id=job_id,
             status=JobStatus.queued,
@@ -85,23 +73,58 @@ class JobService:
             created_at=now,
             updated_at=now,
             prompt=prompt,
-            filenames=filenames,
-            file_paths=file_paths,
+            filenames=[item.filename for item in input_objects],
+            input_objects=input_objects,
         )
         created = await self._repository.create(job)
 
-        # Start the job runner in the background (non-blocking).
-        asyncio.create_task(run_job(created.job_id, self._repository))
-
+        asyncio.create_task(
+            run_generation_job(
+                created.job_id,
+                self._repository,
+                self._storage,
+                use_fake_llm=self._use_fake_llm,
+                skip_semantic_review=self._skip_semantic_review,
+            )
+        )
         return created
 
-    async def get_job(self, job_id: str) -> JobModel | None:
-        """Retrieve a job by ID.
+    async def get_job(
+        self,
+        job_id: str,
+        *,
+        refresh_download_urls: bool = True,
+    ) -> JobModel | None:
+        job = await self._repository.get(job_id)
 
-        Args:
-            job_id: Unique identifier of the job to retrieve.
+        if job is None:
+            return None
 
-        Returns:
-            The JobModel if found, otherwise None.
-        """
-        return await self._repository.get(job_id)
+        if job.job_id != job_id:
+            raise RuntimeError("持久化工作識別碼與查詢鍵不一致")
+
+        if not job.artifacts:
+            return job
+
+        # Never trust a persisted URL. Only keys belonging to the requested
+        # job may be signed, and callers can request sanitized metadata without
+        # signing.
+        artifacts = []
+        for artifact in job.artifacts:
+            authorized = is_authorized_artifact_key(
+                job_id,
+                artifact.filename,
+                artifact.object_key,
+            )
+            download_url = (
+                self._storage.presigned_download_url(artifact.object_key)
+                if authorized
+                and refresh_download_urls
+                and artifact.object_key is not None
+                else ""
+            )
+            artifacts.append(
+                artifact.model_copy(update={"download_url": download_url})
+            )
+
+        return job.model_copy(update={"artifacts": artifacts})

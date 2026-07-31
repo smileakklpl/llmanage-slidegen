@@ -103,6 +103,10 @@ class MetricSeries:
     categories: list[str]
     series: dict[str, list[float | None]]
     unit: str | None = None
+    #: 每個系列的原始單位。當同一 MetricSeries 合併不同來源指標時，
+    #: ``unit`` 會是 None，但這份 mapping 仍保留每條 series 的量綱，
+    #: 供 chart planner 防止把張數、金額、比率畫在同一個 value axis。
+    series_units: dict[str, str | None] = field(default_factory=dict)
     #: 指標語意類型，供 reviewer 判斷圖表類型是否合適（如 share 不該用折線圖）
     semantic: str = "value"
     #: 類別軸語意：``temporal``（時間序列）或 ``categorical``（橫斷面分類）。
@@ -120,6 +124,13 @@ class MetricSeries:
     requires_human_review: bool = False
 
     def __post_init__(self) -> None:
+        unknown_unit_series = set(self.series_units) - set(self.series)
+        if unknown_unit_series:
+            raise ValueError(
+                f"指標 {self.metric_key!r} 的 series_units 含不存在的系列："
+                f"{sorted(unknown_unit_series)}"
+            )
+
         for series_name, values in self.series.items():
             if len(values) != len(self.categories):
                 raise ValueError(
@@ -140,6 +151,15 @@ class MetricSeries:
 
         return list(self.series[series_name])
 
+    def unit_for(self, series_name: str) -> str | None:
+        """Return the series unit, falling back to the metric-wide unit."""
+        if series_name not in self.series:
+            raise MetricNotFoundError(
+                f"指標 {self.metric_key!r} 中沒有系列 {series_name!r}"
+            )
+
+        return self.series_units.get(series_name, self.unit)
+
     def source_of(self, series_name: str, category: str) -> SourceRef | None:
         """取得某格數值的來源。衍生指標可能沒有直接來源，回傳 None。"""
         return self.evidence.get(f"{series_name}|{category}")
@@ -151,6 +171,7 @@ class MetricSeries:
             "categories": list(self.categories),
             "series": {name: list(values) for name, values in self.series.items()},
             "unit": self.unit,
+            "series_units": dict(self.series_units),
             "semantic": self.semantic,
             "axis_kind": self.axis_kind,
             "computable": self.computable,
@@ -171,6 +192,10 @@ class MetricSeries:
                 for name, values in payload.get("series", {}).items()
             },
             unit=payload.get("unit"),
+            series_units={
+                str(name): unit
+                for name, unit in payload.get("series_units", {}).items()
+            },
             semantic=payload.get("semantic", "value"),
             axis_kind=payload.get("axis_kind", "categorical"),
             computable=payload.get("computable", True),
@@ -278,6 +303,10 @@ class MetricStore:
                     "metric_key": metric_key,
                     "name": series.name,
                     "unit": series.unit,
+                    "series_units": {
+                        name: series.unit_for(name)
+                        for name in series.series_names
+                    },
                     "semantic": series.semantic,
                     "axis_kind": series.axis_kind,
                     "series_names": series.series_names,

@@ -113,21 +113,26 @@
       `sections` 猜成 `pages`；非必填欄位的 null 被當型別錯誤；429 限流沒有重試），
       已修並有 `tests/test_llm_client_contract.py` 守著。
       註：免費額度是 per-model per-day（約 20 次），全流程要靠 per-stage 模型路由分散
-- [ ] **真實模型的 prompt 迭代**。目前敘事品質已可用，但仍有 selector 語意誤用
-      （把 `max` 用在「何時」的位置）。`narrative_writer._label_hints()` 已針對
-      民國年月代碼與 `max_category` 補了提示，實測有效；剩下的要靠 `evalh/` 跑 N 次看比率
+- [ ] **真實模型的 prompt 迭代**。目前敘事品質已可用，後續以
+      `python -m tools.compare_models` 對固定 Excel/prompt 跑完整 generation pipeline，
+      比較 reviewer fail-closed、T1 通過率與延遲
 - [ ] **F4 自動寄送完全未做**。`src/` 下沒有 mailer 模組，也沒有 MailHog 的
       docker compose。做起來最快、Demo 效果明顯
-- [ ] **F5.3 非同步 job API 未做**。`src/backend/app/main.py` 只有 `/health`、`/ready`
-      與 ingestion router；缺 `POST /generate` → `202` + job_id → `GET /jobs/{id}` 輪詢
+- [x] **F5.3 非同步 job API 已接通**。`POST /api/v1/jobs/generate` 回 `202 + job_id`，
+      worker 透過 `GenerationRequest` 呼叫正式 orchestrator，`GET /api/v1/jobs/{id}`
+      回傳狀態與四項 artifacts
+- [ ] **job durable dispatch / restart recovery 尚未完成**。job 狀態已落 S3，但目前以
+      process-local `asyncio.create_task` 執行；程序在 queued/running 中重啟時，尚無重新 claim
+      與 retry 機制。部署前需改為可恢復的 worker queue 或啟動時 recovery scan
 - [ ] **A2 DeckSpec / Refresh 未做**。找不到 deckspec 模組，`replay(deckspec, new_data)`
       不存在
-- [ ] **intent 模組未接上**。`src/core/contracts/intent_spec.py` 有契約，但
-      `run_pipeline` 直接把 prompt 丟給 section_planner，沒有先解析成 IntentSpec
-      （FR-5.2 要抽取頁數、對象、收件人）
+- [ ] **intent 契約尚未獨立落地**。目前 `run_pipeline` 直接把 prompt 交給
+      section planner；若要完整滿足 FR-5.2，仍需在正式 agent schemas 中加入頁數、
+      對象與收件人的結構化意圖契約，不得恢復已刪除的第二套 core contracts
 - [ ] **敘事平行化未做**。`narrative_writer.py:306` 自己留了註記，目前序列執行，
       影響 NFR-1 的 5 分鐘目標
-- [ ] **S3 落檔未做**。規格要求所有輸入輸出一律落 S3，目前全在本機 `outputs/`
+- [x] **S3 落檔已接通**。uploads、jobs 與生成 artifacts 由 backend storage/repository
+      保存；本地 worker temp path 不成為持久化真相來源
 - [ ] **前端**只有 `.gitkeep`；**部署**沒有 Dockerfile / docker-compose
 
 ### 圖表與驗收
@@ -158,9 +163,9 @@
 
 | 測試 | 結果 | 備註 |
 |:---|:---|:---|
-| root `pytest` | ✅ 202 passed | 前一輪為 180；新增 `test_deck_style.py`（14）與 `test_llm_client_contract.py`（8） |
-| `src/backend` `pytest` | ✅ 66 passed | 前一輪為 36；PDF／影像 2 支因本機缺 reportlab／pymupdf 無法 collect，與本次改動無關 |
-| `scripts/verify_all.py` | ✅ 8 項全綠 | 含分層依賴、golden 辨識器、FR-1.5 開關、writer fixture 漂移 |
+| root `pytest` | ✅ 187 passed | 已移除只綁舊 core engine/contracts 的重複測試；關鍵 YoY 斷言已遷到正式 metric engine |
+| `src/backend` `pytest` | ✅ 73 passed | ingestion、API、S3 repository/worker 路徑全綠 |
+| `scripts/verify_all.py` | ✅ 4 gates 全綠 | root/backend tests、分層掃描、正式 orchestrator full smoke；21 slides / 9 charts / T1 22/22 / 4 artifacts |
 
 ### 端到端（全部 `--fake-llm`，零次模型呼叫）
 

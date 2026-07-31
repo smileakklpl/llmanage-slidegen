@@ -4,17 +4,29 @@
 期間對應、機構對應、合計列取值三者同時正確。缺檔時 skip。
 """
 
-import sys
+import os
 from pathlib import Path
 
 import pytest
 from openpyxl import load_workbook
 
 from tools.ingest_fsc import METRICS, convert, discover, norm
-from paths import find_xlsx
 
-from paths import FSC_RAW as SRC
-REF = find_xlsx()
+REPO_ROOT = Path(__file__).resolve().parent.parent
+SRC = REPO_ROOT / "fixtures" / "data" / "金融業務資訊揭露"
+
+
+def _find_reference_xlsx() -> Path | None:
+    configured = os.getenv("SLIDEGEN_XLSX")
+    candidates = [
+        Path(configured).expanduser() if configured else None,
+        REPO_ROOT / "source" / "附件四_預期修正參照資料.xlsx",
+        REPO_ROOT / "fixtures" / "data" / "附件四_預期修正參照資料.xlsx",
+    ]
+    return next((path for path in candidates if path and path.is_file()), None)
+
+
+REF = _find_reference_xlsx()
 
 PERIODS_114 = [f"114{m:02d}" for m in range(1, 13)]
 

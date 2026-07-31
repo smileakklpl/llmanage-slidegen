@@ -400,11 +400,13 @@ CHART_SKILL_TOOL_SCHEMAS = [
                 "series_names": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": "限定取用的系列名稱，留空代表全取。",
+                    "minItems": 1,
+                    "maxItems": 2,
+                    "description": "必填；只列出與本頁主題直接相關的系列名稱。",
                 },
                 "chart_title": {"type": "string"},
             },
-            "required": ["metric_key", "chart_title"],
+            "required": ["metric_key", "series_names", "chart_title"],
         },
     },
     {
@@ -422,11 +424,13 @@ CHART_SKILL_TOOL_SCHEMAS = [
                 "series_names": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": "限定取用的系列名稱，留空代表全取。",
+                    "minItems": 1,
+                    "maxItems": 2,
+                    "description": "必填；只列出與本頁主題直接相關的系列名稱。",
                 },
                 "chart_title": {"type": "string"},
             },
-            "required": ["metric_key", "chart_title"],
+            "required": ["metric_key", "series_names", "chart_title"],
         },
     },
     {
@@ -444,11 +448,13 @@ CHART_SKILL_TOOL_SCHEMAS = [
                 "series_names": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": "限定取用的系列名稱，留空代表全取。",
+                    "minItems": 1,
+                    "maxItems": 2,
+                    "description": "必填；只列出與本頁主題直接相關的系列名稱。",
                 },
                 "chart_title": {"type": "string"},
             },
-            "required": ["metric_key", "chart_title"],
+            "required": ["metric_key", "series_names", "chart_title"],
         },
     },
     {
@@ -458,9 +464,16 @@ CHART_SKILL_TOOL_SCHEMAS = [
             "type": "object",
             "properties": {
                 "metric_key": {"type": "string"},
+                "series_names": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "minItems": 1,
+                    "maxItems": 1,
+                    "description": "必填且只能指定一個與本頁主題相關的系列。",
+                },
                 "chart_title": {"type": "string"},
             },
-            "required": ["metric_key", "chart_title"],
+            "required": ["metric_key", "series_names", "chart_title"],
         },
     },
     {
@@ -468,7 +481,7 @@ CHART_SKILL_TOOL_SCHEMAS = [
         "description": (
             "雙軸圖（長條 + 折線）。適合兩個量級差距大、但需並列比較的系列，"
             "例如流通卡數（張）與簽帳金額（百萬元）同時看趨勢。"
-            "series_names 的第一個畫長條掛主軸，其餘畫折線掛右側次軸。"
+            "series_names 的第一個畫長條掛主軸，第二個畫折線掛右側次軸。"
         ),
         "parameters": {
             "type": "object",
@@ -480,9 +493,11 @@ CHART_SKILL_TOOL_SCHEMAS = [
                 "series_names": {
                     "type": "array",
                     "items": {"type": "string"},
+                    "minItems": 2,
+                    "maxItems": 2,
                     "description": (
-                        "至少兩個系列名稱。第一個為長條（主軸），"
-                        "其餘為折線（次軸）。"
+                        "恰好兩個系列名稱。第一個為長條（主軸），"
+                        "第二個為折線（次軸）。"
                     ),
                 },
                 "chart_title": {"type": "string"},
@@ -500,6 +515,8 @@ CHART_SKILL_TOOL_SCHEMAS = [
                 "series_names": {
                     "type": "array",
                     "items": {"type": "string"},
+                    "minItems": 2,
+                    "maxItems": 2,
                     "description": "恰好兩個系列名稱，分別對應 x 軸與 y 軸。",
                 },
                 "chart_title": {"type": "string"},

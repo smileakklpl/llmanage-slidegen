@@ -1,11 +1,18 @@
 services:
   backend:
-    build: ./src/backend
+    build:
+      context: .
+      dockerfile: src/backend/Dockerfile
     container_name: slidegen-backend
     environment:
       - CORS_ORIGINS=["http://localhost","http://localhost:80"]
       - APP_NAME=slidegen-api
       - DEBUG=false
+      - AWS_REGION=${AWS_REGION:-ap-northeast-1}
+      - S3_BUCKET=${S3_BUCKET:-}
+      - S3_ENDPOINT_URL=${S3_ENDPOINT_URL:-}
+      - GENERATION_USE_FAKE_LLM=${GENERATION_USE_FAKE_LLM:-false}
+      - GENERATION_SKIP_SEMANTIC_REVIEW=${GENERATION_SKIP_SEMANTIC_REVIEW:-false}
     expose:
       - "8000"
     restart: unless-stopped
