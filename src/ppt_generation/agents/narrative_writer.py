@@ -17,12 +17,17 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import Any, Callable, Collection, Mapping
 
 from ..core import llm_client, placeholders
 from ..charts.chart_planner import ResolvedChart
-from ..data.metric_store import MetricStore
+from ..data.metric_store import (
+    MetricNotComputableError,
+    MetricNotFoundError,
+    MetricStore,
+)
 from .section_planner import SectionPlan
 
 
@@ -76,6 +81,9 @@ _PLACEHOLDER_RULES = """
 - selector 可以是類別名稱（如 3月、中信），或以下關鍵字：
   latest（最後一期）、first（第一期）、max、min、sum、avg、
   max_category（最大值所在類別名稱）、min_category
+- 只有 semantic=rank 的指標可用來描述「排名／名次／第幾名」；
+  value 指標是規模數值，不可放進排名或「幾倍」的語句
+- max_category / min_category 回傳實體名稱；「總計／合計」不是實體，禁止當銀行名稱
 
 正確範例：
   「市場流通卡數達 {{mkt.value|2026年|latest}}，年增 {{mkt.yoy|2026 vs 2025|latest}}」
@@ -172,6 +180,9 @@ def build_prompt(
             "metric_key": metric.metric_key,
             "name": metric.name,
             "unit": metric.unit,
+            "series_units": {
+                name: metric.unit_for(name) for name in chart.series_names
+            },
             "semantic": metric.semantic,
             "axis_kind": metric.axis_kind,
             "series_names": chart.series_names,
@@ -340,10 +351,68 @@ def _label_hints(chart: ResolvedChart) -> list[str]:
     return hints
 
 
+def _check_placeholder_semantics(text: str, store: MetricStore) -> list[str]:
+    """攔截把一般數值誤當排名或未計算倍數的敘事。"""
+    issues: list[str] = []
+
+    for match in placeholders.PLACEHOLDER_PATTERN.finditer(text):
+        try:
+            placeholder = placeholders.parse_placeholder(match.group(1))
+            metric = store.get(placeholder.metric_key)
+        except (
+            placeholders.PlaceholderError,
+            MetricNotFoundError,
+            MetricNotComputableError,
+        ):
+            # Lookup and parse errors are reported by render_text below. Keep this
+            # check focused on the semantic role of otherwise valid placeholders.
+            continue
+
+        if placeholder.returns_category:
+            continue
+
+        before = text[max(0, match.start() - 16) : match.start()]
+        after = text[match.end() : match.end() + 8]
+        rank_context = bool(
+            re.search(
+                r"(?:排名|名次)(?:為|是|達|第|落在|來到|升至|降至|：|:|\s)*$",
+                before,
+            )
+            or (
+                re.search(r"第\s*$", before)
+                and re.match(r"^\s*(?:名|位)", after)
+            )
+        )
+
+        if rank_context and metric.semantic != "rank":
+            issues.append(
+                f"佔位符 {{{{{placeholder.raw}}}}} 引用 semantic="
+                f"{metric.semantic!r} 的數值，卻被放在排名／名次語句中；"
+                "請改用同一指標的 .rank metric_key，或改寫為規模比較"
+            )
+
+        ratio_context = bool(
+            re.match(r"^\s*倍", after)
+            or re.search(
+                r"倍數(?:為|是|達|來到|約為|：|:|\s)*$",
+                before,
+            )
+        )
+
+        if ratio_context and metric.semantic != "ratio" and metric.unit != "倍":
+            issues.append(
+                f"佔位符 {{{{{placeholder.raw}}}}} 是原始數值，不能直接當倍數；"
+                "倍數必須由 engine 先產生可追溯的 ratio 指標"
+            )
+
+    return issues
+
+
 def check_narrative(
     narrative: PageNarrative,
     store: MetricStore,
     allowed_metric_keys: set[str] | None = None,
+    allowed_series_by_metric: Mapping[str, Collection[str]] | None = None,
 ) -> list[str]:
     """
     規則層檢查（確定性，不呼叫 LLM）。
@@ -404,6 +473,39 @@ def check_narrative(
             f"本頁可用指標：{sorted(allowed)}"
         )
 
+    if allowed_series_by_metric is not None:
+        outside_scope: list[str] = []
+
+        for match in placeholders.PLACEHOLDER_PATTERN.finditer(text):
+            try:
+                placeholder = placeholders.parse_placeholder(match.group(1))
+            except placeholders.PlaceholderError:
+                continue
+
+            if placeholder.series_name is None:
+                # 多系列省略 series 的錯誤會由 render_text 回報；單系列則
+                # 沒有選錯主題的可能，因此不重複報錯。
+                continue
+
+            series_allowlist = set(
+                allowed_series_by_metric.get(placeholder.metric_key, [])
+            )
+            if (
+                placeholder.metric_key in allowed
+                and placeholder.series_name not in series_allowlist
+            ):
+                outside_scope.append(
+                    f"{placeholder.metric_key}|{placeholder.series_name}"
+                )
+
+        if outside_scope:
+            issues.append(
+                f"敘事引用了本頁圖表未呈現的系列 {outside_scope}；"
+                "文字與圖表必須使用同一組 series scope"
+            )
+
+    issues.extend(_check_placeholder_semantics(text, store))
+
     # 逐一嘗試代入，抓出系列名稱或 selector 寫錯的情況。
     _, render_errors = placeholders.render_text(text, store, strict=False)
     issues.extend(render_errors)
@@ -418,6 +520,9 @@ def write_narrative_for_page(
     *,
     llm_call: Callable[..., Any] | None = None,
     max_attempts: int = MAX_NARRATIVE_ATTEMPTS,
+    initial_errors: Collection[str] | None = None,
+    llm_stage: str = "writer",
+    deadline_monotonic: float | None = None,
 ) -> tuple[PageNarrative | None, list[str], int]:
     """
     為單頁撰寫敘事，內含規則層自我校正迴圈。
@@ -427,14 +532,17 @@ def write_narrative_for_page(
     """
     call = llm_call or llm_client.complete_json
     allowed = {chart.metric.metric_key}
-    issues: list[str] = []
+    # Reviewer 退件後的修正也走同一個結構化 writer 契約；第一輪 prompt
+    # 直接帶入退件原因，避免再花一次呼叫重現已知問題。
+    issues: list[str] = list(initial_errors or [])
 
     for attempt in range(1, max_attempts + 1):
         payload = call(
             build_prompt(section, chart, store, issues),
             NARRATIVE_SCHEMA,
             system_prompt=SYSTEM_PROMPT,
-            stage="writer",
+            stage=llm_stage,
+            deadline_monotonic=deadline_monotonic,
         )
 
         narrative = PageNarrative(
@@ -449,7 +557,12 @@ def write_narrative_for_page(
             narrative.all_text
         )
 
-        issues = check_narrative(narrative, store, allowed)
+        issues = check_narrative(
+            narrative,
+            store,
+            allowed,
+            {chart.metric.metric_key: chart.series_names},
+        )
 
         if not issues:
             return narrative, [], attempt
@@ -462,6 +575,59 @@ def write_narrative_for_page(
         )
 
     return None, issues, max_attempts
+
+
+def build_deterministic_fallback(
+    section: SectionPlan,
+    chart: ResolvedChart,
+    store: MetricStore,
+) -> PageNarrative:
+    """Build a neutral, fully traceable narrative without asking an LLM.
+
+    This is the final required-output safety net. It deliberately avoids causal
+    or directional claims and references only the page's validated ChartSpec.
+    """
+    metric_key = chart.metric.metric_key
+    series_name = chart.series_names[0]
+
+    def cite(selector: str) -> str:
+        return f"{{{{{metric_key}|{series_name}|{selector}}}}}"
+
+    narrative = PageNarrative(
+        page_number=section.page_number,
+        slide_title=section.title,
+        headline=(
+            "本頁指標呈現可追蹤的市場結構，後續決策應持續依據資料變化調整"
+        ),
+        bullets=[
+            (
+                f"目前觀察值為 {cite('latest')}，可作為評估市場狀態、"
+                "資源配置與經營節奏的客觀基準。"
+            ),
+            (
+                f"觀察區間內的代表性高點為 {cite('max')}，管理團隊應搭配"
+                "客群與通路結構持續檢視其管理意涵。"
+            ),
+            (
+                f"觀察區間內的代表性低點為 {cite('min')}，後續應以一致"
+                "口徑追蹤，並依最新資料調整管理優先順序。"
+            ),
+        ],
+    )
+    narrative.cited_metric_keys = placeholders.cited_metric_keys(
+        narrative.all_text
+    )
+    issues = check_narrative(
+        narrative,
+        store,
+        {metric_key},
+        {metric_key: chart.series_names},
+    )
+
+    if issues:
+        raise RuntimeError(f"確定性敘事 fallback 未通過規則：{issues}")
+
+    return narrative
 
 
 def write_narratives(

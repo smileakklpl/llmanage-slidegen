@@ -51,11 +51,14 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import logging
 import sys
+import time
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any, Callable, Sequence
 
 from .agents import chart_agent, narrative_writer, reviewer, section_planner
 from .charts import chart_planner
@@ -81,6 +84,17 @@ STAGE_SEQUENCE: tuple[str, ...] = (
     "render",
     "verify",
 )
+
+#: Reviewer 退回 narrative_writer 後，單頁最多額外重寫次數。
+#: 初始 writer 本身已有 MAX_NARRATIVE_ATTEMPTS 次確定性自我修正；這裡再設
+#: 硬上限，避免 semantic reviewer 不穩定時形成無限 Bedrock 呼叫。
+MAX_REVIEW_REPAIR_ATTEMPTS = 2
+
+DELIVERY_APPROVED = "APPROVED"
+DELIVERY_APPROVED_WITH_WARNING = "APPROVED_WITH_WARNING"
+CANDIDATE_LLM = "writer"
+CANDIDATE_FALLBACK_MODEL = "writer_fallback"
+CANDIDATE_DETERMINISTIC = "deterministic_fallback"
 
 #: 封面標題預設值。用使用者的 prompt 原句當標題會在封面上出現
 #: 「幫我做一份…」這種指令句；標題該是簡報的名字，不是下單的話。
@@ -136,6 +150,212 @@ class StageDump:
         return target
 
 
+def _sha256_text(text: str) -> str:
+    """Return the lowercase SHA-256 digest of UTF-8 text."""
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _hash_input(path: Path | None, payload: dict[str, Any]) -> tuple[str, str, int]:
+    """Hash the exact source input; directories include relative names and bytes."""
+    digest = hashlib.sha256()
+
+    if path is None:
+        canonical = json.dumps(
+            payload,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            default=str,
+        )
+        digest.update(canonical.encode("utf-8"))
+        return digest.hexdigest(), "sample", 0
+
+    resolved = path.resolve()
+
+    if resolved.is_file():
+        with resolved.open("rb") as stream:
+            for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                digest.update(chunk)
+
+        return digest.hexdigest(), "file", 1
+
+    if not resolved.is_dir():
+        raise ValueError(f"無法計算輸入雜湊，路徑不存在：{resolved}")
+
+    files = sorted(item for item in resolved.rglob("*") if item.is_file())
+
+    for item in files:
+        relative = item.relative_to(resolved).as_posix()
+        digest.update(relative.encode("utf-8"))
+        digest.update(b"\0")
+
+        with item.open("rb") as stream:
+            for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                digest.update(chunk)
+
+        digest.update(b"\0")
+
+    return digest.hexdigest(), "directory", len(files)
+
+
+def _write_generation_manifest(
+    *,
+    output_dir: Path,
+    input_path: Path | None,
+    data_source: str,
+    payload: dict[str, Any],
+    user_prompt: str,
+    sections: Sequence[str] | None,
+    deck_title: str | None,
+    use_fake_llm: bool,
+    skip_semantic_review: bool,
+    generation_policy: str,
+    deadline_seconds: float,
+    render_reserve_seconds: float,
+) -> Path:
+    """Persist model routing and content hashes for post-run audit."""
+    input_sha256, input_kind, input_file_count = _hash_input(input_path, payload)
+
+    if use_fake_llm:
+        llm_payload: dict[str, Any] = {
+            "mode": "fake",
+            "provider": "fake",
+            "aws_region": None,
+            "configured_stage_models": {
+                "sections": "fake",
+                "charts": "fake",
+                "narratives": "fake",
+                "narratives_fallback": "fake",
+                "review": "fake" if not skip_semantic_review else None,
+            },
+        }
+    else:
+        try:
+            settings = config.load_llm_settings()
+        except Exception as error:  # noqa: BLE001 - required mode must deliver
+            if generation_policy != "required":
+                raise
+            llm_payload = {
+                "mode": "configuration_unavailable",
+                "provider": None,
+                "aws_region": None,
+                "configured_stage_models": {},
+                "configuration_error_type": type(error).__name__,
+            }
+        else:
+            llm_payload = {
+                "mode": "live",
+                "provider": settings.provider,
+                "aws_region": (
+                    settings.aws_region
+                    if settings.provider == "bedrock"
+                    else None
+                ),
+                "configured_stage_models": {
+                    "sections": settings.model_for("intent"),
+                    "charts": settings.model_for("chart"),
+                    "narratives": settings.model_for("writer"),
+                    "narratives_fallback": settings.model_for(
+                        "writer_fallback"
+                    ),
+                    "review": (
+                        settings.model_for("reviewer")
+                        if not skip_semantic_review
+                        else None
+                    ),
+                },
+                "capabilities": {
+                    "tool_mode": settings.tool_mode,
+                    "json_mode": settings.json_mode,
+                    "system_mode": settings.system_mode,
+                },
+            }
+
+    llm_payload["semantic_review_enabled"] = not skip_semantic_review
+    llm_payload["calls_by_stage"] = {
+        "sections": 0,
+        "charts": 0,
+        "narratives": 0,
+        "review": 0,
+    }
+
+    manifest = {
+        "contract_version": "1.0",
+        "input": {
+            "source": data_source,
+            "kind": input_kind,
+            "file_count": input_file_count,
+            "sha256": input_sha256,
+        },
+        "request": {
+            "user_prompt_sha256": _sha256_text(user_prompt),
+            "sections": list(sections) if sections is not None else None,
+            "deck_title": deck_title or DEFAULT_DECK_TITLE,
+            "generation_policy": generation_policy,
+            "deadline_seconds": deadline_seconds,
+            "render_reserve_seconds": render_reserve_seconds,
+        },
+        "configured_system_prompt_sha256": {
+            "sections": _sha256_text(section_planner.SYSTEM_PROMPT),
+            "charts": _sha256_text(chart_agent.SYSTEM_PROMPT),
+            "narratives": _sha256_text(narrative_writer.SYSTEM_PROMPT),
+            "review": (
+                _sha256_text(reviewer.SYSTEM_PROMPT)
+                if not skip_semantic_review
+                else None
+            ),
+        },
+        "llm": llm_payload,
+    }
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    target = output_dir / "generation_manifest.json"
+    target.write_text(
+        json.dumps(manifest, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    return target
+
+
+_LLM_STAGE_TO_MANIFEST = {
+    "intent": "sections",
+    "chart": "charts",
+    "writer": "narratives",
+    "writer_fallback": "narratives",
+    "reviewer": "review",
+}
+
+
+def _record_llm_call(output_dir: Path, llm_stage: str) -> None:
+    """Increment the actual invocation count for one routed LLM stage."""
+    stage = _LLM_STAGE_TO_MANIFEST.get(llm_stage)
+
+    if stage is None:
+        return
+
+    target = output_dir / "generation_manifest.json"
+    payload = json.loads(target.read_text(encoding="utf-8"))
+    calls = payload["llm"]["calls_by_stage"]
+    calls[stage] = int(calls.get(stage) or 0) + 1
+    target.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
+def _audited_llm_call(
+    call: Callable[..., Any],
+    output_dir: Path,
+) -> Callable[..., Any]:
+    """Wrap a live or fake LLM callable and record every actual invocation."""
+
+    def wrapped(*args: Any, **kwargs: Any) -> Any:
+        _record_llm_call(output_dir, str(kwargs.get("stage") or "default"))
+        return call(*args, **kwargs)
+
+    return wrapped
+
+
 def _resolved_chart_payload(chart: Any) -> dict[str, Any]:
     """序列化 ResolvedChart。數值來自 MetricStore 查表結果，非 LLM 產出。"""
     spec = chart.spec
@@ -163,6 +383,9 @@ def _resolved_chart_payload(chart: Any) -> dict[str, Any]:
         "plan": chart.plan.to_dict(),
         "skill_name": chart.skill_name,
         "series_names": list(chart.series_names),
+        "series_units": {
+            name: chart.metric.unit_for(name) for name in chart.series_names
+        },
         "metric_key": chart.metric.metric_key,
         "spec": spec_payload,
     }
@@ -335,19 +558,37 @@ def _fake_json_call(prompt: str, schema: dict[str, Any], **_: Any) -> Any:
                     "title": "市場整體概況",
                     "chapter": "市場整體概況",
                     "intent": "呈現市場規模趨勢",
-                    "suggested_metric_keys": ["market_cards.value"],
+                    "metric_scopes": [
+                        {
+                            "metric_key": "market_cards.value",
+                            "series_names": ["2026年"],
+                            "comparison_reason": "",
+                        }
+                    ],
                 },
                 {
                     "title": "成長動能檢視",
                     "chapter": "同業成長及競爭分析",
                     "intent": "檢視年增動能變化",
-                    "suggested_metric_keys": ["market_cards.yoy"],
+                    "metric_scopes": [
+                        {
+                            "metric_key": "market_cards.yoy",
+                            "series_names": ["2026 vs 2025"],
+                            "comparison_reason": "",
+                        }
+                    ],
                 },
                 {
                     "title": "業者競爭態勢",
                     "chapter": "同業成長及競爭分析",
                     "intent": "比較各銀行市占",
-                    "suggested_metric_keys": ["bank_cards.share"],
+                    "metric_scopes": [
+                        {
+                            "metric_key": "bank_cards.share",
+                            "series_names": ["流通卡數"],
+                            "comparison_reason": "",
+                        }
+                    ],
                 },
             ],
         }
@@ -604,6 +845,20 @@ def _make_store_aware_fakes(store: Any):
 
         return None
 
+    def _scope_for(page: dict[str, Any]) -> list[str]:
+        arguments = _fake_chart_arguments(
+            store, page["metric_key"], page["skill"]
+        )
+        return list(arguments.get("series_names") or [])
+
+    def _comparison_reason_for(page: dict[str, Any]) -> str:
+        scope = _scope_for(page)
+        return (
+            "依頁面 intent 比較同一主題的多期表現或兩項明確關係"
+            if len(scope) > 1
+            else ""
+        )
+
     def json_call(prompt: str, schema: dict[str, Any], **_: Any) -> Any:
         properties = schema.get("properties", {})
 
@@ -618,7 +873,13 @@ def _make_store_aware_fakes(store: Any):
                             f"回答 {store.get(page['metric_key']).name}"
                             "的分佈是否已形成穩定的競爭格局"
                         ),
-                        "suggested_metric_keys": [page["metric_key"]],
+                        "metric_scopes": [
+                            {
+                                "metric_key": page["metric_key"],
+                                "series_names": _scope_for(page),
+                                "comparison_reason": _comparison_reason_for(page),
+                            }
+                        ],
                     }
                     for page in pages
                 ],
@@ -635,7 +896,13 @@ def _make_store_aware_fakes(store: Any):
 
             key = found[0]
             metric = store.get(key)
-            series = metric.series_names[-1]
+            page = _page_for(prompt)
+            scoped_series = (
+                _scope_for(page)
+                if page is not None and page["metric_key"] == key
+                else []
+            )
+            series = (scoped_series or metric.series_names)[-1]
 
             def cite(selector: str) -> str:
                 return f"{{{{{key}|{series}|{selector}}}}}"
@@ -741,6 +1008,7 @@ def _fake_tool_payload(prompt: str) -> dict[str, Any]:
             "arguments": {
                 "metric_key": "market_cards.yoy",
                 "chart_title": "年增動能逐季走高，反映滲透率持續提升",
+                "series_names": ["2026 vs 2025"],
             },
         }
 
@@ -839,6 +1107,301 @@ def check_llm() -> int:
 
 
 # ---------------------------------------------------------------------------
+# Required-output narrative orchestration
+# ---------------------------------------------------------------------------
+@dataclass
+class RequiredPageOutcome:
+    narrative: narrative_writer.PageNarrative
+    review: reviewer.ReviewResult | None
+    writer_attempts: int
+    reviewer_attempts: int
+    delivery_status: str
+    candidate_source: str
+    warning: str | None = None
+
+    def review_dict(self, section: Any) -> dict[str, Any]:
+        if self.review is None:
+            payload: dict[str, Any] = {
+                "status": "NOT_REVIEWED",
+                "rule_issues": [],
+                "semantic_issues": [],
+                "target_agent": None,
+            }
+        else:
+            payload = self.review.to_dict()
+
+        return {
+            "page_number": section.page_number,
+            "section_title": section.title,
+            **payload,
+            "delivery_status": self.delivery_status,
+            "hard_rules_passed": True,
+            "selected_candidate_hard_issues": [],
+            "candidate_source": self.candidate_source,
+            "delivery_warning": self.warning,
+            "writer_attempts": self.writer_attempts,
+            "reviewer_attempts": self.reviewer_attempts,
+        }
+
+
+def _narrative_signature(narrative: narrative_writer.PageNarrative) -> str:
+    return _sha256_text(narrative.all_text)
+
+
+def _generate_required_page(
+    section: Any,
+    chart: Any,
+    store: Any,
+    *,
+    json_call: Callable[..., Any],
+    review_enabled: bool,
+    enable_semantic_review: bool,
+    page_deadline: float,
+    repair_escalate_after: int,
+) -> RequiredPageOutcome:
+    """Generate one deliverable page while preserving deterministic hard gates."""
+    writer_attempts = 0
+    reviewer_attempts = 0
+    last_errors: list[str] = []
+    warning_reasons: list[str] = []
+    candidate: narrative_writer.PageNarrative | None = None
+    candidate_source = CANDIDATE_LLM
+
+    def has_time() -> bool:
+        return time.monotonic() < page_deadline
+
+    for stage, attempts in (
+        (CANDIDATE_LLM, narrative_writer.MAX_NARRATIVE_ATTEMPTS),
+        (CANDIDATE_FALLBACK_MODEL, 1),
+    ):
+        if not has_time():
+            warning_reasons.append("頁面 LLM 時間配額已用盡")
+            break
+
+        try:
+            candidate, issues, used = narrative_writer.write_narrative_for_page(
+                section,
+                chart,
+                store,
+                llm_call=json_call,
+                max_attempts=attempts,
+                initial_errors=last_errors,
+                llm_stage=stage,
+                deadline_monotonic=page_deadline,
+            )
+            writer_attempts += used
+            last_errors = list(issues)
+        except Exception as error:  # noqa: BLE001 - required mode must degrade
+            warning_reasons.append(f"{stage} 無法完成：{error}")
+            candidate = None
+
+        if candidate is not None:
+            candidate_source = stage
+            break
+
+    if candidate is None:
+        candidate = narrative_writer.build_deterministic_fallback(
+            section, chart, store
+        )
+        candidate_source = CANDIDATE_DETERMINISTIC
+        warning_reasons.append("LLM 未產生合法敘事，已套用確定性敘事模板")
+
+    hard_issues = reviewer.run_rule_layer(candidate, chart, store)
+    if hard_issues and (not review_enabled or not has_time()):
+        candidate = narrative_writer.build_deterministic_fallback(
+            section, chart, store
+        )
+        candidate_source = CANDIDATE_DETERMINISTIC
+        hard_issues = reviewer.run_rule_layer(candidate, chart, store)
+        warning_reasons.append("LLM 候選未通過硬性規則，已套用確定性敘事模板")
+
+    if hard_issues and not review_enabled:
+        raise RuntimeError(f"required fallback 仍未通過硬性規則：{hard_issues}")
+
+    if not review_enabled:
+        warning = "；".join(dict.fromkeys(warning_reasons)) or None
+        return RequiredPageOutcome(
+            narrative=candidate,
+            review=None,
+            writer_attempts=writer_attempts,
+            reviewer_attempts=0,
+            delivery_status=(
+                DELIVERY_APPROVED_WITH_WARNING
+                if warning is not None
+                else DELIVERY_APPROVED
+            ),
+            candidate_source=candidate_source,
+            warning=warning,
+        )
+
+    last_valid: narrative_writer.PageNarrative | None = (
+        candidate if not hard_issues else None
+    )
+    last_valid_source = candidate_source if last_valid is not None else None
+    current = candidate
+    current_source = candidate_source
+    final_review: reviewer.ReviewResult | None = None
+    seen_candidates = {_narrative_signature(candidate)}
+    seen_issue_signatures: set[str] = set()
+    repair_attempts = 0
+
+    while has_time():
+        reviewer_attempts += 1
+        try:
+            final_review = reviewer.review_page(
+                current,
+                chart,
+                store,
+                llm_call=json_call,
+                enable_semantic_layer=enable_semantic_review,
+                deadline_monotonic=page_deadline,
+            )
+        except Exception as error:  # noqa: BLE001 - required mode must degrade
+            warning_reasons.append(f"Reviewer 無法在期限內完成：{error}")
+            break
+
+        if not final_review.rule_issues:
+            last_valid = current
+            last_valid_source = current_source
+
+        if final_review.approved:
+            warning = "；".join(dict.fromkeys(warning_reasons)) or None
+            return RequiredPageOutcome(
+                narrative=current,
+                review=final_review,
+                writer_attempts=writer_attempts,
+                reviewer_attempts=reviewer_attempts,
+                delivery_status=(
+                    DELIVERY_APPROVED_WITH_WARNING
+                    if warning is not None
+                    else DELIVERY_APPROVED
+                ),
+                candidate_source=current_source,
+                warning=warning,
+            )
+
+        issue_signature = _sha256_text(
+            json.dumps(final_review.all_issues, ensure_ascii=False, sort_keys=True)
+        )
+        repeated_issue = issue_signature in seen_issue_signatures
+        seen_issue_signatures.add(issue_signature)
+
+        if (
+            final_review.target_agent == reviewer.AGENT_CHART
+            and not final_review.rule_issues
+        ):
+            warning_reasons.append(
+                "語意 Reviewer 建議重新規劃圖表；既有圖表已通過確定性驗證"
+            )
+            break
+
+        repair_attempts += 1
+        use_fallback_model = (
+            repeated_issue or repair_attempts > repair_escalate_after
+        )
+        primary_stage = (
+            CANDIDATE_FALLBACK_MODEL
+            if use_fallback_model
+            else CANDIDATE_LLM
+        )
+        stages_to_try = [primary_stage]
+        if primary_stage != CANDIDATE_FALLBACK_MODEL:
+            stages_to_try.append(CANDIDATE_FALLBACK_MODEL)
+
+        replacement: narrative_writer.PageNarrative | None = None
+        replacement_source = primary_stage
+
+        for writer_stage in stages_to_try:
+            if not has_time():
+                break
+
+            try:
+                repaired, issues, used = (
+                    narrative_writer.write_narrative_for_page(
+                        section,
+                        chart,
+                        store,
+                        llm_call=json_call,
+                        max_attempts=1,
+                        initial_errors=final_review.all_issues,
+                        llm_stage=writer_stage,
+                        deadline_monotonic=page_deadline,
+                    )
+                )
+                writer_attempts += used
+            except Exception as error:  # noqa: BLE001 - required mode must degrade
+                repaired = None
+                issues = [str(error)]
+
+            if repaired is None:
+                if writer_stage == CANDIDATE_FALLBACK_MODEL:
+                    warning_reasons.append(
+                        "升級模型後仍無法產生合法修正版："
+                        + "；".join(issues)
+                    )
+                continue
+
+            signature = _narrative_signature(repaired)
+            if signature in seen_candidates:
+                if writer_stage == CANDIDATE_FALLBACK_MODEL:
+                    warning_reasons.append(
+                        "升級模型仍回傳重複候選，停止無效重試"
+                    )
+                continue
+
+            seen_candidates.add(signature)
+            replacement = repaired
+            replacement_source = writer_stage
+            break
+
+        if replacement is None:
+            break
+
+        current = replacement
+        current_source = replacement_source
+
+    if time.monotonic() >= page_deadline:
+        warning_reasons.append("頁面修正期限已到")
+
+    if last_valid is None:
+        selected = narrative_writer.build_deterministic_fallback(
+            section, chart, store
+        )
+        selected_source = CANDIDATE_DETERMINISTIC
+        warning_reasons.append("無可交付 LLM 候選，已套用確定性敘事模板")
+    else:
+        selected = last_valid
+        selected_source = last_valid_source or CANDIDATE_LLM
+
+    selected_hard_issues = reviewer.run_rule_layer(selected, chart, store)
+
+    if selected_hard_issues:
+        selected = narrative_writer.build_deterministic_fallback(
+            section, chart, store
+        )
+        selected_source = CANDIDATE_DETERMINISTIC
+        selected_hard_issues = reviewer.run_rule_layer(selected, chart, store)
+        warning_reasons.append("最佳候選未通過硬性規則，已套用確定性敘事模板")
+
+    if selected_hard_issues:
+        raise RuntimeError(
+            f"required 最終候選未通過硬性規則：{selected_hard_issues}"
+        )
+
+    warning_reasons.append("語意審查未核准，採用期限內最佳合法候選")
+    warning = "；".join(dict.fromkeys(warning_reasons))
+    return RequiredPageOutcome(
+        narrative=selected,
+        review=final_review,
+        writer_attempts=writer_attempts,
+        reviewer_attempts=reviewer_attempts,
+        delivery_status=DELIVERY_APPROVED_WITH_WARNING,
+        candidate_source=selected_source,
+        warning=warning,
+    )
+
+
+# ---------------------------------------------------------------------------
 # 主流程
 # ---------------------------------------------------------------------------
 def run(
@@ -854,6 +1417,9 @@ def run(
     excel_path: str | Path | None = None,
     excel_sheet: str | None = None,
     deck_title: str | None = None,
+    generation_policy: str | None = None,
+    generation_deadline_seconds: float | None = None,
+    generation_render_reserve_seconds: float | None = None,
 ) -> int:
     """
     跑管線。``stop_after`` 指定跑到哪個階段為止（見 :data:`STAGE_SEQUENCE`）。
@@ -866,11 +1432,45 @@ def run(
             f"未知階段 {stop_after!r}，可用：{', '.join(STAGE_SEQUENCE)}"
         )
 
+    generation = config.load_generation_settings()
+    effective_policy = generation_policy or generation.policy
+    deadline_seconds = (
+        generation_deadline_seconds
+        if generation_deadline_seconds is not None
+        else generation.deadline_seconds
+    )
+    render_reserve_seconds = (
+        generation_render_reserve_seconds
+        if generation_render_reserve_seconds is not None
+        else generation.render_reserve_seconds
+    )
+
+    if effective_policy not in config.GENERATION_POLICIES:
+        raise ValueError(
+            f"generation_policy 只能是 {sorted(config.GENERATION_POLICIES)} 之一"
+        )
+
+    if deadline_seconds <= 0 or not 0 <= render_reserve_seconds < deadline_seconds:
+        raise ValueError("generation deadline 必須大於 render reserve，且兩者不可為負")
+
+    pipeline_started = time.monotonic()
+    llm_cutoff = pipeline_started + deadline_seconds - render_reserve_seconds
+
     # 內建範例用寫死的假回應（它同時也在驗那組固定期望值）；
     # 真實資料的假回應要看得懂當前 MetricStore，等 store 建好後再產生。
     uses_sample = excel_path is None and ingestion_path is None
-    json_call = _fake_json_call if (use_fake_llm and uses_sample) else None
-    tool_call = _fake_tool_call if (use_fake_llm and uses_sample) else None
+
+    if use_fake_llm and uses_sample:
+        json_call: Callable[..., Any] | None = _fake_json_call
+        tool_call: Callable[..., Any] | None = _fake_tool_call
+    elif use_fake_llm:
+        # 真實資料的 store-aware fake 要等 MetricStore 建好後才能建立。
+        json_call = None
+        tool_call = None
+    else:
+        json_call = llm_client.complete_json
+        tool_call = llm_client.complete_tool_call
+
     dump = StageDump(dump_dir)
     stop_index = STAGE_SEQUENCE.index(stop_after)
 
@@ -934,11 +1534,40 @@ def run(
         data_source = str(ingestion_path)
         print(f"  資料來源：{ingestion_path}")
 
+    if excel_path is not None:
+        manifest_input_path = Path(excel_path)
+    elif ingestion_path is not None:
+        manifest_input_path = Path(ingestion_path)
+    else:
+        manifest_input_path = None
+
+    manifest_path = _write_generation_manifest(
+        output_dir=output_dir,
+        input_path=manifest_input_path,
+        data_source=data_source,
+        payload=payload,
+        user_prompt=user_prompt,
+        sections=sections,
+        deck_title=deck_title,
+        use_fake_llm=use_fake_llm,
+        skip_semantic_review=skip_semantic_review,
+        generation_policy=effective_policy,
+        deadline_seconds=deadline_seconds,
+        render_reserve_seconds=render_reserve_seconds,
+    )
+    print(f"  [執行稽核] {manifest_path}")
+
     loaded = dataset_loader.load_ingestion_result(payload)
     store, engine_report = metric_engine.build_metric_store(loaded)
 
     if use_fake_llm and not uses_sample:
         json_call, tool_call = _make_store_aware_fakes(store)
+
+    if json_call is None or tool_call is None:
+        raise RuntimeError("LLM callable 尚未初始化")
+
+    json_call = _audited_llm_call(json_call, output_dir)
+    tool_call = _audited_llm_call(tool_call, output_dir)
 
     print(f"  資料集：{len(loaded.datasets)} 個")
     print(f"  可用指標：{engine_report.metric_count} 個")
@@ -978,14 +1607,30 @@ def run(
     print("Stage 4-1：章節規劃")
     print("=" * 68)
 
-    plan = section_planner.plan_sections(
-        user_prompt,
-        store,
-        existing_sections=sections,
-        llm_call=json_call,
-    )
+    section_warning: str | None = None
+    try:
+        plan = section_planner.plan_sections(
+            user_prompt,
+            store,
+            existing_sections=sections,
+            llm_call=json_call,
+            deadline_monotonic=(
+                llm_cutoff if effective_policy == "required" else None
+            ),
+        )
+    except Exception as error:  # noqa: BLE001 - required mode must degrade
+        if effective_policy != "required":
+            raise
+        plan = section_planner.build_deterministic_sections(store)
+        section_warning = f"章節 LLM 無法完成，已使用確定性規劃：{error}"
+
+    if plan.needs_confirmation and effective_policy == "required":
+        plan = section_planner.build_deterministic_sections(store)
+        section_warning = "章節需求不足，required 模式已使用可計算指標建立規劃"
 
     print(f"  狀態：{plan.status}")
+    if section_warning:
+        print(f"  [必產出降級] {section_warning}")
 
     if plan.needs_confirmation:
         print(f"\n需要你先確認：{plan.question_to_user}")
@@ -1018,7 +1663,11 @@ def run(
         for key, reason in plan.dropped_metric_keys.items():
             print(f"    - {key}：{reason}")
 
-    if finish("sections", plan.to_dict()):
+    sections_payload = plan.to_dict()
+    if section_warning:
+        sections_payload["delivery_warning"] = section_warning
+
+    if finish("sections", sections_payload):
         return 0
 
     # ---- Stage 4-2 圖表決策 ----
@@ -1027,8 +1676,36 @@ def run(
     print("=" * 68)
 
     chart_result = chart_agent.plan_charts(
-        plan.sections, store, llm_call=tool_call
+        plan.sections,
+        store,
+        llm_call=tool_call,
+        deadline_monotonic=(
+            llm_cutoff if effective_policy == "required" else None
+        ),
+        recover_provider_errors=effective_policy == "required",
     )
+    chart_fallbacks: dict[str, str] = {}
+
+    if effective_policy == "required":
+        produced_pages = {
+            chart.plan.page_number for chart in chart_result.charts
+        }
+        for section in plan.sections:
+            if section.page_number in produced_pages:
+                continue
+
+            previous_errors = chart_result.failures.get(section.title, [])
+            fallback = chart_agent.build_deterministic_chart(section, store)
+            chart_result.charts.append(fallback)
+            chart_result.failures.pop(section.title, None)
+            chart_fallbacks[section.title] = (
+                "圖表 LLM 未產生合法規劃，已使用確定性 axis-kind fallback"
+                + (f"：{'；'.join(previous_errors)}" if previous_errors else "")
+            )
+
+        chart_result.charts.sort(
+            key=lambda item: item.plan.page_number or 0
+        )
 
     for chart in chart_result.charts:
         attempts = chart_result.attempts.get(chart.plan.slide_title, 1)
@@ -1037,16 +1714,38 @@ def run(
             f"{chart.plan.chart_title}（嘗試 {attempts} 次）"
         )
 
+    for title, warning in chart_fallbacks.items():
+        print(f"    [必產出降級] {title}：{warning}")
+
     for title, errors in chart_result.failures.items():
         print(f"    [失敗] {title}：{errors[0]}")
+
+    expected_chart_pages = {
+        section.page_number for section in plan.sections
+    }
+    produced_chart_pages = {
+        chart.plan.page_number for chart in chart_result.charts
+    }
+    missing_chart_pages = sorted(expected_chart_pages - produced_chart_pages)
 
     charts_payload = {
         "charts": [
             _resolved_chart_payload(chart) for chart in chart_result.charts
         ],
         "failures": chart_result.failures,
+        "missing_pages": missing_chart_pages,
         "attempts": chart_result.attempts,
     }
+    if chart_fallbacks:
+        charts_payload["delivery_warnings"] = chart_fallbacks
+
+    if chart_result.failures or missing_chart_pages:
+        dump.write("charts", charts_payload)
+        print(
+            "\n圖表決策未完整覆蓋所有規劃頁面，已 fail-closed；"
+            f"缺少頁面：{missing_chart_pages}。"
+        )
+        return 1
 
     if not chart_result.charts:
         dump.write("charts", charts_payload)
@@ -1063,32 +1762,237 @@ def run(
         if chart.plan.page_number == section.page_number
     ]
 
-    # ---- Stage 4-3 敘事 ----
+    # ---- Stage 4-3/4-4：逐頁敘事與審查 ----
     print("\n" + "=" * 68)
-    print("Stage 4-3：敘事撰寫")
+    print("Stage 4-3：逐頁敘事撰寫")
     print("=" * 68)
 
-    narrative_result = narrative_writer.write_narratives(
-        pairs, store, llm_call=json_call
-    )
-
-    for narrative in narrative_result.narratives:
-        attempts = narrative_result.attempts.get(narrative.slide_title, 1)
+    review_enabled = stop_index >= STAGE_SEQUENCE.index("review")
+    if effective_policy == "required":
         print(
-            f"    P.{narrative.page_number} {narrative.headline}"
-            f"（嘗試 {attempts} 次）"
+            "  策略：required-output；硬性規則不放寬，語意品質在每頁公平 "
+            "deadline 內持續改善，期限到採最佳合法候選。"
+        )
+        print(
+            f"  全案期限：{deadline_seconds:.0f} 秒；"
+            f"保留 render/verify：{render_reserve_seconds:.0f} 秒。"
+        )
+    elif review_enabled:
+        print(
+            "  策略：strict；每頁寫完立即審查，退回 narrative_writer 時只重寫"
+            f"該頁，最多 {MAX_REVIEW_REPAIR_ATTEMPTS} 次；耗盡即 fail-fast。"
         )
 
-    for title, issues in narrative_result.failures.items():
-        print(f"    [失敗] {title}：{issues[0]}")
-
-    narratives_payload = {
-        "narratives": [
-            narrative.to_dict() for narrative in narrative_result.narratives
-        ],
-        "failures": narrative_result.failures,
-        "attempts": narrative_result.attempts,
+    narrative_result = narrative_writer.NarrativeResult()
+    approved: list[tuple[Any, Any, Any]] = []
+    review_payload: list[dict[str, Any]] = []
+    expected_narrative_pages = {
+        section.page_number for section, _ in pairs
     }
+
+    def current_narratives_payload() -> dict[str, Any]:
+        produced_pages = {
+            narrative.page_number for narrative in narrative_result.narratives
+        }
+        return {
+            "narratives": [
+                narrative.to_dict()
+                for narrative in narrative_result.narratives
+            ],
+            "failures": narrative_result.failures,
+            "missing_pages": sorted(
+                expected_narrative_pages - produced_pages
+            ),
+            "attempts": narrative_result.attempts,
+        }
+
+    def checkpoint_page_progress() -> None:
+        # 每頁完成即覆寫 checkpoint。若後續頁失敗，已核准頁面與呼叫次數
+        # 仍保留在 stage JSON，不必靠終端輸出回推發生了什麼。
+        dump.write("narratives", current_narratives_payload())
+        if review_enabled:
+            dump.write("review", {"reviews": review_payload})
+
+    for page_index, (section, chart) in enumerate(pairs):
+        if effective_policy == "required":
+            now = time.monotonic()
+            pages_left = max(1, len(pairs) - page_index)
+            remaining_llm_time = max(0.0, llm_cutoff - now)
+            page_deadline = now + remaining_llm_time / pages_left
+            outcome = _generate_required_page(
+                section,
+                chart,
+                store,
+                json_call=json_call,
+                review_enabled=review_enabled,
+                enable_semantic_review=not skip_semantic_review,
+                page_deadline=page_deadline,
+                repair_escalate_after=generation.repair_escalate_after,
+            )
+            narrative_result.narratives.append(outcome.narrative)
+            narrative_result.attempts[section.title] = outcome.writer_attempts
+            approved.append((section, chart, outcome.narrative))
+
+            if review_enabled:
+                review_payload.append(outcome.review_dict(section))
+
+            status_text = outcome.delivery_status
+            print(
+                f"    P.{section.page_number} {section.title}：{status_text} "
+                f"（writer {outcome.writer_attempts} 次、"
+                f"reviewer {outcome.reviewer_attempts} 次、"
+                f"來源 {outcome.candidate_source}）"
+            )
+            if outcome.warning:
+                print(f"        - {outcome.warning}")
+
+            checkpoint_page_progress()
+            continue
+
+        narrative, issues, attempts = narrative_writer.write_narrative_for_page(
+            section,
+            chart,
+            store,
+            llm_call=json_call,
+        )
+        total_writer_attempts = attempts
+        narrative_result.attempts[section.title] = total_writer_attempts
+
+        if narrative is None:
+            narrative_result.failures[section.title] = issues or ["未知原因"]
+            checkpoint_page_progress()
+            unvisited = [
+                pending.page_number
+                for pending, _ in pairs[page_index + 1 :]
+            ]
+            print(f"    [失敗] P.{section.page_number} {section.title}：")
+            for issue in narrative_result.failures[section.title]:
+                print(f"        - {issue}")
+            print(
+                "\n敘事在單頁 writer 預算內仍未通過，已 fail-fast；"
+                f"未再呼叫後續頁面：{unvisited}。"
+            )
+            return 1
+
+        current_narrative = narrative
+
+        if not review_enabled:
+            narrative_result.narratives.append(current_narrative)
+            print(
+                f"    P.{current_narrative.page_number} "
+                f"{current_narrative.headline}"
+                f"（writer 嘗試 {total_writer_attempts} 次）"
+            )
+            checkpoint_page_progress()
+            continue
+
+        final_review: reviewer.ReviewResult | None = None
+        repair_feedback: list[str] = []
+        repair_attempts = 0
+        review_attempts = 0
+
+        while True:
+            review_attempts += 1
+            final_review = reviewer.review_page(
+                current_narrative,
+                chart,
+                store,
+                llm_call=json_call,
+                enable_semantic_layer=not skip_semantic_review,
+            )
+
+            if final_review.approved:
+                break
+
+            print(
+                f"    P.{section.page_number} {section.title}：REJECTED "
+                f"→ {final_review.target_agent}"
+            )
+            for issue in final_review.all_issues:
+                print(f"        - {issue}")
+
+            if final_review.target_agent != reviewer.AGENT_NARRATIVE:
+                # 圖表問題不能靠重寫文字掩蓋；目前 chart 已通過所有確定性
+                # scope/量綱檢查，語意層仍要求改 chart 時直接停，避免繼續燒額度。
+                break
+
+            if repair_attempts >= MAX_REVIEW_REPAIR_ATTEMPTS:
+                break
+
+            repair_feedback = list(final_review.all_issues)
+            repaired: narrative_writer.PageNarrative | None = None
+
+            while (
+                repaired is None
+                and repair_attempts < MAX_REVIEW_REPAIR_ATTEMPTS
+            ):
+                repair_attempts += 1
+                repaired, writer_issues, writer_attempts = (
+                    narrative_writer.write_narrative_for_page(
+                        section,
+                        chart,
+                        store,
+                        llm_call=json_call,
+                        max_attempts=1,
+                        initial_errors=repair_feedback,
+                    )
+                )
+                total_writer_attempts += writer_attempts
+                narrative_result.attempts[section.title] = (
+                    total_writer_attempts
+                )
+
+                if repaired is None:
+                    repair_feedback = writer_issues or [
+                        "修正版仍未通過確定性敘事規則"
+                    ]
+
+            if repaired is None:
+                break
+
+            current_narrative = repaired
+
+        assert final_review is not None
+        review_payload.append(
+            {
+                "page_number": section.page_number,
+                "section_title": section.title,
+                **final_review.to_dict(),
+            }
+        )
+        narrative_result.narratives.append(current_narrative)
+
+        if not final_review.approved:
+            checkpoint_page_progress()
+            unvisited = [
+                pending.page_number
+                for pending, _ in pairs[page_index + 1 :]
+            ]
+            reason = (
+                "Reviewer 要求重新規劃 chart"
+                if final_review.target_agent == reviewer.AGENT_CHART
+                else (
+                    "單頁 narrative 修正預算已耗盡"
+                    if repair_attempts >= MAX_REVIEW_REPAIR_ATTEMPTS
+                    else "Reviewer 退件"
+                )
+            )
+            print(
+                f"\nP.{section.page_number} 審查未通過（{reason}），"
+                "已 fail-fast；"
+                f"未再呼叫後續頁面：{unvisited}。"
+            )
+            return 1
+
+        approved.append((section, chart, current_narrative))
+        print(
+            f"    P.{section.page_number} {section.title}：APPROVED "
+            f"（writer {total_writer_attempts} 次、"
+            f"reviewer {review_attempts} 次）"
+        )
+        checkpoint_page_progress()
+
+    narratives_payload = current_narratives_payload()
 
     if not narrative_result.narratives:
         dump.write("narratives", narratives_payload)
@@ -1098,55 +2002,7 @@ def run(
     if finish("narratives", narratives_payload):
         return 0
 
-    # 只保留同時有圖表與敘事的頁面
-    narrative_by_page = {
-        narrative.page_number: narrative
-        for narrative in narrative_result.narratives
-    }
-
-    usable = [
-        (section, chart, narrative_by_page[section.page_number])
-        for section, chart in pairs
-        if section.page_number in narrative_by_page
-    ]
-
-    # ---- Stage 4-4 審查 ----
-    print("\n" + "=" * 68)
-    print("Stage 4-4：審查")
-    print("=" * 68)
-
-    approved: list[tuple[Any, Any, Any]] = []
-    review_payload: list[dict[str, Any]] = []
-
-    for section, chart, narrative in usable:
-        review = reviewer.review_page(
-            narrative,
-            chart,
-            store,
-            llm_call=json_call,
-            enable_semantic_layer=not skip_semantic_review,
-        )
-
-        status = "APPROVED" if review.approved else "REJECTED"
-        print(f"    P.{section.page_number} {section.title}：{status}")
-
-        if not review.approved:
-            print(f"        退回 {review.target_agent}")
-
-            for issue in review.all_issues:
-                print(f"        - {issue}")
-
-        review_payload.append(
-            {
-                "page_number": section.page_number,
-                "section_title": section.title,
-                **review.to_dict(),
-            }
-        )
-
-        # 退件的頁面仍然輸出，但已在上方明確標示，方便人工判斷。
-        approved.append((section, chart, narrative))
-
+    # 完整流程走到這裡時，每頁已在上面的逐頁迴圈完成 reviewer。
     if finish("review", {"reviews": review_payload}):
         return 0
 
@@ -1318,6 +2174,24 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="只跑審查的規則層，省下一次 LLM 呼叫",
     )
     parser.add_argument(
+        "--generation-policy",
+        choices=sorted(config.GENERATION_POLICIES),
+        default=None,
+        help="strict=退件即停止；required=期限內必產出（預設讀 GENERATION_POLICY）",
+    )
+    parser.add_argument(
+        "--deadline-seconds",
+        type=float,
+        default=None,
+        help="全案時間上限秒數（預設讀 GENERATION_DEADLINE_SECONDS）",
+    )
+    parser.add_argument(
+        "--render-reserve-seconds",
+        type=float,
+        default=None,
+        help="保留給 render/verify 的秒數",
+    )
+    parser.add_argument(
         "--verbose",
         action="store_true",
         help="顯示 LLM 重試等細節",
@@ -1402,6 +2276,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             excel_path=args.excel,
             excel_sheet=args.excel_sheet,
             deck_title=args.title,
+            generation_policy=args.generation_policy,
+            generation_deadline_seconds=args.deadline_seconds,
+            generation_render_reserve_seconds=args.render_reserve_seconds,
         )
     except (
         backend_bridge.BackendUnavailableError,

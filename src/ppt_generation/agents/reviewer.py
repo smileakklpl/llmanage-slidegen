@@ -275,7 +275,12 @@ def run_rule_layer(
     issues: list[str] = []
 
     issues.extend(
-        check_narrative(narrative, store, {chart.metric.metric_key})
+        check_narrative(
+            narrative,
+            store,
+            {chart.metric.metric_key},
+            {chart.metric.metric_key: chart.series_names},
+        )
     )
     issues.extend(check_chart_narrative_alignment(narrative, chart))
     issues.extend(check_direction_consistency(narrative, store))
@@ -351,6 +356,7 @@ def review_page(
     *,
     llm_call: Callable[..., Any] | None = None,
     enable_semantic_layer: bool = True,
+    deadline_monotonic: float | None = None,
 ) -> ReviewResult:
     """
     審查單頁。
@@ -383,6 +389,7 @@ def review_page(
         REVIEW_SCHEMA,
         system_prompt=SYSTEM_PROMPT,
         stage="reviewer",
+        deadline_monotonic=deadline_monotonic,
     )
 
     status = payload.get("status", STATUS_APPROVED)

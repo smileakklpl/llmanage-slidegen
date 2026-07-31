@@ -55,28 +55,35 @@ FORECAST_CHAPTER = "未來趨勢推測"
 #: 新指標，只回收既有頁面的結論，所以由 renderer 確定性產生。
 CONCLUSION_CHAPTER = "結論與後續行動"
 
-SYSTEM_PROMPT = """你是一位金融業管理顧問，負責規劃給銀行高階主管閱讀的簡報骨架。
+SYSTEM_PROMPT = """你是一位資料分析與管理顧問，負責規劃給管理層閱讀的簡報骨架。
 
 任務：依使用者需求與可用指標目錄，規劃簡報的內容頁。
 
 嚴格規則：
-1. 你只能從提供的指標目錄（metric catalog）中挑選 metric_key，不得自行發明。
+1. 你只能從提供的指標目錄（metric catalog）中挑選 metric_key 與 series_names，
+   不得自行發明。
 2. 你看不到任何實際數值，也不需要看到 —— 你的工作只是規劃結構。
-3. 若使用者的需求沒有明確指出想看的章節或主題，status 必須回傳
+3. 每一頁必須用 metric_scopes 明確列出 metric_key 與該頁允許的 series_names。
+   series_names 只能選與頁面 title / intent 直接相關的資料；禁止因為同一個
+   metric_key 還有其他系列，就把規模、數量、金額等不同主題全部放進同一頁。
+   單一主題頁通常只選一個系列。只有 intent 明確要求多期比較或兩項指標關係時，
+   才能選多個系列，且必須在 comparison_reason 寫出比較理由；單一系列時填空字串。
+   不可用空陣列表示「全部」。
+4. 若使用者的需求沒有明確指出想看的章節或主題，status 必須回傳
    "NEEDS_CONFIRMATION"，並在 question_to_user 提出具體待確認問題。
-4. 若使用者已明確說明章節或主題，status 回傳 "READY"。
-5. 內容頁數量不得超過 {max_sections} 頁。
-6. 每一頁都必須填 chapter，指出它屬於哪一個章節。同一章節的頁面要相鄰，
+5. 若使用者已明確說明章節或主題，status 回傳 "READY"。
+6. 內容頁數量不得超過 {max_sections} 頁。
+7. 每一頁都必須填 chapter，指出它屬於哪一個章節。同一章節的頁面要相鄰，
    不要交錯——章節在簡報中會各自產生一張章節分隔頁。
-7. 未特別指定時，章節請採用預設骨架：{default_chapters}。
-8. 「{forecast_chapter}」章節的頁面只能引用 forecast 類指標
+8. 未特別指定時，章節請採用預設骨架：{default_chapters}。
+9. 「{forecast_chapter}」章節的頁面只能引用 forecast 類指標
    （metric_key 結尾為 .forecast）；若目錄中沒有這類指標，就不要規劃此章節。
-9. 撰寫風格為商業洞察導向（類 McKinsey / BCG 顧問報告），而非數字整理。
-10. **最後一個章節必須是收斂性的結論章節**（預設骨架中的
+10. 撰寫風格為商業洞察導向（類 McKinsey / BCG 顧問報告），而非數字整理。
+11. **最後一個章節必須是收斂性的結論章節**（預設骨架中的
     「{closing_chapter}」即扮演此角色）：它不再引入新主題，而是把前面各章
     的發現收成「所以我們該做什麼」。這一章的 intent 要寫明它要回答的
     決策問題，不要只寫「呈現某指標」。
-11. 每一頁的 intent 都要寫成一個問句或一句結論主張（例如「市場成長的
+12. 每一頁的 intent 都要寫成一個問句或一句結論主張（例如「市場成長的
     驅動力來自簽帳金額而非發卡量」），不要寫成「展示 X 指標的趨勢」——
     intent 是下游撰寫敘事的依據，寫成資料描述會得到資料描述的文案。
 
@@ -103,16 +110,43 @@ SECTION_PLAN_SCHEMA: dict[str, Any] = {
                         ),
                     },
                     "intent": {"type": "string"},
-                    "suggested_metric_keys": {
+                    "metric_scopes": {
                         "type": "array",
-                        "items": {"type": "string"},
+                        "minItems": 1,
+                        "description": (
+                            "本頁允許使用的指標與系列白名單；每個 series_names "
+                            "都必須與 title/intent 直接相關。"
+                        ),
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "metric_key": {"type": "string"},
+                                "series_names": {
+                                    "type": "array",
+                                    "items": {"type": "string"},
+                                    "minItems": 1,
+                                },
+                                "comparison_reason": {
+                                    "type": "string",
+                                    "description": (
+                                        "單一系列填空字串；選兩個以上系列時必須說明"
+                                        "為何 title/intent 明確要求比較這些系列。"
+                                    ),
+                                },
+                            },
+                            "required": [
+                                "metric_key",
+                                "series_names",
+                                "comparison_reason",
+                            ],
+                        },
                     },
                 },
                 "required": [
                     "title",
                     "chapter",
                     "intent",
-                    "suggested_metric_keys",
+                    "metric_scopes",
                 ],
             },
         },
@@ -133,6 +167,12 @@ class SectionPlan:
     title: str
     intent: str
     suggested_metric_keys: list[str] = field(default_factory=list)
+    #: 每個 metric_key 在本頁允許使用的 series 白名單。
+    #: 下游 chart agent 必須把 LLM 選擇限制在這個範圍內。
+    suggested_series_by_metric: dict[str, list[str]] = field(default_factory=dict)
+    #: 多系列 scope 的明確比較理由。沒有理由時只允許單一 series；
+    #: 這讓下游 validator 不必猜測「多系列」究竟是有意比較或模型誤全選。
+    comparison_reason_by_metric: dict[str, str] = field(default_factory=dict)
     #: 由 Orchestrator 指派的頁碼，非 LLM 決定
     page_number: int | None = None
     #: 所屬章節。renderer 依此插入章節分隔頁並產生目錄。
@@ -145,17 +185,49 @@ class SectionPlan:
             "chapter": self.chapter,
             "intent": self.intent,
             "suggested_metric_keys": list(self.suggested_metric_keys),
+            "metric_scopes": [
+                {
+                    "metric_key": metric_key,
+                    "series_names": list(
+                        self.suggested_series_by_metric.get(metric_key, [])
+                    ),
+                    "comparison_reason": self.comparison_reason_by_metric.get(
+                        metric_key, ""
+                    ),
+                }
+                for metric_key in self.suggested_metric_keys
+            ],
             "page_number": self.page_number,
         }
 
     @classmethod
     def from_dict(cls, payload: dict[str, Any]) -> SectionPlan:
         chapter = payload.get("chapter")
+        scopes = payload.get("metric_scopes") or []
+        series_by_metric = {
+            str(scope.get("metric_key", "")): [
+                str(name) for name in scope.get("series_names", []) if str(name)
+            ]
+            for scope in scopes
+            if isinstance(scope, dict) and str(scope.get("metric_key", ""))
+        }
+        comparison_reasons = {
+            str(scope.get("metric_key", "")): str(
+                scope.get("comparison_reason", "")
+            ).strip()
+            for scope in scopes
+            if isinstance(scope, dict) and str(scope.get("metric_key", ""))
+        }
+        metric_keys = list(series_by_metric) or list(
+            payload.get("suggested_metric_keys", [])
+        )
 
         return cls(
             title=payload.get("title", ""),
             intent=payload.get("intent", ""),
-            suggested_metric_keys=list(payload.get("suggested_metric_keys", [])),
+            suggested_metric_keys=metric_keys,
+            suggested_series_by_metric=series_by_metric,
+            comparison_reason_by_metric=comparison_reasons,
             page_number=payload.get("page_number"),
             chapter=str(chapter).strip() if chapter else None,
         )
@@ -206,7 +278,8 @@ def build_prompt(
                 json.dumps(list(existing_sections), ensure_ascii=False),
                 "",
                 "使用者已明確指定章節，status 應為 READY，"
-                "請依此清單規劃並為每個章節挑選合適的 metric_key。",
+                "請依此清單規劃，並為每頁以 metric_scopes 挑選合適的 "
+                "metric_key 與直接相關的 series_names。",
             ]
         )
 
@@ -219,7 +292,7 @@ def build_prompt(
                 "## 不可使用的指標（資料範圍不足，已被防呆擋下）",
                 json.dumps(blocked, ensure_ascii=False, indent=2),
                 "",
-                "上述指標不得出現在 suggested_metric_keys 中。",
+                "上述指標不得出現在 metric_scopes 中。",
             ]
         )
 
@@ -246,16 +319,63 @@ def _sanitize_sections(
         section = SectionPlan.from_dict(raw)
 
         kept: list[str] = []
+        kept_series: dict[str, list[str]] = {}
+        kept_reasons: dict[str, str] = {}
 
         for metric_key in section.suggested_metric_keys:
-            if metric_key in allowed:
-                kept.append(metric_key)
-            elif metric_key in blocked:
+            if metric_key in blocked:
                 dropped[metric_key] = (
                     "指標被防呆擋下：" + "；".join(blocked[metric_key])
                 )
-            else:
+                continue
+
+            if metric_key not in allowed:
                 dropped[metric_key] = "指標不存在於 MetricStore"
+                continue
+
+            metric = store.get(metric_key)
+            requested = section.suggested_series_by_metric.get(metric_key, [])
+
+            # 單系列 metric 沒有選錯空間，可安全補上；多系列 metric 必須由
+            # section planner 明確限縮，空陣列不得再解讀為「全部」。
+            if not requested and len(metric.series_names) == 1:
+                requested = list(metric.series_names)
+
+            if not requested:
+                dropped[f"{section.title}:{metric_key}"] = (
+                    "多系列指標必須在 metric_scopes 明確指定與頁面主題相關的 "
+                    "series_names，不可留空代表全部"
+                )
+                continue
+
+            unknown = [
+                name for name in requested if name not in metric.series
+            ]
+            if unknown:
+                dropped[f"{section.title}:{metric_key}"] = (
+                    f"系列不存在：{unknown}；可用系列：{metric.series_names}"
+                )
+
+            valid = list(dict.fromkeys(
+                name for name in requested if name in metric.series
+            ))
+            if not valid:
+                continue
+
+            comparison_reason = section.comparison_reason_by_metric.get(
+                metric_key, ""
+            ).strip()
+            if len(valid) > 1 and not comparison_reason:
+                dropped[f"{section.title}:{metric_key}"] = (
+                    "同一頁選取多個系列時必須提供 comparison_reason，"
+                    "明確說明 title/intent 要比較的關係；否則 fail-closed"
+                )
+                continue
+
+            kept.append(metric_key)
+            kept_series[metric_key] = valid
+            if comparison_reason:
+                kept_reasons[metric_key] = comparison_reason
 
         # FR-2.6：「未來趨勢推測」章節的數字一律引用 forecast 類指標。
         # 引用一般指標的話，這一頁會用實際值講「未來」——正是防呆要防的事。
@@ -277,8 +397,25 @@ def _sanitize_sections(
                 continue
 
             kept = forecast_keys
+            kept_series = {
+                key: kept_series[key] for key in forecast_keys
+            }
+
+            kept_reasons = {
+                key: kept_reasons[key]
+                for key in forecast_keys
+                if key in kept_reasons
+            }
+
+        if not kept:
+            dropped[f"（章節）{section.title}"] = (
+                "本頁所有 metric scope 均未通過確定性清洗，整頁不產出"
+            )
+            continue
 
         section.suggested_metric_keys = kept
+        section.suggested_series_by_metric = kept_series
+        section.comparison_reason_by_metric = kept_reasons
         sections.append(section)
 
     sections = group_by_chapter(sections)
@@ -312,12 +449,45 @@ def group_by_chapter(sections: Sequence[SectionPlan]) -> list[SectionPlan]:
     return [section for chapter in order for section in buckets[chapter]]
 
 
+def build_deterministic_sections(store: MetricStore) -> SectionPlanResult:
+    """Build a metadata-only section plan when the intent LLM is unavailable."""
+    sections: list[SectionPlan] = []
+
+    for metric_key in store.computable_metric_keys()[:MAX_SECTIONS]:
+        metric = store.get(metric_key)
+        if not metric.series_names:
+            continue
+
+        series_name = metric.series_names[-1]
+        chapter = (
+            "趨勢與成長洞察"
+            if metric.axis_kind == "temporal"
+            else "市場與競爭概況"
+        )
+        sections.append(
+            SectionPlan(
+                title=metric.name,
+                chapter=chapter,
+                intent=f"以可追溯資料說明{metric.name}的市場意涵與管理重點",
+                suggested_metric_keys=[metric_key],
+                suggested_series_by_metric={metric_key: [series_name]},
+                comparison_reason_by_metric={metric_key: ""},
+            )
+        )
+
+    if not sections:
+        raise ValueError("MetricStore 沒有可建立簡報頁面的可計算指標")
+
+    return SectionPlanResult(status=STATUS_READY, sections=sections)
+
+
 def plan_sections(
     user_prompt: str,
     store: MetricStore,
     *,
     existing_sections: Sequence[str] | None = None,
     llm_call: Callable[..., Any] | None = None,
+    deadline_monotonic: float | None = None,
 ) -> SectionPlanResult:
     """
     規劃簡報章節。
@@ -345,6 +515,7 @@ def plan_sections(
             closing_chapter=DEFAULT_CHAPTERS[-1],
         ),
         stage="intent",
+        deadline_monotonic=deadline_monotonic,
     )
 
     sections, dropped = _sanitize_sections(payload.get("sections", []), store)
