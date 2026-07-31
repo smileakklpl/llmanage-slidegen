@@ -187,9 +187,16 @@ async def run_job(job_id: str, repository: JobRepository) -> None:
     merged_payload = None
     all_datasets = []
 
+    def _safe_serialize(obj):
+        """Fallback for objects Pydantic can't serialize (e.g. openpyxl ArrayFormula)."""
+        return str(obj)
+
     for result in ingestion_results:
         if result.pipeline_status in (PipelineStatus.COMPLETED, PipelineStatus.COMPLETED_WITH_WARNINGS):
-            payload = json.loads(result.model_dump_json())
+            # model_dump with mode='python' then json.dumps with default handler
+            # to gracefully handle openpyxl types in raw_value fields
+            raw = result.model_dump(mode="python")
+            payload = json.loads(json.dumps(raw, default=_safe_serialize))
             if merged_payload is None:
                 merged_payload = payload
             all_datasets.extend(payload.get("datasets", []))
