@@ -41,6 +41,17 @@ MODEL_ENV_NAMES = (
 )
 
 
+def _prepare_ingestion(source: Path, target: Path) -> Path:
+    """Materialize backend ingestion JSON before invoking core."""
+    backend_root = str(REPO_ROOT / "src" / "backend")
+    if backend_root not in sys.path:
+        sys.path.insert(0, backend_root)
+
+    from app.ingestion.generation_bridge import ingest_excel, save_payload
+
+    return save_payload(ingest_excel(source), target)
+
+
 @dataclass
 class RunRecord:
     model: str
@@ -74,7 +85,7 @@ def run_model(
     *,
     provider: str,
     model: str,
-    input_path: Path,
+    ingestion_path: Path,
     prompt: str,
     sections: list[str],
     repeat: int,
@@ -94,13 +105,15 @@ def run_model(
                         GenerationRequest(
                             job_id=f"compare-{attempt}",
                             prompt=prompt,
-                            input_path=str(input_path),
+                            ingestion_path=str(ingestion_path),
                             output_dir=str(Path(temp_dir) / "artifacts"),
                             sections=sections,
                             deck_title=f"模型驗收：{model}",
-                            use_fake_llm=False,
-                            skip_semantic_review=False,
-                        )
+                            options={
+                                "use_fake_llm": False,
+                                "skip_semantic_review": False,
+                            },
+                        ).model_dump(mode="json")
                     )
 
                 records.append(
@@ -204,18 +217,23 @@ def main() -> int:
         parser.error("--sections 不可為空")
 
     records: list[RunRecord] = []
-    for model in models:
-        print(f"跑 {args.provider}/{model} × {args.repeat} …", flush=True)
-        records.extend(
-            run_model(
-                provider=args.provider,
-                model=model,
-                input_path=input_path,
-                prompt=args.prompt,
-                sections=sections,
-                repeat=args.repeat,
-            )
+    with tempfile.TemporaryDirectory(prefix="slidegen-model-input-") as temp_dir:
+        ingestion_path = _prepare_ingestion(
+            input_path,
+            Path(temp_dir) / "ingestion.json",
         )
+        for model in models:
+            print(f"跑 {args.provider}/{model} × {args.repeat} …", flush=True)
+            records.extend(
+                run_model(
+                    provider=args.provider,
+                    model=model,
+                    ingestion_path=ingestion_path,
+                    prompt=args.prompt,
+                    sections=sections,
+                    repeat=args.repeat,
+                )
+            )
 
     print(report(records, args.repeat))
     return 0 if records and all(record.ok for record in records) else 1

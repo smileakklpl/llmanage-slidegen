@@ -33,7 +33,14 @@ from ..core import config, placeholders
 from ..agents.narrative_writer import PageNarrative
 from ..agents.section_planner import CONCLUSION_CHAPTER, SectionPlan
 from ..charts.chart_builder import ScatterSpec
-from ..charts.chart_planner import TABLE_LIKE_CHARTS, VISUAL_SKILLS, ResolvedChart
+from ..charts.chart_planner import (
+    TABLE_LIKE_CHARTS,
+    VISUAL_SKILLS,
+    ChartPlan,
+    ResolvedChart,
+    resolve_chart_plan,
+)
+from ..contracts import DeckSpecContract
 from ..data.metric_store import MetricStore
 from . import theme
 
@@ -963,3 +970,42 @@ def scatter_labels_pending(chart: ResolvedChart) -> bool:
     見設計文件 §8.1。
     """
     return isinstance(chart.spec, ScatterSpec) and bool(chart.spec.labels)
+
+
+def bundles_from_deck_spec(
+    payload: dict[str, Any],
+) -> tuple[list[PageBundle], MetricStore, str]:
+    """Validate the renderer JSON boundary and reconstruct local objects."""
+    spec = DeckSpecContract.model_validate(payload)
+    store_payload = spec.metric_store.model_dump(mode="json")
+    store_payload.pop("contract_version", None)
+    store = MetricStore.from_dict(store_payload)
+    bundles: list[PageBundle] = []
+
+    for page in spec.pages:
+        section = SectionPlan.from_dict(page.section.model_dump(mode="json"))
+        plan = ChartPlan.from_dict(page.chart_plan.model_dump(mode="json"))
+        chart = resolve_chart_plan(plan, store)
+        narrative = PageNarrative.from_dict(
+            page.narrative.model_dump(mode="json")
+        )
+        bundles.append(PageBundle(section, chart, narrative))
+
+    return bundles, store, spec.title
+
+
+def render_deck_from_spec(
+    payload: dict[str, Any],
+    *,
+    output_path: str | Path,
+    template_path: str | Path | None = None,
+) -> RenderReport:
+    """Render a deck exclusively from a schema-validated DeckSpec JSON object."""
+    bundles, store, title = bundles_from_deck_spec(payload)
+    return render_deck(
+        bundles,
+        store,
+        output_path=output_path,
+        template_path=template_path,
+        deck_title=title,
+    )

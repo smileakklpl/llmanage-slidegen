@@ -232,11 +232,20 @@ def load_ingestion_result(
     if not isinstance(payload, dict):
         raise IngestionPayloadError("ingestion 結果必須是 JSON object")
 
+    if payload.get("contract_version") != "1.0":
+        raise IngestionPayloadError(
+            "不支援的 ingestion contract_version："
+            f"{payload.get('contract_version')!r}"
+        )
+
     if "datasets" not in payload:
         raise IngestionPayloadError(
             "ingestion 結果缺少 datasets 欄位，"
             "請確認傳入的是 UnifiedIngestionResult"
         )
+
+    if not isinstance(payload["datasets"], list):
+        raise IngestionPayloadError("ingestion datasets 必須是 JSON array")
 
     result = LoadResult(
         pipeline_status=payload.get("pipeline_status", "unknown"),

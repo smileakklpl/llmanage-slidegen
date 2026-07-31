@@ -11,7 +11,10 @@ from app.repositories.job_repository import JobModel, JobRepository
 from app.schemas.jobs import JobStage, JobStatus
 from app.storage.s3_storage import S3ObjectStorage
 from app.worker.generation_job_runner import run_generation_job
-from core.contracts.generation import StoredObjectRef
+from core.contracts.generation import (
+    GenerationOptions,
+    StoredObjectRef,
+)
 
 
 def is_authorized_artifact_key(
@@ -39,17 +42,39 @@ class JobService:
         repository: JobRepository,
         storage: S3ObjectStorage,
         *,
-        use_fake_llm: bool = False,
-        skip_semantic_review: bool = False,
+        default_generation_options: GenerationOptions | None = None,
     ) -> None:
         self._repository = repository
         self._storage = storage
-        self._use_fake_llm = use_fake_llm
-        self._skip_semantic_review = skip_semantic_review
+        self._default_generation_options = (
+            default_generation_options or GenerationOptions()
+        )
 
     @staticmethod
     def generate_job_id() -> str:
         return str(uuid4())
+
+    def resolve_generation_options(
+        self,
+        *,
+        generation_policy: str | None = None,
+        generation_deadline_seconds: float | None = None,
+        generation_render_reserve_seconds: float | None = None,
+    ) -> GenerationOptions:
+        """Validate effective per-job options before any upload is persisted."""
+        option_updates = {
+            key: value
+            for key, value in {
+                "policy": generation_policy,
+                "deadline_seconds": generation_deadline_seconds,
+                "render_reserve_seconds": generation_render_reserve_seconds,
+            }.items()
+            if value is not None
+        }
+        return GenerationOptions.model_validate(
+            self._default_generation_options.model_dump(mode="json")
+            | option_updates
+        )
 
     async def create_job(
         self,
@@ -57,12 +82,22 @@ class JobService:
         job_id: str,
         prompt: str,
         input_objects: list[StoredObjectRef],
+        generation_policy: str | None = None,
+        generation_deadline_seconds: float | None = None,
+        generation_render_reserve_seconds: float | None = None,
     ) -> JobModel:
         """Persist a queued job and start its non-blocking worker task."""
 
         if not input_objects:
             raise ValueError("至少需要一個已保存的輸入物件")
 
+        options = self.resolve_generation_options(
+            generation_policy=generation_policy,
+            generation_deadline_seconds=generation_deadline_seconds,
+            generation_render_reserve_seconds=(
+                generation_render_reserve_seconds
+            ),
+        )
         now = datetime.now(timezone.utc)
         job = JobModel(
             job_id=job_id,
@@ -75,6 +110,7 @@ class JobService:
             prompt=prompt,
             filenames=[item.filename for item in input_objects],
             input_objects=input_objects,
+            generation_options=options,
         )
         created = await self._repository.create(job)
 
@@ -83,8 +119,6 @@ class JobService:
                 created.job_id,
                 self._repository,
                 self._storage,
-                use_fake_llm=self._use_fake_llm,
-                skip_semantic_review=self._skip_semantic_review,
             )
         )
         return created

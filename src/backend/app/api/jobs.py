@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Annotated
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from pydantic import ValidationError
 
 from app.api.deps import get_job_service, get_object_storage
 from app.core.errors import NotFoundError
@@ -53,6 +54,9 @@ async def _load_job(job_id: str):
 async def generate_job(
     files: Annotated[list[UploadFile], File(...)],
     prompt: str = Form(...),
+    generation_policy: str | None = Form(default=None),
+    generation_deadline_seconds: float | None = Form(default=None),
+    generation_render_reserve_seconds: float | None = Form(default=None),
 ) -> JobCreateResponse:
     """Persist Excel uploads in S3 and queue the real generation pipeline."""
 
@@ -86,6 +90,20 @@ async def generate_job(
     except RuntimeError as error:
         raise HTTPException(status_code=503, detail=str(error)) from error
 
+    try:
+        service.resolve_generation_options(
+            generation_policy=generation_policy,
+            generation_deadline_seconds=generation_deadline_seconds,
+            generation_render_reserve_seconds=(
+                generation_render_reserve_seconds
+            ),
+        )
+    except ValidationError as error:
+        raise HTTPException(
+            status_code=422,
+            detail=error.errors(include_url=False),
+        ) from error
+
     job_id = service.generate_job_id()
     uploaded: list[StoredObjectRef] = []
 
@@ -106,6 +124,11 @@ async def generate_job(
             job_id=job_id,
             prompt=normalized_prompt,
             input_objects=uploaded,
+            generation_policy=generation_policy,
+            generation_deadline_seconds=generation_deadline_seconds,
+            generation_render_reserve_seconds=(
+                generation_render_reserve_seconds
+            ),
         )
     except HTTPException:
         raise

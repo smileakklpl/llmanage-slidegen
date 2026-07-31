@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import mimetypes
 from pathlib import Path
@@ -58,13 +59,23 @@ class S3ObjectStorage:
         if content_type:
             extra_args["ContentType"] = content_type
 
+        position = stream.tell()
+        digest = hashlib.sha256()
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+        stream.seek(position)
+
         self._client.upload_fileobj(
             stream,
             self.bucket,
             key,
             ExtraArgs=extra_args or None,
         )
-        return self._head_ref(key=key, filename=filename)
+        return self._head_ref(
+            key=key,
+            filename=filename,
+            sha256=digest.hexdigest(),
+        )
 
     def upload_path(
         self,
@@ -76,13 +87,22 @@ class S3ObjectStorage:
         source = Path(path)
         detected = content_type or mimetypes.guess_type(source.name)[0]
         extra_args = {"ContentType": detected} if detected else None
+        digest = hashlib.sha256()
+        with source.open("rb") as stream:
+            for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                digest.update(chunk)
+
         self._client.upload_file(
             str(source),
             self.bucket,
             key,
             ExtraArgs=extra_args,
         )
-        return self._head_ref(key=key, filename=source.name)
+        return self._head_ref(
+            key=key,
+            filename=source.name,
+            sha256=digest.hexdigest(),
+        )
 
     def download_path(self, key: str, destination: str | Path) -> Path:
         target = Path(destination)
@@ -122,7 +142,13 @@ class S3ObjectStorage:
             ExpiresIn=self.presign_expires_seconds,
         )
 
-    def _head_ref(self, *, key: str, filename: str) -> StoredObjectRef:
+    def _head_ref(
+        self,
+        *,
+        key: str,
+        filename: str,
+        sha256: str | None = None,
+    ) -> StoredObjectRef:
         metadata = self._client.head_object(Bucket=self.bucket, Key=key)
         return StoredObjectRef(
             bucket=self.bucket,
@@ -130,4 +156,5 @@ class S3ObjectStorage:
             filename=filename,
             size_bytes=int(metadata.get("ContentLength") or 0),
             etag=str(metadata.get("ETag") or "").strip('"') or None,
+            sha256=sha256,
         )

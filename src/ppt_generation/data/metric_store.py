@@ -109,6 +109,23 @@ class MetricSeries:
     series_units: dict[str, str | None] = field(default_factory=dict)
     #: 指標語意類型，供 reviewer 判斷圖表類型是否合適（如 share 不該用折線圖）
     semantic: str = "value"
+    #: 原始 measure 的跨領域數值語意（count/currency/score/price…）。
+    value_semantic: str = "unknown"
+    #: 聚合語意。只有 sum 類 measure 才允許計算組成占比或跨實體加總。
+    aggregation_semantic: str = "sum"
+    #: deterministic profiler 核准的衍生指標白名單。
+    allowed_derivations: list[str] = field(
+        default_factory=lambda: [
+            "period_growth",
+            "yoy",
+            "share",
+            "rank",
+            "forecast",
+            "top",
+        ]
+    )
+    #: 原始資料形狀，供 engine/稽核解釋 view 的形成方式。
+    shape_kind: str = "unknown"
     #: 類別軸語意：``temporal``（時間序列）或 ``categorical``（橫斷面分類）。
     #: 決定哪些衍生指標有意義（跨時間才談成長率，跨機構才談占比／排名）。
     axis_kind: str = "categorical"
@@ -173,6 +190,10 @@ class MetricSeries:
             "unit": self.unit,
             "series_units": dict(self.series_units),
             "semantic": self.semantic,
+            "value_semantic": self.value_semantic,
+            "aggregation_semantic": self.aggregation_semantic,
+            "allowed_derivations": list(self.allowed_derivations),
+            "shape_kind": self.shape_kind,
             "axis_kind": self.axis_kind,
             "computable": self.computable,
             "notes": list(self.notes),
@@ -197,6 +218,22 @@ class MetricSeries:
                 for name, unit in payload.get("series_units", {}).items()
             },
             semantic=payload.get("semantic", "value"),
+            value_semantic=payload.get("value_semantic", "unknown"),
+            aggregation_semantic=payload.get("aggregation_semantic", "sum"),
+            allowed_derivations=list(
+                payload.get(
+                    "allowed_derivations",
+                    [
+                        "period_growth",
+                        "yoy",
+                        "share",
+                        "rank",
+                        "forecast",
+                        "top",
+                    ],
+                )
+            ),
+            shape_kind=payload.get("shape_kind", "unknown"),
             axis_kind=payload.get("axis_kind", "categorical"),
             computable=payload.get("computable", True),
             notes=list(payload.get("notes", [])),
@@ -308,6 +345,10 @@ class MetricStore:
                         for name in series.series_names
                     },
                     "semantic": series.semantic,
+                    "value_semantic": series.value_semantic,
+                    "aggregation_semantic": series.aggregation_semantic,
+                    "allowed_derivations": list(series.allowed_derivations),
+                    "shape_kind": series.shape_kind,
                     "axis_kind": series.axis_kind,
                     "series_names": series.series_names,
                     "category_count": len(series.categories),

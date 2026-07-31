@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import shutil
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -12,8 +13,11 @@ from core.contracts.generation import (
     GeneratedArtifact,
     GenerationRequest,
     GenerationResult,
+    NormalizedIngestionContract,
 )
 from ppt_generation import run_pipeline
+from ppt_generation.contracts import DeckSpecContract
+from ppt_generation.contracts.stages import PipelineRequestContract
 
 
 class GenerationFailedError(RuntimeError):
@@ -75,42 +79,65 @@ def _is_review_deliverable(
     )
 
 
-def generate_deck(request: GenerationRequest | dict[str, Any]) -> GenerationResult:
-    """Run the latest PPT pipeline and return a schema-validated result.
+def generate_deck(request: dict[str, Any]) -> GenerationResult:
+    """Run the production pipeline from a schema-validated JSON request.
 
-    The function deliberately wraps the CLI implementation instead of
-    duplicating any metric, chart, narrative, or rendering logic. It also
-    upgrades the API path to fail closed: rejected reviews, unresolved
-    placeholders, verifier warnings, or incomplete external checks are errors.
+    Backend owns raw-file ingestion. This boundary accepts only normalized
+    ingestion JSON and fails closed on review, placeholders, and T1 coverage.
     """
 
     validated = GenerationRequest.model_validate(request)
-    input_path = Path(validated.input_path).resolve()
+    ingestion_path = Path(validated.ingestion_path).resolve()
     output_dir = Path(validated.output_dir).resolve()
 
-    if not input_path.exists():
-        raise GenerationFailedError(f"輸入不存在：{input_path}")
+    if not ingestion_path.is_file():
+        raise GenerationFailedError(f"ingestion JSON 不存在：{ingestion_path}")
+
+    ingestion_payload = NormalizedIngestionContract.model_validate(
+        _read_json(ingestion_path)
+    ).model_dump(mode="json")
+
+    options = validated.options
+    remaining_deadline = options.deadline_seconds
+    llm_budget_exhausted = False
+    if validated.deadline_at_utc is not None:
+        deadline_at = validated.deadline_at_utc
+        if deadline_at.tzinfo is None:
+            deadline_at = deadline_at.replace(tzinfo=timezone.utc)
+        raw_remaining = (
+            deadline_at - datetime.now(timezone.utc)
+        ).total_seconds()
+        llm_budget_exhausted = raw_remaining <= 0
+        remaining_deadline = max(0.1, raw_remaining)
+    render_reserve = min(
+        options.render_reserve_seconds,
+        max(0.0, remaining_deadline - 0.05),
+    )
 
     output_dir.mkdir(parents=True, exist_ok=True)
     stage_dir = output_dir / "stages"
 
-    exit_code = run_pipeline.run(
-        ingestion_path=None,
+    pipeline_request = PipelineRequestContract(
+        ingestion_payload=ingestion_payload,
+        ingestion_source=str(ingestion_path),
         user_prompt=validated.prompt,
         sections=validated.sections,
-        output_dir=output_dir,
-        use_fake_llm=validated.use_fake_llm,
-        skip_semantic_review=validated.skip_semantic_review,
+        output_dir=str(output_dir),
+        use_fake_llm=options.use_fake_llm,
+        skip_semantic_review=options.skip_semantic_review,
         stop_after="verify",
-        dump_dir=stage_dir,
-        excel_path=input_path,
-        excel_sheet=None,
+        dump_dir=str(stage_dir),
         deck_title=validated.deck_title,
-        generation_policy=validated.generation_policy,
-        generation_deadline_seconds=validated.generation_deadline_seconds,
-        generation_render_reserve_seconds=(
-            validated.generation_render_reserve_seconds
-        ),
+        generation_policy=options.policy,
+        generation_deadline_seconds=remaining_deadline,
+        generation_render_reserve_seconds=render_reserve,
+        generation_llm_budget_exhausted=llm_budget_exhausted,
+        source_objects=[
+            item.model_dump(mode="json") for item in validated.source_objects
+        ],
+    )
+    exit_code = run_pipeline.run_from_contract(
+        pipeline_request.model_dump(mode="json")
     )
 
     if exit_code != 0:
@@ -118,6 +145,7 @@ def generate_deck(request: GenerationRequest | dict[str, Any]) -> GenerationResu
 
     review = _read_json(stage_dir / "05_review.json")
     manifest = _read_json(output_dir / "generation_manifest.json")
+    DeckSpecContract.model_validate(_read_json(output_dir / "deckspec.json"))
     generation_policy = (
         manifest.get("request", {}).get("generation_policy") or "strict"
     )

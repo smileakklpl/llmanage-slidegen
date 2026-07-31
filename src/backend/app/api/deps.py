@@ -6,6 +6,7 @@ from app.core.config import settings
 from app.repositories.s3_job_repository import S3JobRepository
 from app.services.job_service import JobService
 from app.storage.s3_storage import S3ObjectStorage
+from core.contracts.generation import GenerationOptions
 
 
 @lru_cache(maxsize=1)
@@ -27,6 +28,13 @@ def get_job_service() -> JobService:
     return JobService(
         repository=repository,
         storage=storage,
-        use_fake_llm=settings.generation_use_fake_llm,
-        skip_semantic_review=settings.generation_skip_semantic_review,
+        default_generation_options=GenerationOptions(
+            policy=settings.generation_policy,
+            deadline_seconds=settings.generation_deadline_seconds,
+            render_reserve_seconds=(
+                settings.generation_render_reserve_seconds
+            ),
+            use_fake_llm=settings.generation_use_fake_llm,
+            skip_semantic_review=settings.generation_skip_semantic_review,
+        ),
     )

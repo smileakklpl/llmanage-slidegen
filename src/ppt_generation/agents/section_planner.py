@@ -34,18 +34,16 @@ MAX_SECTIONS = 16
 #: 不是替使用者作決定。
 DEFAULT_CHAPTERS: tuple[str, ...] = (
     "Executive Summary",
-    "市場整體概況",
-    "同業成長及競爭分析",
-    "客戶活躍度",
-    "獲利能力",
-    "風險與警訊",
-    "未來趨勢推測",
-    "對台新的策略建議",
+    "核心概況",
+    "趨勢與變化",
+    "分群與排行",
+    "異常、風險與限制",
+    "預測與情境",
+    "建議與下一步",
 )
 
-#: 「未來趨勢推測」章節只能引用 forecast 類指標（FR-2.6），
-#: writer 不得自行推測數值。這裡記下對應關係供 prompt 使用。
-FORECAST_CHAPTER = "未來趨勢推測"
+#: 預測章節只能引用 deterministic engine 已核准的 forecast 指標。
+FORECAST_CHAPTER = "預測與情境"
 
 #: 結論章節名稱。renderer 會在所有內容頁之後加一張結論頁，把每個章節的
 #: 結論句收攏成一頁；這裡定義它的標題，讓目錄與頁面標題共用同一個字串。
@@ -83,9 +81,11 @@ SYSTEM_PROMPT = """你是一位資料分析與管理顧問，負責規劃給管�
     「{closing_chapter}」即扮演此角色）：它不再引入新主題，而是把前面各章
     的發現收成「所以我們該做什麼」。這一章的 intent 要寫明它要回答的
     決策問題，不要只寫「呈現某指標」。
-12. 每一頁的 intent 都要寫成一個問句或一句結論主張（例如「市場成長的
-    驅動力來自簽帳金額而非發卡量」），不要寫成「展示 X 指標的趨勢」——
-    intent 是下游撰寫敘事的依據，寫成資料描述會得到資料描述的文案。
+12. 每一頁的 intent 都要寫成一個問句或一句結論主張（例如「需求成長主要來自
+    訂單量而非平均單價」），不要寫成「展示 X 指標的趨勢」——intent 是下游
+    撰寫敘事的依據，寫成資料描述會得到資料描述的文案。
+13. 領域可能是餐飲、旅遊、零售、股票或金融；只能依使用者需求與 catalog
+    判斷語境，不可預設銀行、市場競爭或客戶經營。
 
 只輸出 JSON，不要加任何說明文字。"""
 
@@ -254,6 +254,20 @@ class SectionPlanResult:
             "question_to_user": self.question_to_user,
             "dropped_metric_keys": dict(self.dropped_metric_keys),
         }
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> SectionPlanResult:
+        return cls(
+            status=payload.get("status", STATUS_NEEDS_CONFIRMATION),
+            sections=[
+                SectionPlan.from_dict(item)
+                for item in payload.get("sections", [])
+            ],
+            question_to_user=payload.get("question_to_user"),
+            dropped_metric_keys=dict(
+                payload.get("dropped_metric_keys", {})
+            ),
+        )
 
 
 def build_prompt(
@@ -460,15 +474,15 @@ def build_deterministic_sections(store: MetricStore) -> SectionPlanResult:
 
         series_name = metric.series_names[-1]
         chapter = (
-            "趨勢與成長洞察"
+            "趨勢與變化"
             if metric.axis_kind == "temporal"
-            else "市場與競爭概況"
+            else "分群與比較"
         )
         sections.append(
             SectionPlan(
                 title=metric.name,
                 chapter=chapter,
-                intent=f"以可追溯資料說明{metric.name}的市場意涵與管理重點",
+                intent=f"以可追溯資料說明{metric.name}的變化、管理意涵與下一步",
                 suggested_metric_keys=[metric_key],
                 suggested_series_by_metric={metric_key: [series_name]},
                 comparison_reason_by_metric={metric_key: ""},
@@ -529,7 +543,7 @@ def plan_sections(
             sections=[],
             question_to_user=(
                 "無法從您的描述判斷簡報章節，請說明想呈現的主題或章節，"
-                f"例如：市場整體概況、各業者競爭態勢。可用指標共 "
+                f"例如：核心概況、趨勢變化、分群排行或決策建議。可用指標共 "
                 f"{len(store.computable_metric_keys())} 項。"
             ),
             dropped_metric_keys=dropped,
@@ -540,4 +554,44 @@ def plan_sections(
         sections=sections,
         question_to_user=payload.get("question_to_user"),
         dropped_metric_keys=dropped,
+    )
+
+
+def plan_sections_from_contract(
+    user_prompt: str,
+    metric_store_payload: dict[str, Any],
+    *,
+    existing_sections: Sequence[str] | None = None,
+    llm_call: Callable[..., Any] | None = None,
+    deadline_monotonic: float | None = None,
+) -> dict[str, Any]:
+    """JSON-only stage boundary for section planning."""
+    from ..contracts import stages as stage_contracts
+
+    validated_store = stage_contracts.metric_store_payload(metric_store_payload)
+    store_body = dict(validated_store)
+    store_body.pop("contract_version", None)
+    store = MetricStore.from_dict(store_body)
+    result = plan_sections(
+        user_prompt,
+        store,
+        existing_sections=existing_sections,
+        llm_call=llm_call,
+        deadline_monotonic=deadline_monotonic,
+    )
+    return stage_contracts.section_stage_payload(result.to_dict())
+
+
+def build_deterministic_sections_from_contract(
+    metric_store_payload: dict[str, Any],
+) -> dict[str, Any]:
+    """JSON-only deterministic fallback for section planning."""
+    from ..contracts import stages as stage_contracts
+
+    validated_store = stage_contracts.metric_store_payload(metric_store_payload)
+    store_body = dict(validated_store)
+    store_body.pop("contract_version", None)
+    store = MetricStore.from_dict(store_body)
+    return stage_contracts.section_stage_payload(
+        build_deterministic_sections(store).to_dict()
     )

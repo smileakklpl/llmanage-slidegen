@@ -13,7 +13,7 @@
 import pytest
 from openpyxl import Workbook
 
-from ppt_generation.data import backend_bridge
+from app.ingestion import generation_bridge as backend_bridge
 
 
 PERIODS = [11401, 11402, 11403, 11404, 11405, 11406]

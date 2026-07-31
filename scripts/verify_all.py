@@ -58,26 +58,60 @@ def _backend_pytest() -> str:
 
 
 def _layering() -> str:
-    """產品碼不得反向依賴 tools/。"""
+    """Enforce backend → core → ppt_generation and block tool imports."""
     import re
 
-    pattern = re.compile(r"^\s*(?:from|import)\s+(tools)\b", re.MULTILINE)
+    tool_pattern = re.compile(r"^\s*(?:from|import)\s+(tools)\b", re.MULTILINE)
+    forbidden_by_layer = {
+        "backend": re.compile(
+            r"^\s*(?:from|import)\s+ppt_generation\b", re.MULTILINE
+        ),
+        "core": re.compile(
+            r"^\s*(?:from|import)\s+(?:app|backend)\b", re.MULTILINE
+        ),
+        "ppt_generation": re.compile(
+            r"^\s*(?:from|import)\s+(?:app|backend|core)\b",
+            re.MULTILINE,
+        ),
+    }
     offenders: list[str] = []
     source_files = sorted((REPO_ROOT / "src").rglob("*.py"))
 
     for path in source_files:
         text = path.read_text(encoding="utf-8")
-        for match in pattern.finditer(text):
-            line = text[: match.start()].count("\n") + 1
-            offenders.append(
-                f"{path.relative_to(REPO_ROOT)}:{line} → {match.group(1)}"
-            )
+        patterns = [("tools", tool_pattern)]
+        relative = path.relative_to(REPO_ROOT / "src")
+        if relative.parts:
+            layer = relative.parts[0]
+            if layer in forbidden_by_layer:
+                patterns.append(("layer", forbidden_by_layer[layer]))
+
+        for rule, pattern in patterns:
+            for match in pattern.finditer(text):
+                line = text[: match.start()].count("\n") + 1
+                offenders.append(
+                    f"{path.relative_to(REPO_ROOT)}:{line} → {rule}: "
+                    f"{match.group(0).strip()}"
+                )
 
     assert not offenders, (
-        "產品碼 src/ 反向依賴量測或工具碼：\n    "
-        + "\n    ".join(offenders)
+        "產品碼依賴方向違規：\n    " + "\n    ".join(offenders)
     )
-    return f"src/ 的 {len(source_files)} 支檔案依賴方向正確"
+    return (
+        f"src/ 的 {len(source_files)} 支檔案符合 "
+        "backend → core → ppt_generation"
+    )
+
+
+def _prepare_ingestion(source: Path, target: Path) -> Path:
+    """Run the backend-owned ingestion bridge before crossing into core."""
+    backend_root = str(REPO_ROOT / "src" / "backend")
+    if backend_root not in sys.path:
+        sys.path.insert(0, backend_root)
+
+    from app.ingestion.generation_bridge import ingest_excel, save_payload
+
+    return save_payload(ingest_excel(source), target)
 
 
 def _production_pipeline() -> str:
@@ -90,17 +124,23 @@ def _production_pipeline() -> str:
 
     with tempfile.TemporaryDirectory(prefix="slidegen-verify-") as temp_dir:
         output_dir = Path(temp_dir) / "artifacts"
+        ingestion_path = _prepare_ingestion(
+            SMOKE_INPUT,
+            Path(temp_dir) / "ingestion.json",
+        )
         request = GenerationRequest(
             job_id="verify-production-pipeline",
-            prompt="依上傳資料產出管理層簡報，呈現市場概況、趨勢與重點觀察。",
-            input_path=str(SMOKE_INPUT),
+            prompt="依上傳資料產出管理層簡報，呈現核心概況、趨勢與重點觀察。",
+            ingestion_path=str(ingestion_path),
             output_dir=str(output_dir),
-            sections=["市場概況", "趨勢分析", "重點觀察"],
+            sections=["核心概況", "趨勢分析", "重點觀察"],
             deck_title="正式管線驗收",
-            use_fake_llm=True,
-            skip_semantic_review=False,
+            options={
+                "use_fake_llm": True,
+                "skip_semantic_review": False,
+            },
         )
-        result = generate_deck(request)
+        result = generate_deck(request.model_dump(mode="json"))
 
         expected = {
             "deck.pptx",

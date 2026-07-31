@@ -33,7 +33,7 @@ from ..charts.chart_planner import (
     validate_chart_plan,
 )
 from ..data.metric_store import MetricStore
-from .section_planner import SectionPlan
+from .section_planner import SectionPlan, SectionPlanResult
 
 
 logger = logging.getLogger(__name__)
@@ -289,3 +289,61 @@ def plan_charts(
         result.charts.append(resolved)
 
     return result
+
+
+def plan_charts_from_contract(
+    section_stage_payload: dict[str, Any],
+    metric_store_payload: dict[str, Any],
+    *,
+    llm_call: Callable[..., Any] | None = None,
+    max_attempts: int = MAX_PLAN_ATTEMPTS,
+    deadline_monotonic: float | None = None,
+    recover_provider_errors: bool = False,
+) -> dict[str, Any]:
+    """JSON-only stage boundary for chart planning; output contains no values."""
+    from ..contracts import stages as stage_contracts
+
+    sections_json = stage_contracts.section_stage_payload(
+        section_stage_payload
+    )
+    sections = SectionPlanResult.from_dict(sections_json).sections
+    store_json = stage_contracts.metric_store_payload(metric_store_payload)
+    store_body = dict(store_json)
+    store_body.pop("contract_version", None)
+    store = MetricStore.from_dict(store_body)
+    result = plan_charts(
+        sections,
+        store,
+        llm_call=llm_call,
+        max_attempts=max_attempts,
+        deadline_monotonic=deadline_monotonic,
+        recover_provider_errors=recover_provider_errors,
+    )
+    return stage_contracts.chart_stage_payload(
+        {
+            "plans": [chart.plan.to_dict() for chart in result.charts],
+            "failures": result.failures,
+            "attempts": result.attempts,
+        }
+    )
+
+
+def build_deterministic_chart_from_contract(
+    section_payload: dict[str, Any],
+    metric_store_payload: dict[str, Any],
+) -> dict[str, Any]:
+    """JSON-only deterministic chart fallback returning a value-free plan."""
+    from ..contracts import stages as stage_contracts
+
+    section_json = stage_contracts.SectionContract.model_validate(
+        section_payload
+    ).model_dump(mode="json")
+    section = SectionPlan.from_dict(section_json)
+    store_json = stage_contracts.metric_store_payload(metric_store_payload)
+    store_body = dict(store_json)
+    store_body.pop("contract_version", None)
+    store = MetricStore.from_dict(store_body)
+    plan = build_deterministic_chart(section, store).plan
+    return stage_contracts.ChartPlanContract.model_validate(
+        plan.to_dict()
+    ).model_dump(mode="json")

@@ -11,25 +11,9 @@
 2. **內建範例資料**：不需要 backend 輸出，直接用內建的信用卡市場範例跑完整流程
    ``python -m ppt_generation.run_pipeline --sample --prompt "..."``
 
-3. **直接讀 Excel**：由 backend ingestion 現場解析，支援兩種版型
-
-   單檔多表（一個 .xlsx，每張工作表一個指標）::
-
-       python -m ppt_generation.run_pipeline \
-           --excel fixtures/data/fsc_114_workbook.xlsx --prompt "..."
-
-   多檔單表（一個目錄，每個 .xlsx 一個指標）::
-
-       python -m ppt_generation.run_pipeline \
-           --excel fixtures/data/fsc_114 --prompt "..."
-
-   兩種版型走同一條路徑，版型判斷在 :mod:`data.backend_bridge` 裡完成，
-   下游拿到的 payload 形狀一致。ingestion 結果會落檔成
-   ``<output-dir>/stages/00_ingestion.json``，之後可用 ``--ingestion``
-   重跑同一份資料而不必再解析一次 Excel。
-
-4. **既有 backend JSON**
-   ``python -m ppt_generation.run_pipeline --ingestion outputs/ingestion.json --prompt "..."``
+3. **既有 backend ingestion JSON**：正式 API/worker 會先完成 ingestion，
+   再把 versioned JSON 交給本管線。
+   ``python -m ppt_generation.run_pipeline --ingestion ingestion.json --prompt "..."``
 
 加上 ``--fake-llm`` 可完全不呼叫 LLM（用內建假回應），用來驗證非 LLM 的部分。
 
@@ -62,8 +46,10 @@ from typing import Any, Callable, Sequence
 
 from .agents import chart_agent, narrative_writer, reviewer, section_planner
 from .charts import chart_planner
+from .contracts import stages as stage_contracts
 from .core import config, llm_client
-from .data import backend_bridge, dataset_loader, metric_engine
+from .data import dataset_loader, metric_engine
+from .data.metric_store import MetricStore
 from .output import excel_exporter, renderer
 from .verification import verify_chart_consistency as vcc
 
@@ -98,7 +84,7 @@ CANDIDATE_DETERMINISTIC = "deterministic_fallback"
 
 #: 封面標題預設值。用使用者的 prompt 原句當標題會在封面上出現
 #: 「幫我做一份…」這種指令句；標題該是簡報的名字，不是下單的話。
-DEFAULT_DECK_TITLE = "信用卡市場分析與經營洞察"
+DEFAULT_DECK_TITLE = "資料分析與決策洞察"
 
 STAGE_LABELS: dict[str, str] = {
     "metrics": "Stage 1-3 資料讀取與指標計算",
@@ -212,9 +198,14 @@ def _write_generation_manifest(
     generation_policy: str,
     deadline_seconds: float,
     render_reserve_seconds: float,
+    source_objects: Sequence[dict[str, Any]] | None,
+    llm_budget_exhausted: bool,
 ) -> Path:
     """Persist model routing and content hashes for post-run audit."""
     input_sha256, input_kind, input_file_count = _hash_input(input_path, payload)
+    if input_path is None and data_source != "built-in sample":
+        input_kind = "normalized_json"
+        input_file_count = len(source_objects or [])
 
     if use_fake_llm:
         llm_payload: dict[str, Any] = {
@@ -286,6 +277,20 @@ def _write_generation_manifest(
             "kind": input_kind,
             "file_count": input_file_count,
             "sha256": input_sha256,
+            "ingestion_sha256": input_sha256,
+            "source_objects": list(source_objects or []),
+            "source_objects_sha256_complete": bool(source_objects)
+            and all(item.get("sha256") for item in source_objects or []),
+        },
+        "contracts": {
+            "generation_request": "1.1",
+            "ingestion": str(payload.get("contract_version") or "legacy"),
+            "metric_store": "1.0",
+            "section_plan": "1.0",
+            "chart_plan": "1.0",
+            "narrative": "1.0",
+            "review": "1.0",
+            "deckspec": "1.0",
         },
         "request": {
             "user_prompt_sha256": _sha256_text(user_prompt),
@@ -294,6 +299,7 @@ def _write_generation_manifest(
             "generation_policy": generation_policy,
             "deadline_seconds": deadline_seconds,
             "render_reserve_seconds": render_reserve_seconds,
+            "llm_budget_exhausted": llm_budget_exhausted,
         },
         "configured_system_prompt_sha256": {
             "sections": _sha256_text(section_planner.SYSTEM_PROMPT),
@@ -649,20 +655,20 @@ def _fake_chart_for_metric(metric: Any) -> dict[str, Any]:
         if len(metric.categories) > chart_planner.MAX_PIE_CATEGORIES:
             return {
                 "tool_name": "bar",
-                "chart_title": f"{metric.name}：業者份額排序",
+                "chart_title": f"{metric.name}：類別份額排序",
                 "series_names": series_names[-1:],
             }
 
         return {
             "tool_name": "pie",
-            "chart_title": f"{metric.name}結構：前段業者掌握主要份額",
+            "chart_title": f"{metric.name}結構：主要類別占比較高",
             "series_names": series_names[-1:],
         }
 
     if metric.semantic == "rank":
         return {
             "tool_name": "bar",
-            "chart_title": f"{metric.name}：業者排序",
+            "chart_title": f"{metric.name}：類別排序",
             "series_names": series_names[-1:],
         }
 
@@ -675,7 +681,7 @@ def _fake_chart_for_metric(metric: Any) -> dict[str, Any]:
 
     return {
         "tool_name": "column",
-        "chart_title": f"{metric.name}：業者間規模差異明顯",
+        "chart_title": f"{metric.name}：類別間差異值得關注",
         "series_names": series_names[-1:],
     }
 
@@ -684,15 +690,15 @@ def _fake_chart_for_metric(metric: Any) -> dict[str, Any]:
 #: 對齊 FR-2.6 的八章節與附件三的頁面型態。順序即簡報順序。
 _FAKE_DECK_BLUEPRINT: tuple[tuple[str, str, str, str], ...] = (
     ("Executive Summary", "關鍵指標總覽", "top_value", "table"),
-    ("市場整體概況", "市場規模趨勢", "timeline", "combo"),
-    ("市場整體概況", "市場動能檢視", "timeline_growth", "line"),
-    ("同業成長及競爭分析", "業者規模排序", "top_value", "bar"),
-    ("同業成長及競爭分析", "市占結構", "top_share", "pie"),
-    ("客戶活躍度", "有效卡數表現", "top_value_2", "column"),
-    ("獲利能力", "循環信用與分期貢獻", "top_value_3", "column"),
-    ("風險與警訊", "轉銷呆帳分佈", "top_value_last", "heatmap"),
-    ("未來趨勢推測", "市場規模外推", "forecast", "line"),
-    ("對台新的策略建議", "市占提升空間", "share", "bar"),
+    ("核心概況", "整體指標趨勢", "timeline", "combo"),
+    ("趨勢與變化", "變化動能檢視", "timeline_growth", "line"),
+    ("分群與排行", "類別表現排序", "top_value", "bar"),
+    ("分群與排行", "組成結構", "top_share", "pie"),
+    ("核心概況", "第二項指標表現", "top_value_2", "column"),
+    ("核心概況", "第三項指標表現", "top_value_3", "column"),
+    ("異常、風險與限制", "差異與異常分佈", "top_value_last", "heatmap"),
+    ("預測與情境", "後續趨勢外推", "forecast", "line"),
+    ("建議與下一步", "改善與追蹤空間", "share", "bar"),
 )
 
 
@@ -713,8 +719,10 @@ def _select_fake_metric(store: Any, kind: str) -> str | None:
         "top_value_last": top_values[-1:],
         "top_share": top_shares[:1],
         "share": [key for key in ends(".share") if ".top" not in key][:1],
-        "timeline": [key for key in ends("market_by_period.value")],
-        "timeline_growth": [key for key in ends("market_by_period.period_growth")],
+        "timeline": [key for key in ends("aggregate_by_period.value")],
+        "timeline_growth": [
+            key for key in ends("aggregate_by_period.period_growth")
+        ],
         "forecast": [key for key in ends(".forecast")],
     }
 
@@ -793,20 +801,20 @@ def _fake_chart_arguments(
     if skill == "combo" and len(names) >= 2:
         # 附件三 P.5 的形狀：規模走長條、金額走折線掛次軸。
         series_names = [names[0], names[2] if len(names) > 2 else names[1]]
-        title = f"{metric.name}：規模與金額走勢並列"
+        title = f"{metric.name}：多指標走勢並列"
     elif skill == "line" and is_temporal:
         series_names = names[:2]
         title = f"{metric.name}走勢"
     elif skill == "pie" and not is_temporal:
         series_names = names[-1:]
-        title = f"{metric.name}：前段業者掌握主要份額"
+        title = f"{metric.name}：主要類別占比較高"
     elif skill in {"table", "heatmap"}:
         # 表格欄位太多會擠成一片，取最後 6 期就夠看出強弱分佈。
         series_names = names[-6:]
         title = f"{metric.name}明細"
     elif skill in {"bar", "column"} and not is_temporal:
         series_names = names[-1:]
-        title = f"{metric.name}：業者間差異明顯"
+        title = f"{metric.name}：類別間差異值得關注"
     else:
         return {
             "tool_name": auto["tool_name"],
@@ -871,7 +879,7 @@ def _make_store_aware_fakes(store: Any):
                         "chapter": page["chapter"],
                         "intent": (
                             f"回答 {store.get(page['metric_key']).name}"
-                            "的分佈是否已形成穩定的競爭格局"
+                            "的變化或類別差異對下一步決策有何意涵"
                         ),
                         "metric_scopes": [
                             {
@@ -912,16 +920,16 @@ def _make_store_aware_fakes(store: Any):
             # 規則允許的更短，端到端就會在敘事階段掉頁，測不到 render 與比對。
             return {
                 "headline": (
-                    f"{metric.name}呈現明顯的業者集中態勢，"
-                    "規模差距短期內難以收斂"
+                    f"{metric.name}呈現可辨識的類別差異，"
+                    "後續行動應以持續更新的資料校準優先順序"
                 ),
                 "bullets": [
-                    f"領先者 {cite('max_category')} 達 {cite('max')}，"
-                    "明顯拉開與其餘業者的距離，反映規模效應仍在累積",
-                    f"末位業者僅 {cite('min')}，與領先者之間的落差顯示"
-                    "中小型業者在此指標上缺乏可持續的規模優勢",
-                    f"全體平均為 {cite('avg')}，位於平均之下的業者"
-                    "需重新檢視資源配置是否與市場競爭強度相稱",
+                    f"觀察高點 {cite('max_category')} 為 {cite('max')}，"
+                    "建議回到來源資料檢視其形成條件，再評估是否擴大相關行動",
+                    f"觀察低點為 {cite('min')}，與高點之間的差異顯示各類別"
+                    "表現並不一致，後續追蹤應維持相同定義與資料口徑",
+                    f"整體平均為 {cite('avg')}，管理團隊可據此建立追蹤基準，"
+                    "並在下一次資料更新後重新檢視資源與改善工作的排序",
                 ],
             }
 
@@ -1166,6 +1174,57 @@ def _generate_required_page(
     warning_reasons: list[str] = []
     candidate: narrative_writer.PageNarrative | None = None
     candidate_source = CANDIDATE_LLM
+    section_payload = section.to_dict()
+    chart_plan_payload = chart.plan.to_dict()
+    metric_store_payload = stage_contracts.metric_store_payload(store.to_dict())
+
+    def write_candidate(**kwargs: Any) -> tuple[Any, list[str], int]:
+        result = narrative_writer.write_narrative_from_contract(
+            section_payload,
+            chart_plan_payload,
+            metric_store_payload,
+            **kwargs,
+        )
+        narrative_payload = result.get("narrative")
+        narrative = (
+            narrative_writer.PageNarrative.from_dict(narrative_payload)
+            if narrative_payload is not None
+            else None
+        )
+        return narrative, list(result["issues"]), int(result["attempts"])
+
+    def deterministic_candidate() -> narrative_writer.PageNarrative:
+        payload = narrative_writer.build_deterministic_fallback_from_contract(
+            section_payload,
+            chart_plan_payload,
+            metric_store_payload,
+        )
+        return narrative_writer.PageNarrative.from_dict(payload)
+
+    def hard_issues_for(item: narrative_writer.PageNarrative) -> list[str]:
+        return reviewer.run_rule_layer_from_contract(
+            item.to_dict(),
+            chart_plan_payload,
+            metric_store_payload,
+        )
+
+    def review_candidate(
+        item: narrative_writer.PageNarrative,
+    ) -> reviewer.ReviewResult:
+        payload = reviewer.review_page_from_contract(
+            item.to_dict(),
+            chart_plan_payload,
+            metric_store_payload,
+            llm_call=json_call,
+            enable_semantic_layer=enable_semantic_review,
+            deadline_monotonic=page_deadline,
+        )
+        return reviewer.ReviewResult(
+            status=payload["status"],
+            rule_issues=list(payload["rule_issues"]),
+            semantic_issues=list(payload["semantic_issues"]),
+            target_agent=payload.get("target_agent"),
+        )
 
     def has_time() -> bool:
         return time.monotonic() < page_deadline
@@ -1179,10 +1238,7 @@ def _generate_required_page(
             break
 
         try:
-            candidate, issues, used = narrative_writer.write_narrative_for_page(
-                section,
-                chart,
-                store,
+            candidate, issues, used = write_candidate(
                 llm_call=json_call,
                 max_attempts=attempts,
                 initial_errors=last_errors,
@@ -1200,19 +1256,15 @@ def _generate_required_page(
             break
 
     if candidate is None:
-        candidate = narrative_writer.build_deterministic_fallback(
-            section, chart, store
-        )
+        candidate = deterministic_candidate()
         candidate_source = CANDIDATE_DETERMINISTIC
         warning_reasons.append("LLM 未產生合法敘事，已套用確定性敘事模板")
 
-    hard_issues = reviewer.run_rule_layer(candidate, chart, store)
+    hard_issues = hard_issues_for(candidate)
     if hard_issues and (not review_enabled or not has_time()):
-        candidate = narrative_writer.build_deterministic_fallback(
-            section, chart, store
-        )
+        candidate = deterministic_candidate()
         candidate_source = CANDIDATE_DETERMINISTIC
-        hard_issues = reviewer.run_rule_layer(candidate, chart, store)
+        hard_issues = hard_issues_for(candidate)
         warning_reasons.append("LLM 候選未通過硬性規則，已套用確定性敘事模板")
 
     if hard_issues and not review_enabled:
@@ -1248,14 +1300,7 @@ def _generate_required_page(
     while has_time():
         reviewer_attempts += 1
         try:
-            final_review = reviewer.review_page(
-                current,
-                chart,
-                store,
-                llm_call=json_call,
-                enable_semantic_layer=enable_semantic_review,
-                deadline_monotonic=page_deadline,
-            )
+            final_review = review_candidate(current)
         except Exception as error:  # noqa: BLE001 - required mode must degrade
             warning_reasons.append(f"Reviewer 無法在期限內完成：{error}")
             break
@@ -1316,17 +1361,12 @@ def _generate_required_page(
                 break
 
             try:
-                repaired, issues, used = (
-                    narrative_writer.write_narrative_for_page(
-                        section,
-                        chart,
-                        store,
-                        llm_call=json_call,
-                        max_attempts=1,
-                        initial_errors=final_review.all_issues,
-                        llm_stage=writer_stage,
-                        deadline_monotonic=page_deadline,
-                    )
+                repaired, issues, used = write_candidate(
+                    llm_call=json_call,
+                    max_attempts=1,
+                    initial_errors=final_review.all_issues,
+                    llm_stage=writer_stage,
+                    deadline_monotonic=page_deadline,
                 )
                 writer_attempts += used
             except Exception as error:  # noqa: BLE001 - required mode must degrade
@@ -1364,23 +1404,19 @@ def _generate_required_page(
         warning_reasons.append("頁面修正期限已到")
 
     if last_valid is None:
-        selected = narrative_writer.build_deterministic_fallback(
-            section, chart, store
-        )
+        selected = deterministic_candidate()
         selected_source = CANDIDATE_DETERMINISTIC
         warning_reasons.append("無可交付 LLM 候選，已套用確定性敘事模板")
     else:
         selected = last_valid
         selected_source = last_valid_source or CANDIDATE_LLM
 
-    selected_hard_issues = reviewer.run_rule_layer(selected, chart, store)
+    selected_hard_issues = hard_issues_for(selected)
 
     if selected_hard_issues:
-        selected = narrative_writer.build_deterministic_fallback(
-            section, chart, store
-        )
+        selected = deterministic_candidate()
         selected_source = CANDIDATE_DETERMINISTIC
-        selected_hard_issues = reviewer.run_rule_layer(selected, chart, store)
+        selected_hard_issues = hard_issues_for(selected)
         warning_reasons.append("最佳候選未通過硬性規則，已套用確定性敘事模板")
 
     if selected_hard_issues:
@@ -1407,6 +1443,8 @@ def _generate_required_page(
 def run(
     *,
     ingestion_path: str | Path | None,
+    ingestion_payload: dict[str, Any] | None = None,
+    ingestion_source: str | None = None,
     user_prompt: str,
     sections: Sequence[str] | None,
     output_dir: Path,
@@ -1414,12 +1452,12 @@ def run(
     skip_semantic_review: bool,
     stop_after: str = STAGE_SEQUENCE[-1],
     dump_dir: Path | None = None,
-    excel_path: str | Path | None = None,
-    excel_sheet: str | None = None,
     deck_title: str | None = None,
     generation_policy: str | None = None,
     generation_deadline_seconds: float | None = None,
     generation_render_reserve_seconds: float | None = None,
+    generation_llm_budget_exhausted: bool = False,
+    source_objects: Sequence[dict[str, Any]] | None = None,
 ) -> int:
     """
     跑管線。``stop_after`` 指定跑到哪個階段為止（見 :data:`STAGE_SEQUENCE`）。
@@ -1454,11 +1492,18 @@ def run(
         raise ValueError("generation deadline 必須大於 render reserve，且兩者不可為負")
 
     pipeline_started = time.monotonic()
-    llm_cutoff = pipeline_started + deadline_seconds - render_reserve_seconds
+    llm_cutoff = (
+        pipeline_started
+        if generation_llm_budget_exhausted
+        else pipeline_started + deadline_seconds - render_reserve_seconds
+    )
+
+    if ingestion_path is not None and ingestion_payload is not None:
+        raise ValueError("ingestion_path 與 ingestion_payload 不可同時提供")
 
     # 內建範例用寫死的假回應（它同時也在驗那組固定期望值）；
     # 真實資料的假回應要看得懂當前 MetricStore，等 store 建好後再產生。
-    uses_sample = excel_path is None and ingestion_path is None
+    uses_sample = ingestion_path is None and ingestion_payload is None
 
     if use_fake_llm and uses_sample:
         json_call: Callable[..., Any] | None = _fake_json_call
@@ -1494,52 +1539,45 @@ def run(
 
     data_source: str
 
-    if excel_path is not None:
-        # 直接讀 Excel：由 backend ingestion 產生 payload。
-        # 單一檔案（多工作表）與目錄（多個單表檔）兩種版型都走這條，
-        # 版型判斷在 backend_bridge 裡，這裡不分支。
-        payload = backend_bridge.ingest_excel(
-            excel_path,
-            sheet_name=excel_sheet,
-        )
-
-        source_files = payload.get("source_files") or []
-        data_source = str(excel_path)
-
-        print(f"  資料來源：{excel_path}（經 backend ingestion）")
-        print(
-            f"  輸入檔案：{len(source_files)} 個"
-            f"（{'、'.join(source_files[:6])}"
-            f"{' …' if len(source_files) > 6 else ''}）"
-        )
-
-        for message in payload.get("warnings") or []:
-            print(f"    註：{message}")
-
-        # payload 落檔，之後可用 --ingestion 重跑同一份資料，
-        # 也是「數字可追溯」的稽核起點。
-        if dump_dir is not None:
-            saved = backend_bridge.save_payload(
-                payload,
-                Path(dump_dir) / "00_ingestion.json",
-            )
-            print(f"  [階段輸出] {saved}")
-
-    elif ingestion_path is None:
+    if uses_sample:
         payload = _sample_ingestion_payload()
         data_source = "built-in sample"
-        print("  資料來源：內建範例（--sample）")
-    else:
-        payload = json.loads(Path(ingestion_path).read_text(encoding="utf-8"))
-        data_source = str(ingestion_path)
-        print(f"  資料來源：{ingestion_path}")
-
-    if excel_path is not None:
-        manifest_input_path = Path(excel_path)
-    elif ingestion_path is not None:
-        manifest_input_path = Path(ingestion_path)
-    else:
         manifest_input_path = None
+        print("  資料來源：內建範例（--sample）")
+    elif ingestion_payload is not None:
+        payload = dict(ingestion_payload)
+        data_source = ingestion_source or "normalized ingestion JSON"
+        manifest_input_path = None
+        print(f"  資料來源：{data_source}")
+
+        if dump_dir is not None:
+            ingestion_dump = Path(dump_dir) / "00_ingestion.json"
+            ingestion_dump.parent.mkdir(parents=True, exist_ok=True)
+            ingestion_dump.write_text(
+                json.dumps(payload, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+            print(f"  [階段輸出] {ingestion_dump}")
+    else:
+        assert ingestion_path is not None
+        ingestion_file = Path(ingestion_path)
+        payload = json.loads(ingestion_file.read_text(encoding="utf-8"))
+        if not isinstance(payload, dict):
+            raise dataset_loader.IngestionPayloadError(
+                "ingestion JSON 最外層必須是 object"
+            )
+        data_source = str(ingestion_file)
+        manifest_input_path = ingestion_file
+        print(f"  資料來源：{ingestion_file}")
+
+        if dump_dir is not None:
+            ingestion_dump = Path(dump_dir) / "00_ingestion.json"
+            ingestion_dump.parent.mkdir(parents=True, exist_ok=True)
+            ingestion_dump.write_text(
+                json.dumps(payload, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+            print(f"  [階段輸出] {ingestion_dump}")
 
     manifest_path = _write_generation_manifest(
         output_dir=output_dir,
@@ -1554,11 +1592,18 @@ def run(
         generation_policy=effective_policy,
         deadline_seconds=deadline_seconds,
         render_reserve_seconds=render_reserve_seconds,
+        source_objects=source_objects,
+        llm_budget_exhausted=generation_llm_budget_exhausted,
     )
     print(f"  [執行稽核] {manifest_path}")
 
-    loaded = dataset_loader.load_ingestion_result(payload)
-    store, engine_report = metric_engine.build_metric_store(loaded)
+    engine_payload = metric_engine.build_metric_store_from_contract(payload)
+    metric_store_json = engine_payload["metric_store"]
+    metric_store_body = dict(metric_store_json)
+    metric_store_body.pop("contract_version", None)
+    store = MetricStore.from_dict(metric_store_body)
+    engine_report = engine_payload["engine_report"]
+    dataset_ids = list(engine_payload["dataset_ids"])
 
     if use_fake_llm and not uses_sample:
         json_call, tool_call = _make_store_aware_fakes(store)
@@ -1569,35 +1614,31 @@ def run(
     json_call = _audited_llm_call(json_call, output_dir)
     tool_call = _audited_llm_call(tool_call, output_dir)
 
-    print(f"  資料集：{len(loaded.datasets)} 個")
-    print(f"  可用指標：{engine_report.metric_count} 個")
+    print(f"  資料集：{len(dataset_ids)} 個")
+    print(f"  可用指標：{engine_report['metric_count']} 個")
 
     for key in store.computable_metric_keys():
         metric = store.get(key)
         print(f"    - {key}（{metric.name}／{metric.axis_kind}）")
 
-    if engine_report.blocked:
-        print(f"  防呆擋下 {len(engine_report.blocked)} 個指標：")
+    if engine_report["blocked"]:
+        print(f"  防呆擋下 {len(engine_report['blocked'])} 個指標：")
 
-        for key, reasons in engine_report.blocked.items():
+        for key, reasons in engine_report["blocked"].items():
             print(f"    - {key}：{'；'.join(reasons)}")
 
-    for note in engine_report.notes:
+    for note in engine_report["notes"]:
         print(f"  註：{note}")
 
     if finish(
         "metrics",
         {
             "source": data_source,
-            "dataset_ids": [dataset.dataset_id for dataset in loaded.datasets],
-            "engine_report": {
-                "metric_count": engine_report.metric_count,
-                "blocked": engine_report.blocked,
-                "notes": engine_report.notes,
-            },
+            "dataset_ids": dataset_ids,
+            "engine_report": engine_report,
             "computable_metric_keys": store.computable_metric_keys(),
             "catalog_for_llm": store.catalog_for_llm(),
-            "metric_store": store.to_dict(),
+            "metric_store": metric_store_json,
         },
     ):
         return 0
@@ -1608,25 +1649,47 @@ def run(
     print("=" * 68)
 
     section_warning: str | None = None
-    try:
-        plan = section_planner.plan_sections(
-            user_prompt,
-            store,
-            existing_sections=sections,
-            llm_call=json_call,
-            deadline_monotonic=(
-                llm_cutoff if effective_policy == "required" else None
-            ),
+    if effective_policy == "required" and time.monotonic() >= llm_cutoff:
+        sections_payload = (
+            section_planner.build_deterministic_sections_from_contract(
+                metric_store_json
+            )
         )
-    except Exception as error:  # noqa: BLE001 - required mode must degrade
-        if effective_policy != "required":
-            raise
-        plan = section_planner.build_deterministic_sections(store)
-        section_warning = f"章節 LLM 無法完成，已使用確定性規劃：{error}"
+        section_warning = "LLM 時間配額已用盡，已使用確定性章節規劃"
+    else:
+        try:
+            sections_payload = section_planner.plan_sections_from_contract(
+                user_prompt,
+                metric_store_json,
+                existing_sections=sections,
+                llm_call=json_call,
+                deadline_monotonic=(
+                    llm_cutoff if effective_policy == "required" else None
+                ),
+            )
+        except Exception as error:  # noqa: BLE001 - required mode must degrade
+            if effective_policy != "required":
+                raise
+            sections_payload = (
+                section_planner.build_deterministic_sections_from_contract(
+                    metric_store_json
+                )
+            )
+            section_warning = f"章節 LLM 無法完成，已使用確定性規劃：{error}"
 
+    plan = section_planner.SectionPlanResult.from_dict(sections_payload)
     if plan.needs_confirmation and effective_policy == "required":
-        plan = section_planner.build_deterministic_sections(store)
+        sections_payload = (
+            section_planner.build_deterministic_sections_from_contract(
+                metric_store_json
+            )
+        )
         section_warning = "章節需求不足，required 模式已使用可計算指標建立規劃"
+
+    if section_warning:
+        sections_payload["delivery_warning"] = section_warning
+    sections_payload = stage_contracts.section_stage_payload(sections_payload)
+    plan = section_planner.SectionPlanResult.from_dict(sections_payload)
 
     print(f"  狀態：{plan.status}")
     if section_warning:
@@ -1663,10 +1726,6 @@ def run(
         for key, reason in plan.dropped_metric_keys.items():
             print(f"    - {key}：{reason}")
 
-    sections_payload = plan.to_dict()
-    if section_warning:
-        sections_payload["delivery_warning"] = section_warning
-
     if finish("sections", sections_payload):
         return 0
 
@@ -1675,37 +1734,75 @@ def run(
     print("Stage 4-2：圖表決策")
     print("=" * 68)
 
-    chart_result = chart_agent.plan_charts(
-        plan.sections,
-        store,
-        llm_call=tool_call,
-        deadline_monotonic=(
-            llm_cutoff if effective_policy == "required" else None
-        ),
-        recover_provider_errors=effective_policy == "required",
-    )
+    if effective_policy == "required" and time.monotonic() >= llm_cutoff:
+        chart_contract_payload = stage_contracts.chart_stage_payload(
+            {
+                "plans": [],
+                "failures": {
+                    section.title: ["LLM 時間配額已用盡"]
+                    for section in plan.sections
+                },
+                "attempts": {
+                    section.title: 0 for section in plan.sections
+                },
+            }
+        )
+    else:
+        chart_contract_payload = chart_agent.plan_charts_from_contract(
+            sections_payload,
+            metric_store_json,
+            llm_call=tool_call,
+            deadline_monotonic=(
+                llm_cutoff if effective_policy == "required" else None
+            ),
+            recover_provider_errors=effective_policy == "required",
+        )
     chart_fallbacks: dict[str, str] = {}
 
     if effective_policy == "required":
         produced_pages = {
-            chart.plan.page_number for chart in chart_result.charts
+            item.get("page_number")
+            for item in chart_contract_payload["plans"]
         }
         for section in plan.sections:
             if section.page_number in produced_pages:
                 continue
 
-            previous_errors = chart_result.failures.get(section.title, [])
-            fallback = chart_agent.build_deterministic_chart(section, store)
-            chart_result.charts.append(fallback)
-            chart_result.failures.pop(section.title, None)
+            previous_errors = chart_contract_payload["failures"].get(
+                section.title, []
+            )
+            fallback_plan = (
+                chart_agent.build_deterministic_chart_from_contract(
+                    section.to_dict(),
+                    metric_store_json,
+                )
+            )
+            chart_contract_payload["plans"].append(fallback_plan)
+            chart_contract_payload["failures"].pop(section.title, None)
             chart_fallbacks[section.title] = (
                 "圖表 LLM 未產生合法規劃，已使用確定性 axis-kind fallback"
                 + (f"：{'；'.join(previous_errors)}" if previous_errors else "")
             )
 
-        chart_result.charts.sort(
-            key=lambda item: item.plan.page_number or 0
+        chart_contract_payload["plans"].sort(
+            key=lambda item: item.get("page_number") or 0
         )
+
+    chart_contract_payload["delivery_warnings"] = chart_fallbacks
+    chart_contract_payload = stage_contracts.chart_stage_payload(
+        chart_contract_payload
+    )
+    chart_result = chart_agent.ChartAgentResult(
+        charts=[
+            chart_planner.resolve_chart_plan(
+                chart_planner.ChartPlan.from_dict(plan_payload),
+                store,
+            )
+            for plan_payload in chart_contract_payload["plans"]
+        ],
+        failures=dict(chart_contract_payload["failures"]),
+        attempts=dict(chart_contract_payload["attempts"]),
+    )
 
     for chart in chart_result.charts:
         attempts = chart_result.attempts.get(chart.plan.slide_title, 1)
@@ -1729,15 +1826,12 @@ def run(
     missing_chart_pages = sorted(expected_chart_pages - produced_chart_pages)
 
     charts_payload = {
-        "charts": [
+        **chart_contract_payload,
+        "resolved_charts": [
             _resolved_chart_payload(chart) for chart in chart_result.charts
         ],
-        "failures": chart_result.failures,
         "missing_pages": missing_chart_pages,
-        "attempts": chart_result.attempts,
     }
-    if chart_fallbacks:
-        charts_payload["delivery_warnings"] = chart_fallbacks
 
     if chart_result.failures or missing_chart_pages:
         dump.write("charts", charts_payload)
@@ -1790,6 +1884,12 @@ def run(
         section.page_number for section, _ in pairs
     }
 
+    def validate_narrative_contract(
+        narrative: narrative_writer.PageNarrative,
+    ) -> narrative_writer.PageNarrative:
+        payload = stage_contracts.narrative_payload(narrative.to_dict())
+        return narrative_writer.PageNarrative.from_dict(payload)
+
     def current_narratives_payload() -> dict[str, Any]:
         produced_pages = {
             narrative.page_number for narrative in narrative_result.narratives
@@ -1829,12 +1929,19 @@ def run(
                 page_deadline=page_deadline,
                 repair_escalate_after=generation.repair_escalate_after,
             )
-            narrative_result.narratives.append(outcome.narrative)
+            validated_narrative = validate_narrative_contract(
+                outcome.narrative
+            )
+            narrative_result.narratives.append(validated_narrative)
             narrative_result.attempts[section.title] = outcome.writer_attempts
-            approved.append((section, chart, outcome.narrative))
+            approved.append((section, chart, validated_narrative))
 
             if review_enabled:
-                review_payload.append(outcome.review_dict(section))
+                review_payload.append(
+                    stage_contracts.review_payload(
+                        outcome.review_dict(section)
+                    )
+                )
 
             status_text = outcome.delivery_status
             print(
@@ -1849,12 +1956,20 @@ def run(
             checkpoint_page_progress()
             continue
 
-        narrative, issues, attempts = narrative_writer.write_narrative_for_page(
-            section,
-            chart,
-            store,
+        narrative_attempt = narrative_writer.write_narrative_from_contract(
+            section.to_dict(),
+            chart.plan.to_dict(),
+            metric_store_json,
             llm_call=json_call,
         )
+        narrative_payload = narrative_attempt.get("narrative")
+        narrative = (
+            narrative_writer.PageNarrative.from_dict(narrative_payload)
+            if narrative_payload is not None
+            else None
+        )
+        issues = list(narrative_attempt["issues"])
+        attempts = int(narrative_attempt["attempts"])
         total_writer_attempts = attempts
         narrative_result.attempts[section.title] = total_writer_attempts
 
@@ -1874,7 +1989,7 @@ def run(
             )
             return 1
 
-        current_narrative = narrative
+        current_narrative = validate_narrative_contract(narrative)
 
         if not review_enabled:
             narrative_result.narratives.append(current_narrative)
@@ -1893,12 +2008,18 @@ def run(
 
         while True:
             review_attempts += 1
-            final_review = reviewer.review_page(
-                current_narrative,
-                chart,
-                store,
+            review_json = reviewer.review_page_from_contract(
+                current_narrative.to_dict(),
+                chart.plan.to_dict(),
+                metric_store_json,
                 llm_call=json_call,
                 enable_semantic_layer=not skip_semantic_review,
+            )
+            final_review = reviewer.ReviewResult(
+                status=review_json["status"],
+                rule_issues=list(review_json["rule_issues"]),
+                semantic_issues=list(review_json["semantic_issues"]),
+                target_agent=review_json.get("target_agent"),
             )
 
             if final_review.approved:
@@ -1927,16 +2048,22 @@ def run(
                 and repair_attempts < MAX_REVIEW_REPAIR_ATTEMPTS
             ):
                 repair_attempts += 1
-                repaired, writer_issues, writer_attempts = (
-                    narrative_writer.write_narrative_for_page(
-                        section,
-                        chart,
-                        store,
-                        llm_call=json_call,
-                        max_attempts=1,
-                        initial_errors=repair_feedback,
-                    )
+                repair_result = narrative_writer.write_narrative_from_contract(
+                    section.to_dict(),
+                    chart.plan.to_dict(),
+                    metric_store_json,
+                    llm_call=json_call,
+                    max_attempts=1,
+                    initial_errors=repair_feedback,
                 )
+                repaired_payload = repair_result.get("narrative")
+                repaired = (
+                    narrative_writer.PageNarrative.from_dict(repaired_payload)
+                    if repaired_payload is not None
+                    else None
+                )
+                writer_issues = list(repair_result["issues"])
+                writer_attempts = int(repair_result["attempts"])
                 total_writer_attempts += writer_attempts
                 narrative_result.attempts[section.title] = (
                     total_writer_attempts
@@ -1950,15 +2077,17 @@ def run(
             if repaired is None:
                 break
 
-            current_narrative = repaired
+            current_narrative = validate_narrative_contract(repaired)
 
         assert final_review is not None
         review_payload.append(
-            {
-                "page_number": section.page_number,
-                "section_title": section.title,
-                **final_review.to_dict(),
-            }
+            stage_contracts.review_payload(
+                {
+                    "page_number": section.page_number,
+                    "section_title": section.title,
+                    **final_review.to_dict(),
+                }
+            )
         )
         narrative_result.narratives.append(current_narrative)
 
@@ -2024,16 +2153,48 @@ def run(
         chart.plan.page_number = section.page_number
         narrative.page_number = section.page_number
 
-    bundles = [
-        renderer.PageBundle(section, chart, narrative)
-        for section, chart, narrative in approved
-    ]
+    review_by_page = {
+        item.get("page_number"): item for item in review_payload
+    }
+    deck_spec = stage_contracts.deck_spec_payload(
+        {
+            "contract_version": "1.0",
+            "title": deck_title or DEFAULT_DECK_TITLE,
+            "metric_store": metric_store_json,
+            "pages": [
+                {
+                    "section": section.to_dict(),
+                    "chart_plan": chart.plan.to_dict(),
+                    "narrative": narrative.to_dict(),
+                    "review": review_by_page.get(section.page_number),
+                }
+                for section, chart, narrative in approved
+            ],
+            "generation_policy": effective_policy,
+            "delivery_warnings": [
+                warning
+                for warning in [section_warning, *chart_fallbacks.values()]
+                if warning
+            ],
+        }
+    )
+    deck_spec_path = output_dir / "deckspec.json"
+    deck_spec_path.write_text(
+        json.dumps(deck_spec, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["contracts"]["deckspec_sha256"] = hashlib.sha256(
+        deck_spec_path.read_bytes()
+    ).hexdigest()
+    manifest_path.write_text(
+        json.dumps(manifest, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
 
-    render_report = renderer.render_deck(
-        bundles,
-        store,
+    render_report = renderer.render_deck_from_spec(
+        deck_spec,
         output_path=pptx_path,
-        deck_title=deck_title or DEFAULT_DECK_TITLE,
     )
 
     print(
@@ -2055,8 +2216,9 @@ def run(
     for page, errors in render_report.placeholder_errors.items():
         print(f"    [P.{page} 佔位符未代入] {errors}")
 
-    export_report = excel_exporter.export_audit_workbook(
-        [chart for _, chart, _ in approved], output_path=xlsx_path
+    export_report = excel_exporter.export_audit_workbook_from_spec(
+        deck_spec,
+        output_path=xlsx_path,
     )
 
     print(f"  {export_report.output_path}（{len(export_report.sheet_names)} 工作表）")
@@ -2066,6 +2228,7 @@ def run(
         {
             "pptx": str(render_report.output_path),
             "xlsx": str(export_report.output_path),
+            "deckspec": str(deck_spec_path),
             "page_count": render_report.page_count,
             "slide_count": render_report.slide_count,
             "divider_count": render_report.divider_count,
@@ -2106,6 +2269,35 @@ def run(
     return 0 if report.passed else 1
 
 
+def run_from_contract(payload: dict[str, Any]) -> int:
+    """Validate the single JSON invocation contract before pipeline hydration."""
+    validated = stage_contracts.PipelineRequestContract.model_validate(payload)
+    return run(
+        ingestion_path=None,
+        ingestion_payload=validated.ingestion_payload,
+        ingestion_source=validated.ingestion_source,
+        user_prompt=validated.user_prompt,
+        sections=validated.sections,
+        output_dir=Path(validated.output_dir),
+        use_fake_llm=validated.use_fake_llm,
+        skip_semantic_review=validated.skip_semantic_review,
+        stop_after=validated.stop_after,
+        dump_dir=(
+            Path(validated.dump_dir) if validated.dump_dir is not None else None
+        ),
+        deck_title=validated.deck_title,
+        generation_policy=validated.generation_policy,
+        generation_deadline_seconds=validated.generation_deadline_seconds,
+        generation_render_reserve_seconds=(
+            validated.generation_render_reserve_seconds
+        ),
+        generation_llm_budget_exhausted=(
+            validated.generation_llm_budget_exhausted
+        ),
+        source_objects=validated.source_objects,
+    )
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="簡報生成端到端管線",
@@ -2119,20 +2311,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="只檢查 LLM 設定與連線，不跑管線",
     )
     parser.add_argument(
-        "--excel",
-        default=None,
-        help=(
-            "Excel 輸入，交給 backend ingestion 讀取。"
-            "可以是單一 .xlsx（多工作表，每張表一個指標），"
-            "或含多個 .xlsx 的目錄（每檔一個指標）"
-        ),
-    )
-    parser.add_argument(
-        "--excel-sheet",
-        default=None,
-        help="只讀 --excel 指定檔案中的某一張工作表",
-    )
-    parser.add_argument(
         "--ingestion",
         default=None,
         help="backend ingestion 輸出的 JSON 路徑",
@@ -2144,7 +2322,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     parser.add_argument(
         "--prompt",
-        default="幫我做一份 2026 信用卡市場分析簡報",
+        default="依資料製作管理層簡報，說明核心概況、趨勢與建議",
         help="使用者需求描述",
     )
     parser.add_argument(
@@ -2234,7 +2412,6 @@ def main(argv: Sequence[str] | None = None) -> int:
     chosen_sources = [
         name
         for name, value in (
-            ("--excel", args.excel),
             ("--ingestion", args.ingestion),
             ("--sample", args.sample or None),
         )
@@ -2242,17 +2419,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     ]
 
     if not chosen_sources:
-        parser.error(
-            "請指定資料來源：--excel <path|dir>、--ingestion <path> 或 --sample"
-        )
+        parser.error("請指定資料來源：--ingestion <path> 或 --sample")
 
     if len(chosen_sources) > 1:
         parser.error(
             f"資料來源只能指定一個，目前給了：{'、'.join(chosen_sources)}"
         )
-
-    if args.excel_sheet and args.excel is None:
-        parser.error("--excel-sheet 需要搭配 --excel 使用")
 
     output_dir = Path(args.output_dir)
 
@@ -2273,17 +2445,14 @@ def main(argv: Sequence[str] | None = None) -> int:
             skip_semantic_review=args.skip_semantic_review,
             stop_after=args.stage,
             dump_dir=dump_dir,
-            excel_path=args.excel,
-            excel_sheet=args.excel_sheet,
             deck_title=args.title,
             generation_policy=args.generation_policy,
             generation_deadline_seconds=args.deadline_seconds,
             generation_render_reserve_seconds=args.render_reserve_seconds,
         )
     except (
-        backend_bridge.BackendUnavailableError,
-        backend_bridge.NoExcelInputError,
         dataset_loader.IngestionPayloadError,
+        FileNotFoundError,
         ValueError,
     ) as error:
         # 輸入問題是使用者可以自己修的，印一行說明就好；
