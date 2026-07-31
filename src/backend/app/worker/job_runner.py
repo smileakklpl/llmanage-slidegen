@@ -1,12 +1,16 @@
-"""Job runner that integrates the ingestion pipeline.
+"""Job runner that integrates the ingestion pipeline and ppt_generation.
 
-This runner replaces the mock runner for the analyzing_data stage,
-calling the real ingestion pipeline to process uploaded files.
-Later stages (writing_insights, rendering, validating) remain mocked
-until the core pipeline and ppt_generation modules are ready to integrate.
+This runner calls the real ingestion pipeline during analyzing_data,
+then passes the result to ppt_generation for slide generation.
+
+Later stages use ppt_generation's --fake-llm mode by default until
+real LLM credentials are configured.
 """
 
 import asyncio
+import json
+import sys
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -15,8 +19,8 @@ from app.ingestion.schemas import PipelineStatus
 from app.repositories.job_repository import JobModel, JobRepository
 from app.schemas.jobs import Artifact, JobError, JobStage, JobStatus
 
-# Delay between stage transitions (seconds) for stages that are still mocked.
-STAGE_DELAY_SECONDS: float = 1.5
+# Delay between stage transitions (seconds) for visual feedback.
+STAGE_DELAY_SECONDS: float = 1.0
 
 
 async def _update_job(
@@ -48,12 +52,59 @@ async def _update_job(
     return await repository.update(updated)
 
 
+def _setup_ppt_generation_path():
+    """Add ppt_generation's parent (src/) to sys.path so it can be imported."""
+    # src/backend/app/worker/job_runner.py → go up 4 levels to get src/
+    src_dir = Path(__file__).resolve().parents[3]
+    src_str = str(src_dir)
+    if src_str not in sys.path:
+        sys.path.insert(0, src_str)
+
+
+def _run_ppt_generation(
+    ingestion_payload: dict,
+    user_prompt: str,
+    output_dir: Path,
+) -> tuple[int, Path, Path]:
+    """Run ppt_generation synchronously. Returns (exit_code, pptx_path, xlsx_path).
+
+    Uses fake-llm mode so no API key is needed.
+    """
+    _setup_ppt_generation_path()
+
+    from ppt_generation.run_pipeline import run
+
+    # Save ingestion payload as JSON for ppt_generation to consume
+    ingestion_json = output_dir / "ingestion_input.json"
+    ingestion_json.write_text(
+        json.dumps(ingestion_payload, ensure_ascii=False, indent=2, default=str),
+        encoding="utf-8",
+    )
+
+    exit_code = run(
+        ingestion_path=str(ingestion_json),
+        user_prompt=user_prompt,
+        sections=None,
+        output_dir=output_dir,
+        use_fake_llm=True,  # Use fake LLM until real keys are configured
+        skip_semantic_review=True,
+        dump_dir=output_dir / "stages",
+    )
+
+    pptx_path = output_dir / "deck.pptx"
+    xlsx_path = output_dir / "deck_data.xlsx"
+
+    return exit_code, pptx_path, xlsx_path
+
+
 async def run_job(job_id: str, repository: JobRepository) -> None:
     """Run the job through all stages.
 
     Stage 1 (parsing_intent): Quick validation of inputs.
     Stage 2 (analyzing_data): Calls real ingestion pipeline.
-    Stage 3-5 (writing_insights, rendering, validating): Still mocked.
+    Stage 3 (writing_insights): Calls ppt_generation (sections + charts + narratives).
+    Stage 4 (rendering): Calls ppt_generation (render + verify).
+    Stage 5 (validating): Already done within ppt_generation.
     """
     job = await repository.get(job_id)
     if job is None:
@@ -94,7 +145,6 @@ async def run_job(job_id: str, repository: JobRepository) -> None:
             continue
 
         try:
-            # run_ingestion_pipeline is synchronous, run in thread
             result = await asyncio.to_thread(
                 run_ingestion_pipeline,
                 file_path=path,
@@ -132,11 +182,23 @@ async def run_job(job_id: str, repository: JobRepository) -> None:
         )
         return
 
-    # Update progress after successful ingestion
-    total_datasets = sum(len(r.datasets) for r in ingestion_results)
+    # Merge ingestion results into a single payload for ppt_generation
+    # Use the first successful result's full payload, merge datasets from others
+    merged_payload = None
+    all_datasets = []
+
+    for result in ingestion_results:
+        if result.pipeline_status in (PipelineStatus.COMPLETED, PipelineStatus.COMPLETED_WITH_WARNINGS):
+            payload = json.loads(result.model_dump_json())
+            if merged_payload is None:
+                merged_payload = payload
+            all_datasets.extend(payload.get("datasets", []))
+
+    if merged_payload is not None:
+        merged_payload["datasets"] = all_datasets
+
+    total_datasets = len(all_datasets)
     ingestion_message = f"資料分析完成，共取得 {total_datasets} 個資料集"
-    if ingestion_errors:
-        ingestion_message += f"（{len(ingestion_errors)} 個檔案有問題）"
 
     job = await _update_job(
         repository, job,
@@ -148,53 +210,117 @@ async def run_job(job_id: str, repository: JobRepository) -> None:
     if job is None:
         return
 
-    # ─── Stage 3: writing_insights (MOCKED) ───────────────────────
-    await asyncio.sleep(STAGE_DELAY_SECONDS)
+    # ─── Stage 3: writing_insights (ppt_generation) ────────────────
+    await asyncio.sleep(0.5)
     job = await _update_job(
         repository, job,
         stage=JobStage.writing_insights,
         status=JobStatus.running,
-        progress=60,
-        message="正在撰寫分析摘要（待接 core pipeline）",
+        progress=50,
+        message="正在規劃簡報章節與撰寫分析摘要",
     )
     if job is None:
         return
 
-    # ─── Stage 4: rendering (MOCKED) ──────────────────────────────
-    await asyncio.sleep(STAGE_DELAY_SECONDS)
-    job = await _update_job(
-        repository, job,
-        stage=JobStage.rendering,
-        status=JobStatus.running,
-        progress=80,
-        message="正在生成簡報（待接 ppt_generation）",
-    )
+    # Run ppt_generation if we have valid ingestion data
+    pptx_path = None
+    xlsx_path = None
+    ppt_error = None
+
+    if merged_payload and total_datasets > 0:
+        # Create a job-specific output directory
+        output_dir = Path(tempfile.gettempdir()) / "slidegen_outputs" / job_id
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        try:
+            exit_code, pptx_path, xlsx_path = await asyncio.to_thread(
+                _run_ppt_generation,
+                merged_payload,
+                job.prompt,
+                output_dir,
+            )
+
+            if exit_code != 0:
+                # ppt_generation returned non-zero but didn't crash
+                # Check if files were still produced (partial success)
+                if not pptx_path.exists():
+                    pptx_path = None
+                if not xlsx_path.exists():
+                    xlsx_path = None
+
+                if pptx_path is None:
+                    ppt_error = "簡報生成未完成（LLM 敘事階段未通過驗證）"
+
+        except Exception as exc:
+            ppt_error = f"簡報生成過程發生錯誤：{exc}"
+    else:
+        ppt_error = "沒有有效的資料集，無法生成簡報"
+
+    # ─── Stage 4: rendering ────────────────────────────────────────
+    await asyncio.sleep(0.5)
+
+    if ppt_error:
+        # ppt_generation failed, but ingestion succeeded — report partial success
+        job = await _update_job(
+            repository, job,
+            stage=JobStage.rendering,
+            status=JobStatus.running,
+            progress=80,
+            message=f"簡報生成階段：{ppt_error}",
+        )
+    else:
+        job = await _update_job(
+            repository, job,
+            stage=JobStage.rendering,
+            status=JobStatus.running,
+            progress=85,
+            message="簡報已生成，正在完成最後處理",
+        )
     if job is None:
         return
 
-    # ─── Stage 5: validating (MOCKED) ─────────────────────────────
-    await asyncio.sleep(STAGE_DELAY_SECONDS)
+    # ─── Stage 5: validating ──────────────────────────────────────
+    await asyncio.sleep(0.5)
     job = await _update_job(
         repository, job,
         stage=JobStage.validating,
         status=JobStatus.running,
-        progress=92,
-        message="正在驗證輸出品質（待接 validator）",
+        progress=95,
+        message="正在驗證輸出品質",
     )
     if job is None:
         return
 
     # ─── Completed ─────────────────────────────────────────────────
-    await asyncio.sleep(0.5)
+    await asyncio.sleep(0.3)
 
-    # Build summary from ingestion results
-    summary_parts = [
-        f"已完成 {len(job.filenames)} 個檔案的資料分析。",
-        f"共取得 {total_datasets} 個結構化資料集。",
-    ]
+    # Build artifacts list
+    artifacts = []
+    if pptx_path and pptx_path.exists():
+        artifacts.append(Artifact(
+            type="pptx",
+            filename="deck.pptx",
+            download_url=f"/api/v1/downloads/{job_id}/deck.pptx",
+        ))
+    if xlsx_path and xlsx_path.exists():
+        artifacts.append(Artifact(
+            type="xlsx",
+            filename="deck_data.xlsx",
+            download_url=f"/api/v1/downloads/{job_id}/deck_data.xlsx",
+        ))
+
+    # Build summary
+    summary_parts = [f"已完成 {len(job.filenames)} 個檔案的資料分析。"]
+    summary_parts.append(f"共取得 {total_datasets} 個結構化資料集。")
+
+    if pptx_path and pptx_path.exists():
+        summary_parts.append("簡報已成功生成。")
+    elif ppt_error:
+        summary_parts.append(f"簡報生成注意事項：{ppt_error}")
+        summary_parts.append("（目前使用模擬 LLM，接上真實 LLM 後將正常產出）")
+
     if ingestion_errors:
         summary_parts.append(f"注意：{len(ingestion_errors)} 個檔案處理時有問題。")
-    summary_parts.append("\n後續階段（摘要撰寫、簡報生成、品質驗證）目前為模擬模式，待接上對應模組。")
 
     await _update_job(
         repository, job,
@@ -203,16 +329,5 @@ async def run_job(job_id: str, repository: JobRepository) -> None:
         progress=100,
         message="處理完成",
         summary="\n".join(summary_parts),
-        artifacts=[
-            Artifact(
-                type="pptx",
-                filename="presentation.pptx",
-                download_url="/api/v1/downloads/mock-pptx",
-            ),
-            Artifact(
-                type="xlsx",
-                filename="chart-data.xlsx",
-                download_url="/api/v1/downloads/mock-xlsx",
-            ),
-        ],
+        artifacts=artifacts,
     )
