@@ -54,11 +54,14 @@ async def _update_job(
 
 def _setup_ppt_generation_path():
     """Add ppt_generation's parent (src/) to sys.path so it can be imported."""
-    # src/backend/app/worker/job_runner.py → go up 4 levels to get src/
+    # In local dev: src/backend/app/worker/job_runner.py → parents[3] = src/
+    # In Docker: /app/app/worker/job_runner.py → parents[3] = /app
+    #   but ppt_generation is at /app/src/ppt_generation/, so also add /app/src/
     src_dir = Path(__file__).resolve().parents[3]
-    src_str = str(src_dir)
-    if src_str not in sys.path:
-        sys.path.insert(0, src_str)
+    for candidate in (src_dir, src_dir / "src"):
+        candidate_str = str(candidate)
+        if candidate_str not in sys.path:
+            sys.path.insert(0, candidate_str)
 
 
 def _run_ppt_generation(

@@ -1,6 +1,8 @@
 services:
   backend:
-    build: ./src/backend
+    build:
+      context: .
+      dockerfile: src/backend/Dockerfile
     container_name: slidegen-backend
     environment:
       - CORS_ORIGINS=["http://localhost","http://localhost:80"]
