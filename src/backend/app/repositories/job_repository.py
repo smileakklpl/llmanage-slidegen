@@ -33,6 +33,7 @@ class JobModel(BaseModel):
     summary: str | None = None
     prompt: str
     filenames: list[str]
+    file_paths: list[str] = Field(default_factory=list)
 
 
 class JobRepository(ABC):

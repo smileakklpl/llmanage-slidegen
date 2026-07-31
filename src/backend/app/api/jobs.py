@@ -1,5 +1,8 @@
 """Job generation, status, and email send endpoints."""
 
+import os
+import tempfile
+from pathlib import Path
 from typing import Annotated
 
 from fastapi import APIRouter, File, Form, UploadFile
@@ -14,6 +17,23 @@ from app.schemas.jobs import (
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
 
+# Temp directory for uploaded files (persists across requests until cleanup)
+_UPLOAD_DIR = Path(tempfile.gettempdir()) / "slidegen_uploads"
+_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+
+
+async def _save_upload(file: UploadFile, job_id: str) -> Path:
+    """Save an uploaded file to a job-specific temp directory."""
+    job_dir = _UPLOAD_DIR / job_id
+    job_dir.mkdir(parents=True, exist_ok=True)
+
+    filename = file.filename or "unknown.xlsx"
+    dest = job_dir / filename
+
+    content = await file.read()
+    dest.write_bytes(content)
+    return dest
+
 
 @router.post("/generate", response_model=JobCreateResponse, status_code=202)
 async def generate_job(
@@ -22,12 +42,14 @@ async def generate_job(
 ) -> JobCreateResponse:
     """Accept a multipart form with one or more Excel files and create a new job.
 
-    Returns HTTP 202 immediately; the mock runner progresses the job
+    Returns HTTP 202 immediately; the runner progresses the job
     in the background.
     """
     service = get_job_service()
     filenames = [f.filename or "unknown.xlsx" for f in files]
-    job = await service.create_job(prompt=prompt, filenames=filenames)
+
+    # Create job first to get job_id, then save files
+    job = await service.create_job(prompt=prompt, filenames=filenames, files=files)
 
     return JobCreateResponse(
         job_id=job.job_id,
