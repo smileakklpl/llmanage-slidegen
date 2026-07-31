@@ -94,8 +94,11 @@ async def send_job_email(
     """Send the completed job artifacts to the specified recipients via email.
 
     Accepts a multipart form with recipients, subject, body text, and
-    optional file attachments. This is a mock implementation — no actual
-    email is sent in this phase.
+    optional file attachments.
+
+    Behavior is controlled by EMAIL_PROVIDER env var:
+    - "mock" (default): returns success without sending
+    - "ses": sends real email via AWS SES with attachments
     """
     service = get_job_service()
     job = await service.get_job(job_id)
@@ -111,17 +114,31 @@ async def send_job_email(
             detail={"code": "JOB_NOT_COMPLETED", "message": "工作尚未完成，無法寄送"},
         )
 
-    extra_attachment_names = [f.filename or "unknown" for f in attachments if f.filename]
-    total_attachments = len(artifact_filenames) + len(extra_attachment_names)
+    # Read extra attachment files into memory
+    extra_attachments: list[tuple[str, bytes]] = []
+    for file in attachments:
+        if file.filename:
+            content = await file.read()
+            extra_attachments.append((file.filename, content))
 
-    return SendEmailResponse(
+    # Send email (mock or real SES depending on EMAIL_PROVIDER env)
+    from app.services.email_service import send_email
+
+    result = await send_email(
         job_id=job_id,
         sender=sender,
         recipients=recipients,
         subject=subject,
-        attachment_count=total_attachments,
-        message=(
-            f"模擬寄送完成，由 {sender} 寄送給 {len(recipients)} 位收件者"
-            + (f"，附帶 {total_attachments} 個附件" if total_attachments else "")
-        ),
+        body=body,
+        artifact_filenames=artifact_filenames,
+        extra_attachments=extra_attachments,
+    )
+
+    return SendEmailResponse(
+        job_id=result["job_id"],
+        sender=result["sender"],
+        recipients=result["recipients"],
+        subject=result["subject"],
+        attachment_count=result["attachment_count"],
+        message=result["message"],
     )
