@@ -79,8 +79,8 @@ export function JobPage() {
             </div>
           )}
 
-          <ArtifactList artifacts={job.artifacts} />
-          <SendEmailSection jobId={job.job_id} artifacts={job.artifacts} />
+          <ArtifactList artifacts={job.artifacts.filter(a => a.type !== "json")} />
+          <SendEmailSection jobId={job.job_id} artifacts={job.artifacts.filter(a => a.type !== "json")} />
         </div>
       )}
 

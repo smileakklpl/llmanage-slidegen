@@ -170,6 +170,11 @@ async def get_job_status(job_id: str) -> JobStatusResponse:
     """Get the current status of a job."""
     job = await _load_job(job_id)
 
+    # Only expose downloadable deliverables (pptx, xlsx) to users;
+    # internal artifacts (verification.json, generation_manifest.json) are
+    # kept in storage but not surfaced in the API response.
+    user_artifacts = [a for a in job.artifacts if a.type != "json"]
+
     return JobStatusResponse(
         job_id=job.job_id,
         status=job.status,
@@ -178,7 +183,7 @@ async def get_job_status(job_id: str) -> JobStatusResponse:
         message=job.message,
         created_at=job.created_at,
         updated_at=job.updated_at,
-        artifacts=job.artifacts,
+        artifacts=user_artifacts,
         error=job.error,
         summary=job.summary,
         review_required_count=job.review_required_count,
