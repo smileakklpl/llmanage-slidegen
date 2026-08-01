@@ -1,0 +1,32 @@
+{
+  "pptx": "outputs\\bedrock_required_20260731_222653\\deck.pptx",
+  "xlsx": "outputs\\bedrock_required_20260731_222653\\deck_data.xlsx",
+  "page_count": 8,
+  "slide_count": 19,
+  "divider_count": 7,
+  "chapters": [
+    "Executive Summary",
+    "市場整體概況",
+    "客戶活躍度",
+    "獲利能力",
+    "風險與警訊",
+    "未來趨勢推測",
+    "對台新的策略建議"
+  ],
+  "chart_count": 8,
+  "warnings": [
+    "已移除模板中 4 張示範頁（保留首頁）"
+  ],
+  "placeholder_errors": {},
+  "sheet_names": [
+    "索引",
+    "P.4_市場整體（各期）",
+    "P.6_市場整體（各期） 期間成長率",
+    "P.7_市場整體（各期）",
+    "P.9_市場整體（各期）",
+    "P.11_市場整體（各期）",
+    "P.13_市場整體（各期）",
+    "P.15_市場整體（各期） 趨勢外推",
+    "P.17_市場整體（各期） 趨勢外推"
+  ]
+}

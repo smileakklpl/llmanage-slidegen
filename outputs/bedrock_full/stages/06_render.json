@@ -1,0 +1,31 @@
+{
+  "pptx": "outputs\\bedrock_full\\deck.pptx",
+  "xlsx": "outputs\\bedrock_full\\deck_data.xlsx",
+  "page_count": 10,
+  "slide_count": 18,
+  "divider_count": 4,
+  "chapters": [
+    "市場整體概況",
+    "成長動能檢視",
+    "業者競爭態勢",
+    "策略建議"
+  ],
+  "chart_count": 10,
+  "warnings": [
+    "已移除模板中 4 張示範頁（保留首頁）"
+  ],
+  "placeholder_errors": {},
+  "sheet_names": [
+    "索引",
+    "P.4_市場整體（各期）",
+    "P.5_當月簽帳金額 占比 Top 10",
+    "P.7_市場整體（各期） 期間成長率",
+    "P.8_市場整體（各期） 趨勢外推",
+    "P.10_當月簽帳金額",
+    "P.11_有效卡數 排名",
+    "P.12_循環信用餘額 排名",
+    "P.13_當月轉銷呆帳金額 排名",
+    "P.15_市場整體（各期） 趨勢外推",
+    "P.16_當月簽帳金額 占比"
+  ]
+}

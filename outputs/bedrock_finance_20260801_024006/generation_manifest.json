@@ -1,0 +1,67 @@
+{
+  "contract_version": "1.0",
+  "input": {
+    "source": "C:\\Users\\user\\AppData\\Local\\Temp\\slidegen_finance_20260801_024006.json",
+    "kind": "normalized_json",
+    "file_count": 0,
+    "sha256": "72657b3c29c545e8264adf81c35916518f3076fd25fc0ba474be46025845a7f3",
+    "ingestion_sha256": "72657b3c29c545e8264adf81c35916518f3076fd25fc0ba474be46025845a7f3",
+    "source_objects": [],
+    "source_objects_sha256_complete": false
+  },
+  "contracts": {
+    "generation_request": "1.1",
+    "ingestion": "1.0",
+    "metric_store": "1.0",
+    "section_plan": "1.0",
+    "chart_plan": "1.0",
+    "narrative": "1.0",
+    "review": "1.0",
+    "deckspec": "1.0",
+    "deckspec_sha256": "0d318e3e296722d38267b8fcb5b1afc7c82977611c58d49dacd7afac15df6b4e"
+  },
+  "request": {
+    "user_prompt_sha256": "8fe69e3012bac84a911d6bd81416e668d5e44a2951cf011f9e6e0da09c5120a1",
+    "sections": [
+      "市場概況",
+      "趨勢分析",
+      "競爭觀察",
+      "重點建議"
+    ],
+    "deck_title": "信用卡市場管理層分析",
+    "generation_policy": "required",
+    "deadline_seconds": 900.0,
+    "render_reserve_seconds": 180.0,
+    "llm_budget_exhausted": false
+  },
+  "configured_system_prompt_sha256": {
+    "sections": "f44bb5c898cf8938874b26808519e824cbdf970237895dc80035217f8795830e",
+    "charts": "ea55b5d9562d508bae62646f46b869b7ed73e12e98eefcf5d3223e8ea8d2b195",
+    "narratives": "3e8387372731dd453e3282f3c48239e3b6fa02fb55183fca070c2d5f84362bfe",
+    "review": "a412cf9f7a662b7b3628cec181de97c096f3141f466ee3e4b4be2229142dd844"
+  },
+  "llm": {
+    "mode": "live",
+    "provider": "bedrock",
+    "aws_region": "ap-northeast-1",
+    "configured_stage_models": {
+      "sections": "global.anthropic.claude-haiku-4-5-20251001-v1:0",
+      "charts": "global.anthropic.claude-haiku-4-5-20251001-v1:0",
+      "narratives": "global.anthropic.claude-haiku-4-5-20251001-v1:0",
+      "narratives_fallback": "global.anthropic.claude-sonnet-4-5-20250929-v1:0",
+      "review": "global.anthropic.claude-sonnet-4-5-20250929-v1:0"
+    },
+    "capabilities": {
+      "tool_mode": "native",
+      "json_mode": "native",
+      "system_mode": "native"
+    },
+    "semantic_review_enabled": true,
+    "calls_by_stage": {
+      "sections": 1,
+      "charts": 16,
+      "narratives": 32,
+      "review": 16
+    }
+  }
+}

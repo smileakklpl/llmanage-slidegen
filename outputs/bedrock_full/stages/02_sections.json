@@ -1,0 +1,114 @@
+{
+  "status": "READY",
+  "sections": [
+    {
+      "title": "信用卡市場規模全景",
+      "chapter": "市場整體概況",
+      "intent": "台灣信用卡市場當前的絕對規模有多大？流通卡數、有效卡數、簽帳金額與信用餘額分別反映了什麼市場特徵？",
+      "suggested_metric_keys": [
+        "market_by_period.value"
+      ],
+      "page_number": 4
+    },
+    {
+      "title": "市場主要參與者的市占格局",
+      "chapter": "市場整體概況",
+      "intent": "Top 10 銀行在簽帳金額、有效卡數、循環信用與分期餘額上的市占分布如何？集中度是否存在差異？",
+      "suggested_metric_keys": [
+        "當月簽帳金額.share.top10",
+        "有效卡數.share.top10",
+        "循環信用餘額.share.top10",
+        "未到期分期付款餘額.share.top10"
+      ],
+      "page_number": 5
+    },
+    {
+      "title": "市場成長軌跡與動能來源",
+      "chapter": "成長動能檢視",
+      "intent": "過去各期市場在流通卡數、簽帳金額、信用餘額上的成長率如何演進？哪些指標驅動了市場成長？",
+      "suggested_metric_keys": [
+        "market_by_period.period_growth"
+      ],
+      "page_number": 7
+    },
+    {
+      "title": "未來市場規模預測",
+      "chapter": "成長動能檢視",
+      "intent": "未來各期市場的流通卡數、簽帳金額、信用餘額預計如何發展？成長動能是否可持續？",
+      "suggested_metric_keys": [
+        "market_by_period.forecast"
+      ],
+      "page_number": 8
+    },
+    {
+      "title": "台新在簽帳金額的競爭位置",
+      "chapter": "業者競爭態勢",
+      "intent": "台新在全市場簽帳金額排名中處於何位置？與 Top 10 競爭對手的差距有多大？",
+      "suggested_metric_keys": [
+        "當月簽帳金額.rank",
+        "當月簽帳金額.share",
+        "當月簽帳金額.value"
+      ],
+      "page_number": 10
+    },
+    {
+      "title": "台新在有效卡數的市場滲透力",
+      "chapter": "業者競爭態勢",
+      "intent": "台新的有效卡數在全市場的排名與占比如何？相對於競爭對手的卡片基礎是否具有優勢？",
+      "suggested_metric_keys": [
+        "有效卡數.rank",
+        "有效卡數.share",
+        "有效卡數.value"
+      ],
+      "page_number": 11
+    },
+    {
+      "title": "台新在信用餘額業務的競爭力",
+      "chapter": "業者競爭態勢",
+      "intent": "台新在循環信用與分期付款餘額上的排名與市占如何？這兩項業務是否為台新的競爭優勢或劣勢？",
+      "suggested_metric_keys": [
+        "循環信用餘額.rank",
+        "循環信用餘額.share",
+        "未到期分期付款餘額.rank",
+        "未到期分期付款餘額.share"
+      ],
+      "page_number": 12
+    },
+    {
+      "title": "台新的風險管理表現",
+      "chapter": "業者競爭態勢",
+      "intent": "台新的轉銷呆帳金額在全市場的排名與占比如何？相對於競爭對手的風險管理水準如何評估？",
+      "suggested_metric_keys": [
+        "當月轉銷呆帳金額.rank",
+        "當月轉銷呆帳金額.share",
+        "當月轉銷呆帳金額.value"
+      ],
+      "page_number": 13
+    },
+    {
+      "title": "市場成長機會與台新的定位",
+      "chapter": "策略建議",
+      "intent": "基於市場成長預測與競爭格局，台新應如何定位自身以捕捉未來成長機會？",
+      "suggested_metric_keys": [
+        "market_by_period.forecast",
+        "當月簽帳金額.share.top10",
+        "有效卡數.share.top10"
+      ],
+      "page_number": 15
+    },
+    {
+      "title": "台新的優先策略行動方案",
+      "chapter": "策略建議",
+      "intent": "台新應在簽帳金額、卡片基礎、信用業務或風險管理中優先強化哪些領域，以提升市場競爭力？",
+      "suggested_metric_keys": [
+        "當月簽帳金額.share",
+        "有效卡數.share",
+        "循環信用餘額.share",
+        "未到期分期付款餘額.share"
+      ],
+      "page_number": 16
+    }
+  ],
+  "question_to_user": null,
+  "dropped_metric_keys": {}
+}
