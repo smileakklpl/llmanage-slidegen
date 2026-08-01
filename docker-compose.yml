@@ -8,9 +8,14 @@ services:
       - CORS_ORIGINS=["http://localhost","http://localhost:80"]
       - APP_NAME=slidegen-api
       - DEBUG=false
-      - AWS_REGION=${AWS_REGION:-ap-northeast-1}
+      - AWS_REGION=${AWS_REGION:-us-west-2}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-}
+      - AWS_SESSION_TOKEN=${AWS_SESSION_TOKEN:-}
       - S3_BUCKET=${S3_BUCKET:-}
       - S3_ENDPOINT_URL=${S3_ENDPOINT_URL:-}
+      - EMAIL_PROVIDER=${EMAIL_PROVIDER:-ses}
+      - SES_SENDER_EMAIL=${SES_SENDER_EMAIL:-ethanlin7890@gmail.com}
       - GENERATION_USE_FAKE_LLM=${GENERATION_USE_FAKE_LLM:-false}
       - GENERATION_SKIP_SEMANTIC_REVIEW=${GENERATION_SKIP_SEMANTIC_REVIEW:-false}
       # LLM 後端：Bedrock 走 EC2 Instance Profile 簽章，不需要 API key。
