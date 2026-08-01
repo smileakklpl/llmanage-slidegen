@@ -53,16 +53,8 @@ export function Navbar() {
             </span>
           </Link>
 
-          {/* Right: Language toggle + User menu */}
+          {/* Right: User menu + Language toggle */}
           <div className="flex items-center gap-3">
-            <button
-              onClick={toggleLocale}
-              className="px-3 py-1.5 rounded-lg border border-gray-300 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
-              aria-label="Toggle language"
-            >
-              {t("langToggle")}
-            </button>
-
             {/* User dropdown */}
             {user && (
               <div className="relative" ref={menuRef}>
@@ -114,6 +106,14 @@ export function Navbar() {
                 )}
               </div>
             )}
+
+            <button
+              onClick={toggleLocale}
+              className="px-3 py-1.5 rounded-lg border border-gray-300 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+              aria-label="Toggle language"
+            >
+              {t("langToggle")}
+            </button>
           </div>
         </div>
       </div>
