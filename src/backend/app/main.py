@@ -7,6 +7,7 @@ from app.ingestion.router import (
     router as ingestion_router,
 )
 from app.api.router import router as api_router
+from app.auth import auth_router
 from app.core.config import settings
 from app.core.errors import register_error_handlers
 
@@ -29,6 +30,9 @@ register_error_handlers(app)
 
 # Ingestion router already owns the /ingestion prefix.
 app.include_router(ingestion_router)
+
+# Auth routes (/auth/login, /auth/register)
+app.include_router(auth_router)
 
 # Web UI 的 job 路由 (/api/v1/jobs/...)
 app.include_router(api_router)

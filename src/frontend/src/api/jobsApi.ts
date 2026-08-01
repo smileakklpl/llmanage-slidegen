@@ -6,6 +6,12 @@ import {
 import type { JobCreateResponse, JobStatusResponse } from "@/types";
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "";
+const TOKEN_KEY = "auth_token";
+
+function getAuthHeaders(): HeadersInit {
+  const token = localStorage.getItem(TOKEN_KEY);
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
 
 export interface JobReviewResponse {
   job_id: string;
@@ -34,6 +40,7 @@ export async function generateJob(
 
   const res = await fetch(`${BASE_URL}/api/v1/jobs/generate`, {
     method: "POST",
+    headers: getAuthHeaders(),
     body: formData,
   });
 
@@ -62,7 +69,7 @@ export async function reviewJobDataset(
 ): Promise<Record<string, unknown>> {
   const res = await fetch(`${BASE_URL}/api/v1/jobs/${jobId}/datasets/${datasetId}/review`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...getAuthHeaders() },
     body: JSON.stringify(review),
   });
 
@@ -77,6 +84,7 @@ export async function reviewJobDataset(
 export async function resumeJob(jobId: string): Promise<ResumeJobResponse> {
   const res = await fetch(`${BASE_URL}/api/v1/jobs/${jobId}/resume`, {
     method: "POST",
+    headers: getAuthHeaders(),
   });
 
   if (!res.ok) {
@@ -88,7 +96,6 @@ export async function resumeJob(jobId: string): Promise<ResumeJobResponse> {
 }
 
 export interface SendEmailRequest {
-  sender: string;
   recipients: string[];
   subject: string;
   body: string;
@@ -108,7 +115,6 @@ export async function sendJobEmail(
 ): Promise<SendEmailResponse> {
   const formData = new FormData();
 
-  formData.append("sender", payload.sender);
   for (const recipient of payload.recipients) {
     formData.append("recipients", recipient);
   }
@@ -123,6 +129,7 @@ export async function sendJobEmail(
 
   const res = await fetch(`${BASE_URL}/api/v1/jobs/${jobId}/send`, {
     method: "POST",
+    headers: getAuthHeaders(),
     body: formData,
   });
 
