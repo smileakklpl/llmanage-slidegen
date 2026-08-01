@@ -15,7 +15,7 @@ class Settings(BaseSettings):
 
     # All durable inputs, outputs, stage dumps, and job states live in S3.
     s3_bucket: str = ""
-    aws_region: str = "ap-northeast-1"
+    aws_region: str = "us-west-2"
     s3_endpoint_url: str | None = None
     s3_presign_expires_seconds: int = Field(default=3600, ge=60, le=604800)
 
