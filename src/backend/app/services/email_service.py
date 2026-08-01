@@ -17,6 +17,7 @@ from email.mime.application import MIMEApplication
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from pathlib import Path
+from uuid import UUID
 
 from app.core.logging import get_logger
 
@@ -27,11 +28,23 @@ _OUTPUT_BASE = Path(tempfile.gettempdir()) / "slidegen_outputs"
 
 
 def _safe_artifact_path(job_id: str, filename: str) -> tuple[str, Path] | None:
+    try:
+        safe_job_id = str(UUID(job_id))
+    except ValueError:
+        logger.warning("Rejected artifact lookup for invalid job_id: %s", job_id)
+        return None
+
     safe_name = Path(filename).name
     if safe_name != filename:
         logger.warning("Rejected artifact filename with path segments: %s", filename)
         return None
-    return safe_name, (_OUTPUT_BASE / job_id / safe_name)
+
+    job_dir = (_OUTPUT_BASE / safe_job_id).resolve()
+    candidate = (job_dir / safe_name).resolve()
+    if not candidate.is_relative_to(job_dir):
+        logger.warning("Rejected artifact filename outside output dir: %s", filename)
+        return None
+    return safe_name, candidate
 
 
 def _get_provider() -> str:
