@@ -51,8 +51,8 @@ $env:S3_BUCKET = "llmanage-slidegen-files"
 docker compose up --build
 ```
 
-若要透過 Amazon SES 真實寄信，寄件身分必須在同一個 `AWS_REGION` 完成驗證，
-並設定以下環境變數後重新建立 backend 容器：
+Compose 預設使用 `us-west-2` 的 Amazon SES，並以已驗證的
+`ethanlin7890@gmail.com` 寄信。若要覆寫設定，可在重新建立 backend 容器前設定：
 
 ```powershell
 $env:EMAIL_PROVIDER = "ses"
@@ -62,8 +62,8 @@ docker compose up --build -d
 
 本機 Docker 會轉傳標準的 `AWS_ACCESS_KEY_ID`、`AWS_SECRET_ACCESS_KEY` 與
 `AWS_SESSION_TOKEN`；部署到 AWS 時則建議使用具備 `ses:SendRawEmail` 權限的 IAM Role。
-若 SES 帳號仍在 sandbox，收件地址也必須先完成驗證。不設定 `EMAIL_PROVIDER=ses`
-時會使用 `mock`，API 只模擬成功而不會寄出郵件。
+若 SES 帳號仍在 sandbox，收件地址也必須先完成驗證。若只想在本機模擬寄送，
+可設定 `EMAIL_PROVIDER=mock`，此時 API 不會真的寄出郵件。
 
 主要 API：
 
@@ -89,7 +89,7 @@ python -m ppt_generation.run_pipeline --excel .\fixtures\data\fsc_114_workbook.x
 
 ```powershell
 $env:LLM_PROVIDER = "bedrock"
-$env:AWS_REGION = "ap-northeast-1"
+$env:AWS_REGION = "us-west-2"
 $env:LLM_MODEL_DEFAULT = "your-model-id"
 $env:LLM_MODEL_INTENT = "your-intent-model-id"
 $env:LLM_MODEL_WRITER = "your-writer-model-id"
