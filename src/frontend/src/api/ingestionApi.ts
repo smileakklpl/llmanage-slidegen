@@ -8,11 +8,10 @@ import {
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "";
 
-// The current backend mounts a router that already has /ingestion under
-// another /ingestion prefix, so the deployed path is /ingestion/ingestion.
-// Override this with VITE_INGESTION_BASE_PATH after the backend prefix is cleaned up.
+// The backend ingestion router owns the single /ingestion prefix.
+// Keep this overridable for deployments that mount the API under another base path.
 const INGESTION_BASE_PATH =
-  import.meta.env.VITE_INGESTION_BASE_PATH ?? "/ingestion/ingestion";
+  import.meta.env.VITE_INGESTION_BASE_PATH ?? "/ingestion";
 
 async function readApiError(res: Response): Promise<string> {
   const payload = await res.json().catch(() => null);
