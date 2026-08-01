@@ -25,26 +25,16 @@ logger = get_logger(__name__)
 
 # Output directory for job artifacts (must match job_runner.py)
 _OUTPUT_BASE = Path(tempfile.gettempdir()) / "slidegen_outputs"
+_ALLOWED_ARTIFACT_FILENAMES = frozenset({"deck.pptx", "deck_data.xlsx"})
 
 
-def _safe_artifact_path(job_id: str, filename: str) -> tuple[str, Path] | None:
+def _safe_job_output_dir(job_id: str) -> Path | None:
     try:
         safe_job_id = str(UUID(job_id))
     except ValueError:
         logger.warning("Rejected artifact lookup for invalid job_id: %s", job_id)
         return None
-
-    safe_name = Path(filename).name
-    if safe_name != filename:
-        logger.warning("Rejected artifact filename with path segments: %s", filename)
-        return None
-
-    job_dir = (_OUTPUT_BASE / safe_job_id).resolve()
-    candidate = (job_dir / safe_name).resolve()
-    if not candidate.is_relative_to(job_dir):
-        logger.warning("Rejected artifact filename outside output dir: %s", filename)
-        return None
-    return safe_name, candidate
+    return (_OUTPUT_BASE / safe_job_id).resolve()
 
 
 def _get_provider() -> str:
@@ -85,15 +75,19 @@ async def send_email(
     all_attachments: list[tuple[str, bytes]] = []
 
     # Load job artifact files from disk
-    for filename in artifact_filenames:
-        safe_artifact = _safe_artifact_path(job_id, filename)
-        if safe_artifact is None:
-            continue
-        safe_name, file_path = safe_artifact
-        if file_path.exists():
-            all_attachments.append((safe_name, file_path.read_bytes()))
-        else:
-            logger.warning("Artifact file not found: %s", file_path)
+    requested_artifacts = {
+        name for name in artifact_filenames if name in _ALLOWED_ARTIFACT_FILENAMES
+    }
+    output_dir = _safe_job_output_dir(job_id)
+    if output_dir is not None and output_dir.exists():
+        for artifact_path in output_dir.iterdir():
+            if (
+                artifact_path.is_file()
+                and artifact_path.name in requested_artifacts
+            ):
+                all_attachments.append(
+                    (artifact_path.name, artifact_path.read_bytes())
+                )
 
     # Add user-uploaded extra attachments
     all_attachments.extend(extra_attachments)
