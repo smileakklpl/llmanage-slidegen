@@ -61,7 +61,7 @@ so the currently deployed path is:
 The frontend therefore uses:
 
 ```env
-VITE_INGESTION_BASE_PATH=/ingestion/ingestion
+VITE_INGESTION_BASE_PATH=/ingestion
 ```
 
 After the backend prefix is fixed, set:
