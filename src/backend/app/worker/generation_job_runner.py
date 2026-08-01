@@ -1,4 +1,4 @@
-"""Real asynchronous job runner connecting S3 inputs to the PPT pipeline."""
+"""Asynchronous job runner connecting S3 inputs to ingestion and PPT generation."""
 
 from __future__ import annotations
 
@@ -8,11 +8,21 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from app.ingestion import generation_bridge
-from app.repositories.job_repository import JobRepository
+from app.repositories.job_repository import JobModel, JobRepository
 from app.schemas.jobs import Artifact, JobError, JobStage, JobStatus
 from app.storage.s3_storage import S3ObjectStorage
-from core.contracts.generation import GenerationRequest, StoredObjectRef
+from core.contracts.generation import GenerationRequest, NormalizedIngestionContract, StoredObjectRef
 from core.generation_orchestrator import generate_deck
+
+
+def _blocked_dataset_ids(payload: dict) -> list[str]:
+    ingestion = NormalizedIngestionContract.model_validate(payload)
+    return [
+        dataset.dataset_id
+        for dataset in ingestion.datasets
+        if dataset.requires_human_review
+        or dataset.review_status in {"pending", "rejected"}
+    ]
 
 
 async def _transition(
@@ -27,6 +37,7 @@ async def _transition(
     error: JobError | None = None,
     summary: str | None = None,
     ingestion_object: StoredObjectRef | None = None,
+    review_required_count: int | None = None,
 ) -> None:
     job = await repository.get(job_id)
     if job is None:
@@ -41,6 +52,11 @@ async def _transition(
         "artifacts": artifacts if artifacts is not None else job.artifacts,
         "error": error,
         "summary": summary if summary is not None else job.summary,
+        "review_required_count": (
+            review_required_count
+            if review_required_count is not None
+            else job.review_required_count
+        ),
     }
     if ingestion_object is not None:
         changes["ingestion_object"] = ingestion_object
@@ -48,13 +64,111 @@ async def _transition(
     await repository.update(job.model_copy(update=changes))
 
 
+async def _generate_from_ingestion_path(
+    *,
+    job: JobModel,
+    ingestion_path: Path,
+    output_dir: Path,
+    repository: JobRepository,
+    storage: S3ObjectStorage,
+) -> None:
+    """Run deterministic/LLM generation after ingestion is approved."""
+    await _transition(
+        job.job_id,
+        repository,
+        status=JobStatus.running,
+        stage=JobStage.rendering,
+        progress=55,
+        message="資料已確認，正在計算指標並生成原生 PowerPoint 圖表",
+        review_required_count=0,
+    )
+
+    # Human review time must not consume the generation budget.
+    deadline_at = datetime.now(timezone.utc) + timedelta(
+        seconds=job.generation_options.deadline_seconds
+    )
+    request = GenerationRequest(
+        job_id=job.job_id,
+        prompt=job.prompt,
+        ingestion_path=str(ingestion_path),
+        output_dir=str(output_dir),
+        source_objects=job.input_objects,
+        options=job.generation_options,
+        deadline_at_utc=deadline_at,
+    )
+    result = await asyncio.to_thread(
+        generate_deck,
+        request.model_dump(mode="json"),
+    )
+
+    await _transition(
+        job.job_id,
+        repository,
+        status=JobStatus.running,
+        stage=JobStage.validating,
+        progress=90,
+        message="驗證已通過，正在保存產出",
+    )
+
+    uploaded_by_path: dict[Path, str] = {}
+    for path in output_dir.rglob("*"):
+        if not path.is_file():
+            continue
+        relative = path.relative_to(output_dir).as_posix()
+        stored = await asyncio.to_thread(
+            storage.upload_path,
+            path,
+            key=f"outputs/{job.job_id}/{relative}",
+        )
+        uploaded_by_path[path.resolve()] = stored.key
+
+    deck_spec_path = output_dir / "deckspec.json"
+    if deck_spec_path.is_file():
+        await asyncio.to_thread(
+            storage.upload_path,
+            deck_spec_path,
+            key=f"deckspecs/{job.job_id}/deckspec.json",
+            content_type="application/json",
+        )
+
+    artifacts: list[Artifact] = []
+    for generated in result.artifacts:
+        generated_path = Path(generated.path).resolve()
+        artifacts.append(
+            Artifact(
+                type=generated.artifact_type,
+                filename=generated.filename,
+                download_url="",
+                object_key=uploaded_by_path[generated_path],
+                sha256=generated.sha256,
+                size_bytes=generated.size_bytes,
+            )
+        )
+
+    summary = (
+        f"已完成 {result.page_count} 個內容頁、{result.chart_count} 張圖表，"
+        f"共 {result.slide_count} 張投影片；"
+        f"T1 已核對 {result.series_checked} 個數值系列。"
+    )
+    await _transition(
+        job.job_id,
+        repository,
+        status=JobStatus.succeeded,
+        stage=JobStage.completed,
+        progress=100,
+        message="簡報生成與數值驗證完成",
+        artifacts=artifacts,
+        summary=summary,
+        review_required_count=0,
+    )
+
+
 async def run_generation_job(
     job_id: str,
     repository: JobRepository,
     storage: S3ObjectStorage,
 ) -> None:
-    """Ingest S3 uploads, call core with JSON, and persist verified outputs."""
-
+    """Ingest raw S3 uploads, pause for review when needed, otherwise generate."""
     try:
         job = await repository.get(job_id)
         if job is None:
@@ -73,7 +187,7 @@ async def run_generation_job(
             workspace = Path(temp_name)
             upload_dir = workspace / "uploads"
             output_dir = workspace / "outputs"
-            local_inputs: list[Path] = []
+            materialized: list[tuple[Path, str]] = []
 
             for index, object_ref in enumerate(job.input_objects, start=1):
                 destination = upload_dir / f"{index:02d}_{object_ref.filename}"
@@ -82,15 +196,14 @@ async def run_generation_job(
                     object_ref.key,
                     destination,
                 )
-                local_inputs.append(destination)
+                materialized.append((destination, object_ref.filename))
 
-            if not local_inputs:
+            if not materialized:
                 raise RuntimeError("job 沒有任何可處理的 S3 輸入")
 
-            raw_input = local_inputs[0] if len(local_inputs) == 1 else upload_dir
             ingestion_payload = await asyncio.to_thread(
-                generation_bridge.ingest_excel,
-                raw_input,
+                generation_bridge.ingest_inputs,
+                materialized,
             )
             ingestion_path = generation_bridge.save_payload(
                 ingestion_payload,
@@ -103,91 +216,42 @@ async def run_generation_job(
                 content_type="application/json",
             )
 
+            blocked = _blocked_dataset_ids(ingestion_payload)
+            if blocked:
+                await _transition(
+                    job_id,
+                    repository,
+                    status=JobStatus.waiting_review,
+                    stage=JobStage.reviewing_data,
+                    progress=45,
+                    message=(
+                        f"辨識完成；{len(blocked)} 個資料集需要人工確認後才能生成"
+                    ),
+                    ingestion_object=ingestion_object,
+                    review_required_count=len(blocked),
+                )
+                return
+
             await _transition(
                 job_id,
                 repository,
                 status=JobStatus.running,
-                stage=JobStage.rendering,
-                progress=55,
-                message="正在計算指標並生成原生 PowerPoint 圖表",
+                stage=JobStage.analyzing_data,
+                progress=50,
+                message="資料解析完成，無需人工確認",
                 ingestion_object=ingestion_object,
+                review_required_count=0,
             )
 
-            deadline_at = job.created_at + timedelta(
-                seconds=job.generation_options.deadline_seconds
-            )
-            request = GenerationRequest(
-                job_id=job_id,
-                prompt=job.prompt,
-                ingestion_path=str(ingestion_path),
-                output_dir=str(output_dir),
-                source_objects=job.input_objects,
-                options=job.generation_options,
-                deadline_at_utc=deadline_at,
-            )
-            result = await asyncio.to_thread(
-                generate_deck,
-                request.model_dump(mode="json"),
-            )
-
-            await _transition(
-                job_id,
-                repository,
-                status=JobStatus.running,
-                stage=JobStage.validating,
-                progress=90,
-                message="驗證已通過，正在保存產出",
-            )
-
-            uploaded_by_path: dict[Path, str] = {}
-            for path in output_dir.rglob("*"):
-                if not path.is_file():
-                    continue
-                relative = path.relative_to(output_dir).as_posix()
-                stored = await asyncio.to_thread(
-                    storage.upload_path,
-                    path,
-                    key=f"outputs/{job_id}/{relative}",
-                )
-                uploaded_by_path[path.resolve()] = stored.key
-
-            deck_spec_path = output_dir / "deckspec.json"
-            if deck_spec_path.is_file():
-                await asyncio.to_thread(
-                    storage.upload_path,
-                    deck_spec_path,
-                    key=f"deckspecs/{job_id}/deckspec.json",
-                    content_type="application/json",
-                )
-
-            artifacts: list[Artifact] = []
-            for generated in result.artifacts:
-                generated_path = Path(generated.path).resolve()
-                artifacts.append(
-                    Artifact(
-                        type=generated.artifact_type,
-                        filename=generated.filename,
-                        download_url="",
-                        object_key=uploaded_by_path[generated_path],
-                        sha256=generated.sha256,
-                        size_bytes=generated.size_bytes,
-                    )
-                )
-
-            summary = (
-                f"已完成 {result.page_count} 個內容頁、{result.chart_count} 張圖表，"
-                f"共 {result.slide_count} 張投影片；"
-                f"T1 已核對 {result.series_checked} 個數值系列。"
-            )
-            await _transition(
-                job_id,
-                repository,
-                status=JobStatus.succeeded,
-                stage=JobStage.completed,
-                progress=100,
-                message="簡報生成與數值驗證完成",
-                artifacts=artifacts,
-                summary=summary,
+            refreshed = await repository.get(job_id)
+            if refreshed is None:
+                return
+            await _generate_from_ingestion_path(
+                job=refreshed,
+                ingestion_path=ingestion_path,
+                output_dir=output_dir,
+                repository=repository,
+                storage=storage,
             )
 
     except Exception as error:  # noqa: BLE001 - worker must persist all failures
@@ -200,6 +264,58 @@ async def run_generation_job(
             message="簡報生成失敗",
             error=JobError(
                 code="GENERATION_FAILED",
+                message=f"{type(error).__name__}: {error}",
+            ),
+        )
+
+
+async def resume_generation_job(
+    job_id: str,
+    repository: JobRepository,
+    storage: S3ObjectStorage,
+) -> None:
+    """Resume a job from its persisted, human-reviewed ingestion JSON."""
+    try:
+        job = await repository.get(job_id)
+        if job is None:
+            return
+        if job.ingestion_object is None:
+            raise RuntimeError("job 尚未保存 ingestion.json")
+
+        with tempfile.TemporaryDirectory(prefix=f"slidegen-resume-{job_id}-") as temp_name:
+            workspace = Path(temp_name)
+            ingestion_path = workspace / "ingestion.json"
+            output_dir = workspace / "outputs"
+            await asyncio.to_thread(
+                storage.download_path,
+                job.ingestion_object.key,
+                ingestion_path,
+            )
+
+            payload = generation_bridge.load_payload(ingestion_path)
+            blocked = _blocked_dataset_ids(payload)
+            if blocked:
+                raise RuntimeError(
+                    "仍有未通過人工確認的資料集：" + "、".join(blocked)
+                )
+
+            await _generate_from_ingestion_path(
+                job=job,
+                ingestion_path=ingestion_path,
+                output_dir=output_dir,
+                repository=repository,
+                storage=storage,
+            )
+    except Exception as error:  # noqa: BLE001
+        await _transition(
+            job_id,
+            repository,
+            status=JobStatus.failed,
+            stage=JobStage.failed,
+            progress=100,
+            message="續跑簡報生成失敗",
+            error=JobError(
+                code="GENERATION_RESUME_FAILED",
                 message=f"{type(error).__name__}: {error}",
             ),
         )

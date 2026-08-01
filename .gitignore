@@ -45,4 +45,11 @@ fixtures/data/*
 
 # Frontend
 node_modules/
+src/frontend/dist/
+src/frontend/*.tsbuildinfo
+src/frontend/vite.config.js
+src/frontend/vite.config.d.ts
 src/frontend/.env
+
+# Local deployment settings and credentials
+.env

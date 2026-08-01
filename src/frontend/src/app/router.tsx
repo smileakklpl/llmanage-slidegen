@@ -3,6 +3,7 @@ import { Layout } from "@/app/Layout";
 import { GeneratePage } from "@/pages/GeneratePage";
 import { JobPage } from "@/pages/JobPage";
 import { NotFoundPage } from "@/pages/NotFoundPage";
+import { ReviewPage } from "@/pages/ReviewPage";
 
 export const router = createBrowserRouter([
   {
@@ -11,6 +12,10 @@ export const router = createBrowserRouter([
       {
         path: "/",
         element: <GeneratePage />,
+      },
+      {
+        path: "/review",
+        element: <ReviewPage />,
       },
       {
         path: "/jobs/:jobId",

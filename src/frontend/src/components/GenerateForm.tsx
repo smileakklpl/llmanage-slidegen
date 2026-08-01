@@ -36,7 +36,17 @@ export function GenerateForm({ onSubmit, isSubmitting }: GenerateFormProps) {
     const newFiles: File[] = [];
     for (let i = 0; i < selected.length; i++) {
       const file = selected[i];
-      if (!file.name.endsWith(".xlsx")) {
+      const extension = file.name.split(".").pop()?.toLowerCase();
+      const allowedExtensions = [
+        "xlsx",
+        "csv",
+        "txt",
+        "pdf",
+        "png",
+        "jpg",
+        "jpeg",
+      ];
+      if (!extension || !allowedExtensions.includes(extension)) {
         setFileError(t("fileError"));
         return;
       }
@@ -91,7 +101,7 @@ export function GenerateForm({ onSubmit, isSubmitting }: GenerateFormProps) {
         </div>
         <input
           type="file"
-          accept=".xlsx"
+          accept=".xlsx,.csv,.txt,.pdf,.png,.jpg,.jpeg"
           multiple
           ref={fileInputRef}
           onChange={handleFileChange}

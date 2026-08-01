@@ -10,15 +10,23 @@ from pydantic import ValidationError
 
 from app.api.deps import get_job_service, get_object_storage
 from app.core.errors import NotFoundError
+from app.ingestion.schemas import HumanReviewRequest, UnifiedDatasetSpec
 from app.ingestion.settings import MAX_UPLOAD_BYTES
 from app.schemas.jobs import (
     JobCreateResponse,
+    JobReviewResponse,
     JobStatusResponse,
+    ResumeJobResponse,
+    ReviewSource,
     SendEmailResponse,
 )
 from core.contracts.generation import StoredObjectRef
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
+
+ALLOWED_UPLOAD_SUFFIXES = {
+    ".xlsx", ".csv", ".tsv", ".txt", ".pdf", ".png", ".jpg", ".jpeg"
+}
 
 
 def _stream_size(stream: object) -> int:
@@ -58,7 +66,7 @@ async def generate_job(
     generation_deadline_seconds: float | None = Form(default=None),
     generation_render_reserve_seconds: float | None = Form(default=None),
 ) -> JobCreateResponse:
-    """Persist Excel uploads in S3 and queue the real generation pipeline."""
+    """Persist supported uploads in S3 and queue ingestion/generation."""
 
     normalized_prompt = prompt.strip()
 
@@ -66,15 +74,18 @@ async def generate_job(
         raise HTTPException(status_code=422, detail="prompt 不可為空")
 
     if not files:
-        raise HTTPException(status_code=422, detail="至少需要一個 Excel 檔案")
+        raise HTTPException(status_code=422, detail="至少需要一個資料檔案")
 
     filenames = [Path(file.filename or "upload.xlsx").name for file in files]
 
     for file, filename in zip(files, filenames):
-        if Path(filename).suffix.lower() != ".xlsx":
+        if Path(filename).suffix.lower() not in ALLOWED_UPLOAD_SUFFIXES:
             raise HTTPException(
                 status_code=415,
-                detail=f"目前生成管線只接受 .xlsx：{filename}",
+                detail=(
+                    f"不支援的格式：{filename}；目前接受 "
+                    + ", ".join(sorted(ALLOWED_UPLOAD_SUFFIXES))
+                ),
             )
 
         actual_size = await asyncio.to_thread(_stream_size, file.file)
@@ -170,6 +181,90 @@ async def get_job_status(job_id: str) -> JobStatusResponse:
         artifacts=job.artifacts,
         error=job.error,
         summary=job.summary,
+        review_required_count=job.review_required_count,
+        review_url=(
+            f"/api/v1/jobs/{job.job_id}/review"
+            if job.status == "waiting_review"
+            else None
+        ),
+    )
+
+
+@router.get("/{job_id}/review", response_model=JobReviewResponse)
+async def get_job_review(job_id: str) -> JobReviewResponse:
+    """Return persisted datasets plus source previews for human review."""
+    try:
+        service = get_job_service()
+        storage = get_object_storage()
+        job, payload = await service.get_review_payload(job_id)
+    except LookupError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+    datasets = list(payload.get("datasets") or [])
+    blocked = [
+        item
+        for item in datasets
+        if item.get("requires_human_review")
+        or item.get("review_status") in {"pending", "rejected"}
+    ]
+    sources = [
+        ReviewSource(
+            filename=item.filename,
+            preview_url=storage.presigned_download_url(item.key),
+        )
+        for item in job.input_objects
+        if item.key.startswith(f"uploads/{job_id}/")
+    ]
+    return JobReviewResponse(
+        job_id=job_id,
+        review_required_count=len(blocked),
+        can_resume=not blocked,
+        datasets=datasets,
+        sources=sources,
+    )
+
+
+@router.post(
+    "/{job_id}/datasets/{dataset_id}/review",
+    response_model=UnifiedDatasetSpec,
+)
+async def review_job_dataset(
+    job_id: str,
+    dataset_id: str,
+    review: HumanReviewRequest,
+) -> UnifiedDatasetSpec:
+    """Approve/reject/correct one persisted dataset."""
+    try:
+        service = get_job_service()
+        _, dataset = await service.review_dataset(
+            job_id=job_id,
+            dataset_id=dataset_id,
+            review=review,
+        )
+        return dataset
+    except LookupError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+
+
+@router.post("/{job_id}/resume", response_model=ResumeJobResponse, status_code=202)
+async def resume_job(job_id: str) -> ResumeJobResponse:
+    """Resume a paused job after all datasets are approved."""
+    try:
+        job = await get_job_service().resume_job(job_id)
+    except LookupError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+    return ResumeJobResponse(
+        job_id=job.job_id,
+        status=job.status,
+        stage=job.stage,
+        message=job.message,
     )
 
 

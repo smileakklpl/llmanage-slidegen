@@ -5,6 +5,7 @@ These models match contracts/job-status.schema.json.
 
 from datetime import datetime
 from enum import StrEnum
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -14,6 +15,7 @@ class JobStatus(StrEnum):
 
     queued = "queued"
     running = "running"
+    waiting_review = "waiting_review"
     succeeded = "succeeded"
     failed = "failed"
 
@@ -24,6 +26,7 @@ class JobStage(StrEnum):
     queued = "queued"
     parsing_intent = "parsing_intent"
     analyzing_data = "analyzing_data"
+    reviewing_data = "reviewing_data"
     writing_insights = "writing_insights"
     rendering = "rendering"
     validating = "validating"
@@ -62,6 +65,8 @@ class JobStatusResponse(BaseModel):
     artifacts: list[Artifact] = Field(default_factory=list)
     error: JobError | None = None
     summary: str | None = None
+    review_required_count: int = Field(default=0, ge=0)
+    review_url: str | None = None
 
 
 class JobCreateResponse(BaseModel):
@@ -70,6 +75,26 @@ class JobCreateResponse(BaseModel):
     job_id: str
     status: str = "queued"
     status_url: str
+
+
+class ReviewSource(BaseModel):
+    filename: str
+    preview_url: str
+
+
+class JobReviewResponse(BaseModel):
+    job_id: str
+    review_required_count: int = Field(ge=0)
+    can_resume: bool
+    datasets: list[dict[str, Any]] = Field(default_factory=list)
+    sources: list[ReviewSource] = Field(default_factory=list)
+
+
+class ResumeJobResponse(BaseModel):
+    job_id: str
+    status: JobStatus
+    stage: JobStage
+    message: str
 
 
 class SendEmailResponse(BaseModel):
