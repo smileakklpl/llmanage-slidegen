@@ -51,11 +51,25 @@ $env:S3_BUCKET = "your-bucket"
 docker compose up --build
 ```
 
+若要透過 Amazon SES 真實寄信，寄件身分必須在同一個 `AWS_REGION` 完成驗證，
+並設定以下環境變數後重新建立 backend 容器：
+
+```powershell
+$env:EMAIL_PROVIDER = "ses"
+$env:SES_SENDER_EMAIL = "verified-sender@example.com"
+docker compose up --build -d
+```
+
+本機 Docker 會轉傳標準的 `AWS_ACCESS_KEY_ID`、`AWS_SECRET_ACCESS_KEY` 與
+`AWS_SESSION_TOKEN`；部署到 AWS 時則建議使用具備 `ses:SendRawEmail` 權限的 IAM Role。
+若 SES 帳號仍在 sandbox，收件地址也必須先完成驗證。不設定 `EMAIL_PROVIDER=ses`
+時會使用 `mock`，API 只模擬成功而不會寄出郵件。
+
 主要 API：
 
 - `POST /api/v1/jobs/generate`：multipart `files` + `prompt`，回傳 `202` 與 `job_id`
 - `GET /api/v1/jobs/{job_id}`：輪詢狀態及 artifacts
-- `POST /api/v1/jobs/{job_id}/send`：模擬寄送完成 artifacts
+- `POST /api/v1/jobs/{job_id}/send`：依 `EMAIL_PROVIDER` 模擬寄送或透過 SES 寄送 artifacts
 - `GET /health`、`GET /ready`：服務檢查
 
 ### 本地 deterministic CLI smoke
