@@ -286,6 +286,7 @@ def _write_generation_manifest(
             "generation_request": "1.1",
             "ingestion": str(payload.get("contract_version") or "legacy"),
             "metric_store": "1.0",
+            "intent_spec": "1.0",
             "section_plan": "1.0",
             "chart_plan": "1.0",
             "narrative": "1.0",
@@ -1166,6 +1167,7 @@ def _generate_required_page(
     enable_semantic_review: bool,
     page_deadline: float,
     repair_escalate_after: int,
+    intent_spec: dict[str, Any] | None = None,
 ) -> RequiredPageOutcome:
     """Generate one deliverable page while preserving deterministic hard gates."""
     writer_attempts = 0
@@ -1183,6 +1185,7 @@ def _generate_required_page(
             section_payload,
             chart_plan_payload,
             metric_store_payload,
+            intent_spec_payload=intent_spec,
             **kwargs,
         )
         narrative_payload = result.get("narrative")
@@ -1218,6 +1221,7 @@ def _generate_required_page(
             llm_call=json_call,
             enable_semantic_layer=enable_semantic_review,
             deadline_monotonic=page_deadline,
+            intent_spec_payload=intent_spec,
         )
         return reviewer.ReviewResult(
             status=payload["status"],
@@ -1653,7 +1657,8 @@ def run(
     if effective_policy == "required" and time.monotonic() >= llm_cutoff:
         sections_payload = (
             section_planner.build_deterministic_sections_from_contract(
-                metric_store_json
+                metric_store_json,
+                fallback_reason="LLM 時間配額已用盡，已使用確定性章節規劃",
             )
         )
         section_warning = "LLM 時間配額已用盡，已使用確定性章節規劃"
@@ -1673,24 +1678,43 @@ def run(
                 raise
             sections_payload = (
                 section_planner.build_deterministic_sections_from_contract(
-                    metric_store_json
+                    metric_store_json,
+                    fallback_reason=(
+                        "章節 LLM 無法完成，已使用確定性規劃："
+                        f"{type(error).__name__}"
+                    ),
                 )
             )
             section_warning = f"章節 LLM 無法完成，已使用確定性規劃：{error}"
 
     plan = section_planner.SectionPlanResult.from_dict(sections_payload)
-    if plan.needs_confirmation and effective_policy == "required":
+    if plan.needs_confirmation:
         sections_payload = (
             section_planner.build_deterministic_sections_from_contract(
-                metric_store_json
+                metric_store_json,
+                plan.intent_spec,
+                fallback_reason=(
+                    plan.question_to_user
+                    or "章節需求不足，已使用可計算指標建立規劃"
+                ),
             )
         )
-        section_warning = "章節需求不足，required 模式已使用可計算指標建立規劃"
+        section_warning = (
+            "提示詞需求不足或無法套用，已使用可計算指標建立規劃；"
+            "簡報仍會產出"
+        )
 
     if section_warning:
         sections_payload["delivery_warning"] = section_warning
     sections_payload = stage_contracts.section_stage_payload(sections_payload)
     plan = section_planner.SectionPlanResult.from_dict(sections_payload)
+    intent_spec = dict(plan.intent_spec)
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["request"]["resolved_intent"] = intent_spec
+    manifest_path.write_text(
+        json.dumps(manifest, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
 
     print(f"  狀態：{plan.status}")
     if section_warning:
@@ -1790,6 +1814,7 @@ def run(
                 chart_agent.build_deterministic_chart_from_contract(
                     section.to_dict(),
                     metric_store_json,
+                    intent_spec_payload=intent_spec,
                 )
             )
             chart_contract_payload["plans"].append(fallback_plan)
@@ -1943,6 +1968,7 @@ def run(
                 enable_semantic_review=not skip_semantic_review,
                 page_deadline=page_deadline,
                 repair_escalate_after=generation.repair_escalate_after,
+                intent_spec=intent_spec,
             )
             validated_narrative = validate_narrative_contract(
                 outcome.narrative
@@ -1976,6 +2002,7 @@ def run(
             chart.plan.to_dict(),
             metric_store_json,
             llm_call=json_call,
+            intent_spec_payload=intent_spec,
         )
         narrative_payload = narrative_attempt.get("narrative")
         narrative = (
@@ -2029,6 +2056,7 @@ def run(
                 metric_store_json,
                 llm_call=json_call,
                 enable_semantic_layer=not skip_semantic_review,
+                intent_spec_payload=intent_spec,
             )
             final_review = reviewer.ReviewResult(
                 status=review_json["status"],
@@ -2070,6 +2098,7 @@ def run(
                     llm_call=json_call,
                     max_attempts=1,
                     initial_errors=repair_feedback,
+                    intent_spec_payload=intent_spec,
                 )
                 repaired_payload = repair_result.get("narrative")
                 repaired = (
@@ -2182,6 +2211,7 @@ def run(
         {
             "contract_version": "1.0",
             "title": deck_title or DEFAULT_DECK_TITLE,
+            "intent_spec": intent_spec,
             "metric_store": metric_store_json,
             "pages": [
                 {
@@ -2195,7 +2225,11 @@ def run(
             "generation_policy": effective_policy,
             "delivery_warnings": [
                 warning
-                for warning in [section_warning, *chart_fallbacks.values()]
+                for warning in [
+                    section_warning,
+                    *intent_spec.get("interpretation_warnings", []),
+                    *chart_fallbacks.values(),
+                ]
                 if warning
             ],
         }

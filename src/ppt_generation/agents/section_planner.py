@@ -5,10 +5,9 @@
 
 職責：把使用者的一句話需求，轉成簡報的章節骨架。
 
-關鍵規則：使用者未明確提供章節清單時，**必須**回傳
-``NEEDS_CONFIRMATION`` 並附上待確認問題，由 Orchestrator 中斷流程等待
-使用者輸入。Agent 不得自行假設章節結構就往下跑 —— 章節決定整份簡報的
-敘事框架，猜錯的成本遠高於多問一次。
+關鍵行為：自然語言需求會先轉成結構化 IntentSpec，再規劃內容頁。若提示詞
+模糊、措辭不佳、含錯字，或模型無法解析，系統不得因此停止；必須忽略無法套用
+的部分、留下 warning，並以可計算指標建立確定性簡報。
 """
 
 from __future__ import annotations
@@ -17,6 +16,7 @@ import json
 from dataclasses import dataclass, field
 from typing import Any, Callable, Sequence
 
+from ..contracts.stages import IntentSpecContract
 from ..core import llm_client
 from ..data.metric_store import MetricStore
 
@@ -67,10 +67,12 @@ SYSTEM_PROMPT = """你是一位資料分析與管理顧問，負責規劃給管�
    單一主題頁通常只選一個系列。只有 intent 明確要求多期比較或兩項指標關係時，
    才能選多個系列，且必須在 comparison_reason 寫出比較理由；單一系列時填空字串。
    不可用空陣列表示「全部」。
-4. 若使用者的需求沒有明確指出想看的章節或主題，status 必須回傳
-   "NEEDS_CONFIRMATION"，並在 question_to_user 提出具體待確認問題。
-5. 若使用者已明確說明章節或主題，status 回傳 "READY"。
-6. 內容頁數量不得超過 {max_sections} 頁。
+4. 解析使用者的目的、受眾、語言、語氣、內容頁數、主題、排除項、圖表偏好與
+   結論要求，寫入 intent_spec。這些都是呈現需求，不得放入任何實際資料值。
+5. 即使使用者描述模糊、帶情緒、措辭不佳、含錯字或提出無法由資料支持的要求，
+   也不得拒絕或停止生成。忽略無法套用的部分、在 interpretation_warnings 說明，
+   使用安全預設補足需求，並盡可能回傳 status="READY" 與至少一個合法內容頁。
+6. 內容頁數量不得超過 {max_sections} 頁。若指定頁數超出範圍，使用合法上限。
 7. 每一頁都必須填 chapter，指出它屬於哪一個章節。同一章節的頁面要相鄰，
    不要交錯——章節在簡報中會各自產生一張章節分隔頁。
 8. 未特別指定時，章節請採用預設骨架：{default_chapters}。
@@ -97,6 +99,59 @@ SECTION_PLAN_SCHEMA: dict[str, Any] = {
             "enum": [STATUS_READY, STATUS_NEEDS_CONFIRMATION],
         },
         "question_to_user": {"type": "string"},
+        "intent_spec": {
+            "type": "object",
+            "properties": {
+                "objective": {"type": "string"},
+                "audience": {"type": "string"},
+                "language": {"type": "string"},
+                "tone": {"type": "string"},
+                "target_content_pages": {"type": "integer"},
+                "requested_topics": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                },
+                "excluded_topics": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                },
+                "requested_metric_keys": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                },
+                "chart_preferences": {
+                    "type": "object",
+                    "properties": {
+                        "preferred_types": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                        },
+                        "avoided_types": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                        },
+                    },
+                },
+                "required_conclusions": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                },
+                "delivery": {
+                    "type": "object",
+                    "properties": {
+                        "recipients": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                        },
+                        "email_subject": {"type": "string"},
+                    },
+                },
+                "interpretation_warnings": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                },
+            },
+        },
         "sections": {
             "type": "array",
             "items": {
@@ -239,6 +294,7 @@ class SectionPlanResult:
 
     status: str
     sections: list[SectionPlan] = field(default_factory=list)
+    intent_spec: dict[str, Any] = field(default_factory=dict)
     question_to_user: str | None = None
     #: 被剔除的無效 metric_key 及原因，供除錯與回報
     dropped_metric_keys: dict[str, str] = field(default_factory=dict)
@@ -250,6 +306,7 @@ class SectionPlanResult:
     def to_dict(self) -> dict[str, Any]:
         return {
             "status": self.status,
+            "intent_spec": dict(self.intent_spec),
             "sections": [section.to_dict() for section in self.sections],
             "question_to_user": self.question_to_user,
             "dropped_metric_keys": dict(self.dropped_metric_keys),
@@ -259,6 +316,9 @@ class SectionPlanResult:
     def from_dict(cls, payload: dict[str, Any]) -> SectionPlanResult:
         return cls(
             status=payload.get("status", STATUS_NEEDS_CONFIRMATION),
+            intent_spec=IntentSpecContract.model_validate(
+                payload.get("intent_spec") or {}
+            ).model_dump(mode="json"),
             sections=[
                 SectionPlan.from_dict(item)
                 for item in payload.get("sections", [])
@@ -311,6 +371,132 @@ def build_prompt(
         )
 
     return "\n".join(parts)
+
+
+_ALLOWED_CHART_TYPES = {
+    "line",
+    "column",
+    "bar",
+    "pie",
+    "scatter",
+    "combo",
+    "table",
+    "heatmap",
+}
+
+
+def _string_list(value: Any) -> list[str]:
+    """Normalize a permissive LLM field without rejecting the whole request."""
+    if not isinstance(value, (list, tuple)):
+        return []
+    return list(
+        dict.fromkeys(
+            text for item in value if (text := str(item).strip())
+        )
+    )
+
+
+def _sanitize_intent_spec(
+    raw: Any,
+    store: MetricStore,
+    sections: Sequence[SectionPlan],
+    *,
+    source: str,
+    extra_warnings: Sequence[str] = (),
+) -> dict[str, Any]:
+    """Build a safe IntentSpec; invalid prompt details become warnings, not errors."""
+    payload = dict(raw) if isinstance(raw, dict) else {}
+    warnings = [
+        *_string_list(payload.get("interpretation_warnings")),
+        *extra_warnings,
+    ]
+    allowed_metrics = set(store.computable_metric_keys())
+    requested = _string_list(payload.get("requested_metric_keys"))
+    unknown = [key for key in requested if key not in allowed_metrics]
+    requested = [key for key in requested if key in allowed_metrics]
+
+    if unknown:
+        warnings.append(
+            "已忽略資料無法支持的 requested_metric_keys：" + "、".join(unknown)
+        )
+
+    if not requested:
+        requested = list(dict.fromkeys(
+            key for section in sections for key in section.suggested_metric_keys
+        ))
+
+    target: int | None = None
+    raw_target = payload.get("target_content_pages")
+    if raw_target is not None and not isinstance(raw_target, bool):
+        try:
+            parsed_target = int(raw_target)
+        except (TypeError, ValueError):
+            warnings.append("內容頁數無法辨識，已使用系統可用頁數")
+        else:
+            target = max(1, min(MAX_SECTIONS, parsed_target))
+            if target != parsed_target:
+                warnings.append(
+                    f"內容頁數 {parsed_target} 超出範圍，已調整為 {target}"
+                )
+
+    chart_payload = payload.get("chart_preferences")
+    chart_payload = chart_payload if isinstance(chart_payload, dict) else {}
+    preferred_raw = [
+        item.lower()
+        for item in _string_list(chart_payload.get("preferred_types"))
+    ]
+    avoided_raw = [
+        item.lower()
+        for item in _string_list(chart_payload.get("avoided_types"))
+    ]
+    preferred = [item for item in preferred_raw if item in _ALLOWED_CHART_TYPES]
+    avoided = [item for item in avoided_raw if item in _ALLOWED_CHART_TYPES]
+    invalid_chart_types = [
+        item
+        for item in [*preferred_raw, *avoided_raw]
+        if item not in _ALLOWED_CHART_TYPES
+    ]
+    if invalid_chart_types:
+        warnings.append(
+            "已忽略不支援的圖表偏好：" + "、".join(dict.fromkeys(invalid_chart_types))
+        )
+    preferred = [item for item in preferred if item not in set(avoided)]
+
+    delivery = payload.get("delivery")
+    delivery = delivery if isinstance(delivery, dict) else {}
+    normalized = {
+        "contract_version": "1.0",
+        "objective": str(
+            payload.get("objective")
+            or "依可用資料產生可追蹤的管理決策簡報"
+        ).strip(),
+        "audience": str(payload.get("audience") or "管理層").strip(),
+        "language": str(payload.get("language") or "zh-TW").strip(),
+        "tone": str(payload.get("tone") or "professional").strip(),
+        "target_content_pages": target,
+        "requested_topics": _string_list(payload.get("requested_topics")),
+        "excluded_topics": _string_list(payload.get("excluded_topics")),
+        "requested_metric_keys": requested,
+        "chart_preferences": {
+            "preferred_types": preferred,
+            "avoided_types": avoided,
+        },
+        "required_conclusions": _string_list(
+            payload.get("required_conclusions")
+        ),
+        "delivery": {
+            "recipients": _string_list(delivery.get("recipients")),
+            "email_subject": (
+                str(delivery.get("email_subject")).strip()
+                if delivery.get("email_subject")
+                else None
+            ),
+        },
+        "interpretation_warnings": list(dict.fromkeys(warnings)),
+        "prompt_applied": source == "parsed" and bool(payload or sections),
+        "source": source,
+    }
+    return IntentSpecContract.model_validate(normalized).model_dump(mode="json")
 
 
 def _sanitize_sections(
@@ -463,11 +649,45 @@ def group_by_chapter(sections: Sequence[SectionPlan]) -> list[SectionPlan]:
     return [section for chapter in order for section in buckets[chapter]]
 
 
-def build_deterministic_sections(store: MetricStore) -> SectionPlanResult:
-    """Build a metadata-only section plan when the intent LLM is unavailable."""
-    sections: list[SectionPlan] = []
+def build_deterministic_sections(
+    store: MetricStore,
+    intent_spec: dict[str, Any] | None = None,
+    *,
+    fallback_reason: str | None = None,
+) -> SectionPlanResult:
+    """Build a safe plan even when the prompt is unusable or the LLM fails."""
+    draft_intent = _sanitize_intent_spec(
+        intent_spec,
+        store,
+        [],
+        source="fallback",
+        extra_warnings=([fallback_reason] if fallback_reason else []),
+    )
+    requested = [
+        key
+        for key in draft_intent["requested_metric_keys"]
+        if key in store.computable_metric_keys()
+    ]
+    metric_keys = requested or store.computable_metric_keys()
+    excluded = [item.casefold() for item in draft_intent["excluded_topics"]]
+    if excluded:
+        filtered = [
+            key
+            for key in metric_keys
+            if not any(
+                topic in store.get(key).name.casefold() for topic in excluded
+            )
+        ]
+        if filtered:
+            metric_keys = filtered
+        else:
+            draft_intent["interpretation_warnings"].append(
+                "排除條件會移除所有可用指標，為確保仍可產出簡報，已忽略該條件"
+            )
 
-    for metric_key in store.computable_metric_keys()[:MAX_SECTIONS]:
+    page_limit = draft_intent.get("target_content_pages") or MAX_SECTIONS
+    sections: list[SectionPlan] = []
+    for metric_key in metric_keys[:page_limit]:
         metric = store.get(metric_key)
         if not metric.series_names:
             continue
@@ -492,7 +712,17 @@ def build_deterministic_sections(store: MetricStore) -> SectionPlanResult:
     if not sections:
         raise ValueError("MetricStore 沒有可建立簡報頁面的可計算指標")
 
-    return SectionPlanResult(status=STATUS_READY, sections=sections)
+    draft_intent = _sanitize_intent_spec(
+        draft_intent,
+        store,
+        sections,
+        source="fallback",
+    )
+    return SectionPlanResult(
+        status=STATUS_READY,
+        sections=sections,
+        intent_spec=draft_intent,
+    )
 
 
 def plan_sections(
@@ -503,56 +733,120 @@ def plan_sections(
     llm_call: Callable[..., Any] | None = None,
     deadline_monotonic: float | None = None,
 ) -> SectionPlanResult:
-    """
-    規劃簡報章節。
-
-    Args:
-        user_prompt: 使用者的自然語言需求。
-        store: MetricStore，只用於提供 catalog 與驗證 metric_key。
-        existing_sections: 使用者已指定的章節清單。有值時 LLM 應回 READY。
-        llm_call: 覆寫 LLM 呼叫，測試時注入假回應。
-            簽名同 :func:`llm_client.complete_json`。
-
-    Returns:
-        :class:`SectionPlanResult`。``needs_confirmation`` 為 True 時，
-        Orchestrator 應中斷流程並把 ``question_to_user`` 回傳給使用者。
-    """
+    """Parse requirements and plan pages without letting bad wording block output."""
     call = llm_call or llm_client.complete_json
 
-    payload = call(
-        build_prompt(user_prompt, store, existing_sections),
-        SECTION_PLAN_SCHEMA,
-        system_prompt=SYSTEM_PROMPT.format(
-            max_sections=MAX_SECTIONS,
-            default_chapters="、".join(DEFAULT_CHAPTERS),
-            forecast_chapter=FORECAST_CHAPTER,
-            closing_chapter=DEFAULT_CHAPTERS[-1],
-        ),
-        stage="intent",
-        deadline_monotonic=deadline_monotonic,
+    prompt = build_prompt(user_prompt, store, existing_sections)
+    system_prompt = SYSTEM_PROMPT.format(
+        max_sections=MAX_SECTIONS,
+        default_chapters="、".join(DEFAULT_CHAPTERS),
+        forecast_chapter=FORECAST_CHAPTER,
+        closing_chapter=DEFAULT_CHAPTERS[-1],
     )
-
-    sections, dropped = _sanitize_sections(payload.get("sections", []), store)
-    status = payload.get("status", STATUS_NEEDS_CONFIRMATION)
-
-    # 防呆：LLM 說 READY 但沒給出任何章節時，仍視為需要確認，
-    # 避免下游拿到空章節清單卻以為一切正常。
-    if status == STATUS_READY and not sections:
-        return SectionPlanResult(
-            status=STATUS_NEEDS_CONFIRMATION,
-            sections=[],
-            question_to_user=(
-                "無法從您的描述判斷簡報章節，請說明想呈現的主題或章節，"
-                f"例如：核心概況、趨勢變化、分群排行或決策建議。可用指標共 "
-                f"{len(store.computable_metric_keys())} 項。"
+    try:
+        payload = call(
+            prompt,
+            SECTION_PLAN_SCHEMA,
+            system_prompt=system_prompt,
+            stage="intent",
+            deadline_monotonic=deadline_monotonic,
+        )
+        if not isinstance(payload, dict):
+            raise TypeError("intent LLM 回應不是 JSON object")
+    except Exception as error:  # noqa: BLE001 - prompt must never block delivery
+        return build_deterministic_sections(
+            store,
+            fallback_reason=(
+                "提示詞無法由模型解析，已使用可計算指標建立簡報："
+                f"{type(error).__name__}"
             ),
-            dropped_metric_keys=dropped,
         )
 
+    sections, dropped = _sanitize_sections(payload.get("sections", []), store)
+    intent_spec = _sanitize_intent_spec(
+        payload.get("intent_spec"),
+        store,
+        sections,
+        source="parsed",
+    )
+    requested_keys = set(intent_spec["requested_metric_keys"])
+    if requested_keys:
+        scoped_sections: list[SectionPlan] = []
+        for section in sections:
+            kept = [
+                key
+                for key in section.suggested_metric_keys
+                if key in requested_keys
+            ]
+            if not kept:
+                continue
+            section.suggested_metric_keys = kept
+            section.suggested_series_by_metric = {
+                key: section.suggested_series_by_metric[key]
+                for key in kept
+            }
+            section.comparison_reason_by_metric = {
+                key: section.comparison_reason_by_metric.get(key, "")
+                for key in kept
+            }
+            scoped_sections.append(section)
+        if len(scoped_sections) != len(sections):
+            intent_spec["interpretation_warnings"].append(
+                "已移除未包含在 requested_metric_keys 的內容頁"
+            )
+        sections = scoped_sections
+
+    excluded_topics = [
+        topic.casefold() for topic in intent_spec["excluded_topics"]
+    ]
+    if excluded_topics:
+        filtered_sections = [
+            section
+            for section in sections
+            if not any(
+                topic
+                in " ".join(
+                    [section.title, section.chapter or "", section.intent]
+                ).casefold()
+                for topic in excluded_topics
+            )
+        ]
+        if len(filtered_sections) != len(sections):
+            intent_spec["interpretation_warnings"].append(
+                "已依 excluded_topics 移除不需要的內容頁"
+            )
+        sections = filtered_sections
+
+    target_pages = intent_spec.get("target_content_pages")
+    if target_pages is not None and len(sections) > target_pages:
+        sections = sections[:target_pages]
+        intent_spec["interpretation_warnings"].append(
+            f"內容頁已依需求限制為 {target_pages} 頁"
+        )
+
+    status = payload.get("status", STATUS_READY)
+    if status != STATUS_READY or not sections:
+        reason = (
+            str(payload.get("question_to_user") or "").strip()
+            or "提示詞未形成可用章節"
+        )
+        intent_spec["interpretation_warnings"].append(
+            reason + "；已改用確定性章節規劃，簡報仍會產出"
+        )
+        return build_deterministic_sections(
+            store,
+            intent_spec,
+            fallback_reason=reason,
+        )
+
+    intent_spec = IntentSpecContract.model_validate(intent_spec).model_dump(
+        mode="json"
+    )
     return SectionPlanResult(
-        status=status,
+        status=STATUS_READY,
         sections=sections,
-        question_to_user=payload.get("question_to_user"),
+        intent_spec=intent_spec,
+        question_to_user=None,
         dropped_metric_keys=dropped,
     )
 
@@ -584,8 +878,11 @@ def plan_sections_from_contract(
 
 def build_deterministic_sections_from_contract(
     metric_store_payload: dict[str, Any],
+    intent_spec_payload: dict[str, Any] | None = None,
+    *,
+    fallback_reason: str | None = None,
 ) -> dict[str, Any]:
-    """JSON-only deterministic fallback for section planning."""
+    """JSON-only fallback that preserves any valid parsed requirements."""
     from ..contracts import stages as stage_contracts
 
     validated_store = stage_contracts.metric_store_payload(metric_store_payload)
@@ -593,5 +890,9 @@ def build_deterministic_sections_from_contract(
     store_body.pop("contract_version", None)
     store = MetricStore.from_dict(store_body)
     return stage_contracts.section_stage_payload(
-        build_deterministic_sections(store).to_dict()
+        build_deterministic_sections(
+            store,
+            intent_spec_payload,
+            fallback_reason=fallback_reason,
+        ).to_dict()
     )

@@ -94,6 +94,7 @@ def build_prompt(
     section: SectionPlan,
     store: MetricStore,
     previous_errors: list[str] | None = None,
+    intent_spec: dict[str, Any] | None = None,
 ) -> str:
     """
     組裝 prompt。重試時附上上一輪的驗證錯誤，引導模型自我修正。
@@ -131,6 +132,28 @@ def build_prompt(
         "只能使用上述 metric_key 與其列出的 series_names；不可擴大範圍。",
     ]
 
+    if intent_spec:
+        preferences = intent_spec.get("chart_preferences") or {}
+        parts.extend(
+            [
+                "",
+                "## 已驗證的呈現需求",
+                f"簡報目的：{intent_spec.get('objective') or '依資料提供管理洞察'}",
+                "偏好圖表："
+                + json.dumps(
+                    preferences.get("preferred_types") or [],
+                    ensure_ascii=False,
+                ),
+                "避免圖表："
+                + json.dumps(
+                    preferences.get("avoided_types") or [],
+                    ensure_ascii=False,
+                ),
+                "偏好只在符合 axis_kind、series 數量與原生物件規則時採用；"
+                "不相容時請選擇合法圖表，不得拒絕產出。",
+            ]
+        )
+
     if previous_errors:
         parts.extend(
             [
@@ -150,6 +173,7 @@ def plan_chart_for_section(
     llm_call: Callable[..., Any] | None = None,
     max_attempts: int = MAX_PLAN_ATTEMPTS,
     deadline_monotonic: float | None = None,
+    intent_spec: dict[str, Any] | None = None,
 ) -> tuple[ResolvedChart | None, list[str], int]:
     """
     為單一章節產出一張已查表完成的圖表。
@@ -165,7 +189,7 @@ def plan_chart_for_section(
 
     for attempt in range(1, max_attempts + 1):
         tool_call = call(
-            build_prompt(section, store, errors),
+            build_prompt(section, store, errors, intent_spec),
             VISUAL_SKILL_TOOL_SCHEMAS,
             system_prompt=SYSTEM_PROMPT,
             stage="chart",
@@ -207,9 +231,43 @@ def plan_chart_for_section(
     return None, errors, max_attempts
 
 
+def _deterministic_chart_type(
+    axis_kind: str,
+    intent_spec: dict[str, Any] | None,
+) -> str:
+    preferences = (intent_spec or {}).get("chart_preferences") or {}
+    preferred = list(preferences.get("preferred_types") or [])
+    avoided = set(preferences.get("avoided_types") or [])
+    compatible = (
+        {"line", "column", "bar", "table"}
+        if axis_kind == "temporal"
+        else {"column", "bar", "pie", "table"}
+    )
+    defaults = ["line", "column", "bar"] if axis_kind == "temporal" else [
+        "bar",
+        "column",
+        "table",
+    ]
+    for candidate in [*preferred, *defaults]:
+        if candidate in compatible and candidate not in avoided:
+            return candidate
+
+    remaining = sorted(compatible - avoided)
+    if remaining:
+        return remaining[0]
+
+    if intent_spec is not None:
+        warnings = intent_spec.setdefault("interpretation_warnings", [])
+        warning = "所有相容圖表類型都被排除，為確保產出已忽略 avoided_types"
+        if warning not in warnings:
+            warnings.append(warning)
+    return "line" if axis_kind == "temporal" else "bar"
+
+
 def build_deterministic_chart(
     section: SectionPlan,
     store: MetricStore,
+    intent_spec: dict[str, Any] | None = None,
 ) -> ResolvedChart:
     """Select a conservative native chart using validated section metadata."""
     errors_by_metric: list[str] = []
@@ -218,7 +276,10 @@ def build_deterministic_chart(
         metric = store.get(metric_key)
         scoped_series = section.suggested_series_by_metric.get(metric_key) or []
         series_names = list(scoped_series[:1] or metric.series_names[-1:])
-        chart_type = "line" if metric.axis_kind == "temporal" else "bar"
+        chart_type = _deterministic_chart_type(
+            metric.axis_kind,
+            intent_spec,
+        )
         plan = ChartPlan(
             slide_title=section.title,
             chart_type=chart_type,
@@ -255,6 +316,7 @@ def plan_charts(
     max_attempts: int = MAX_PLAN_ATTEMPTS,
     deadline_monotonic: float | None = None,
     recover_provider_errors: bool = False,
+    intent_spec: dict[str, Any] | None = None,
 ) -> ChartAgentResult:
     """
     為每個章節各產出一張圖表。
@@ -272,6 +334,7 @@ def plan_charts(
                 llm_call=llm_call,
                 max_attempts=max_attempts,
                 deadline_monotonic=deadline_monotonic,
+                intent_spec=intent_spec,
             )
         except Exception as error:  # noqa: BLE001 - policy decides recovery
             if not recover_provider_errors:
@@ -307,6 +370,7 @@ def plan_charts_from_contract(
         section_stage_payload
     )
     sections = SectionPlanResult.from_dict(sections_json).sections
+    intent_spec = dict(sections_json.get("intent_spec") or {})
     store_json = stage_contracts.metric_store_payload(metric_store_payload)
     store_body = dict(store_json)
     store_body.pop("contract_version", None)
@@ -318,6 +382,7 @@ def plan_charts_from_contract(
         max_attempts=max_attempts,
         deadline_monotonic=deadline_monotonic,
         recover_provider_errors=recover_provider_errors,
+        intent_spec=intent_spec,
     )
     return stage_contracts.chart_stage_payload(
         {
@@ -331,6 +396,8 @@ def plan_charts_from_contract(
 def build_deterministic_chart_from_contract(
     section_payload: dict[str, Any],
     metric_store_payload: dict[str, Any],
+    *,
+    intent_spec_payload: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """JSON-only deterministic chart fallback returning a value-free plan."""
     from ..contracts import stages as stage_contracts
@@ -343,7 +410,11 @@ def build_deterministic_chart_from_contract(
     store_body = dict(store_json)
     store_body.pop("contract_version", None)
     store = MetricStore.from_dict(store_body)
-    plan = build_deterministic_chart(section, store).plan
+    plan = build_deterministic_chart(
+        section,
+        store,
+        intent_spec_payload,
+    ).plan
     return stage_contracts.ChartPlanContract.model_validate(
         plan.to_dict()
     ).model_dump(mode="json")

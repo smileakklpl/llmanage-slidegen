@@ -3,6 +3,7 @@
 from .stages import (
     ChartStageContract,
     DeckSpecContract,
+    IntentSpecContract,
     MetricStoreContract,
     PageNarrativeContract,
     ReviewContract,
@@ -18,6 +19,7 @@ from .stages import (
 __all__ = [
     "ChartStageContract",
     "DeckSpecContract",
+    "IntentSpecContract",
     "MetricStoreContract",
     "PageNarrativeContract",
     "ReviewContract",
