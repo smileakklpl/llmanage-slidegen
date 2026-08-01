@@ -118,6 +118,22 @@ class S3ObjectStorage:
             ContentType="application/json",
         )
 
+    def put_json_ref(self, key: str, payload: dict[str, Any]) -> StoredObjectRef:
+        """Persist JSON and return refreshed object metadata for durable references."""
+        body = json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
+        digest = hashlib.sha256(body).hexdigest()
+        self._client.put_object(
+            Bucket=self.bucket,
+            Key=key,
+            Body=body,
+            ContentType="application/json",
+        )
+        return self._head_ref(
+            key=key,
+            filename=Path(key).name,
+            sha256=digest,
+        )
+
     def get_json(self, key: str) -> dict[str, Any] | None:
         try:
             response = self._client.get_object(Bucket=self.bucket, Key=key)

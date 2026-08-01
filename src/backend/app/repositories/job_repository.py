@@ -39,6 +39,7 @@ class JobModel(BaseModel):
     filenames: list[str]
     input_objects: list[StoredObjectRef] = Field(default_factory=list)
     ingestion_object: StoredObjectRef | None = None
+    review_required_count: int = Field(default=0, ge=0)
     generation_options: GenerationOptions = Field(
         default_factory=GenerationOptions
     )

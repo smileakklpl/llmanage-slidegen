@@ -1,8 +1,7 @@
-"""Backend-owned bridge from one or more Excel uploads to ingestion JSON.
+"""Backend-owned bridge from supported uploads to normalized ingestion JSON.
 
-This module is the only place that adapts uploaded workbook layouts for deck
-generation. Downstream core/ppt_generation code receives the normalized JSON
-contract and never imports backend implementation modules.
+Raw files stay inside backend ingestion. Downstream core/ppt_generation receives
+only the normalized JSON contract.
 """
 
 from __future__ import annotations
@@ -16,6 +15,7 @@ from app.ingestion.pipeline import run_ingestion_pipeline
 from core.contracts.generation import NormalizedIngestionContract
 
 EXCEL_SUFFIXES = (".xlsx",)
+SUPPORTED_SUFFIXES = (".xlsx", ".csv", ".tsv", ".txt", ".pdf", ".png", ".jpg", ".jpeg")
 _STATUS_SEVERITY = {
     "completed": 0,
     "completed_with_warnings": 1,
@@ -25,8 +25,12 @@ _STATUS_SEVERITY = {
 }
 
 
-class NoExcelInputError(FileNotFoundError):
-    """Raised when a generation input has no readable Excel workbook."""
+class NoUsableInputError(FileNotFoundError):
+    """Raised when generation input contains no supported/usable dataset."""
+
+
+# Backward-compatible alias for existing callers/tests.
+NoExcelInputError = NoUsableInputError
 
 
 def _slugify(text: str) -> str:
@@ -148,6 +152,35 @@ def merge_ingestion_results(
     )
 
 
+
+def ingest_inputs(
+    inputs: Iterable[tuple[Path, str]], *, sheet_name: str | None = None
+) -> dict[str, Any]:
+    """Ingest already-materialized backend files while preserving original names."""
+    items = list(inputs)
+    if not items:
+        raise NoUsableInputError("沒有任何輸入檔案")
+
+    if sheet_name is not None and len(items) > 1:
+        raise ValueError("sheet_name 只能用在單一檔案輸入")
+
+    results: list[tuple[Path, dict[str, Any]]] = []
+    for local_path, original_filename in items:
+        suffix = Path(original_filename).suffix.lower()
+        if suffix not in SUPPORTED_SUFFIXES:
+            raise NoUsableInputError(
+                f"不支援的輸入格式：{original_filename}；支援 {', '.join(SUPPORTED_SUFFIXES)}"
+            )
+        result = run_ingestion_pipeline(
+            local_path,
+            original_filename=original_filename,
+            sheet_name=sheet_name,
+        )
+        # merge_ingestion_results uses the Path only for human-readable naming.
+        results.append((Path(original_filename), result.model_dump(mode="json")))
+
+    return merge_ingestion_results(results)
+
 def ingest_excel(
     source: str | Path, *, sheet_name: str | None = None
 ) -> dict[str, Any]:
@@ -168,6 +201,12 @@ def ingest_excel(
         )
         results.append((path, result.model_dump(mode="json")))
     return merge_ingestion_results(results)
+
+
+def load_payload(path: str | Path) -> dict[str, Any]:
+    """Load and validate a persisted normalized ingestion envelope."""
+    payload = json.loads(Path(path).read_text(encoding="utf-8"))
+    return NormalizedIngestionContract.model_validate(payload).model_dump(mode="json")
 
 
 def save_payload(payload: dict[str, Any], path: str | Path) -> Path:

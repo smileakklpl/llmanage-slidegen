@@ -7,12 +7,18 @@ from datetime import datetime, timezone
 from pathlib import PurePosixPath
 from uuid import uuid4
 
+from app.ingestion.normalizer import apply_human_review
+from app.ingestion.schemas import HumanReviewRequest, UnifiedDatasetSpec
 from app.repositories.job_repository import JobModel, JobRepository
 from app.schemas.jobs import JobStage, JobStatus
 from app.storage.s3_storage import S3ObjectStorage
-from app.worker.generation_job_runner import run_generation_job
+from app.worker.generation_job_runner import (
+    resume_generation_job,
+    run_generation_job,
+)
 from core.contracts.generation import (
     GenerationOptions,
+    NormalizedIngestionContract,
     StoredObjectRef,
 )
 
@@ -162,3 +168,125 @@ class JobService:
             )
 
         return job.model_copy(update={"artifacts": artifacts})
+    async def get_review_payload(self, job_id: str) -> tuple[JobModel, dict]:
+        """Return the persisted normalized ingestion payload for review UI."""
+        job = await self._repository.get(job_id)
+        if job is None:
+            raise LookupError("找不到指定的工作")
+        if job.ingestion_object is None:
+            raise ValueError("此工作尚未建立 ingestion.json")
+
+        payload = await asyncio.to_thread(
+            self._storage.get_json,
+            job.ingestion_object.key,
+        )
+        if payload is None:
+            raise ValueError("找不到已保存的 ingestion.json")
+
+        validated = NormalizedIngestionContract.model_validate(payload)
+        return job, validated.model_dump(mode="json")
+
+    async def review_dataset(
+        self,
+        *,
+        job_id: str,
+        dataset_id: str,
+        review: HumanReviewRequest,
+    ) -> tuple[JobModel, UnifiedDatasetSpec]:
+        """Persist one dataset review back into the job's ingestion JSON."""
+        job, payload = await self.get_review_payload(job_id)
+        datasets = list(payload.get("datasets") or [])
+
+        target_index = next(
+            (
+                index
+                for index, item in enumerate(datasets)
+                if item.get("dataset_id") == dataset_id
+            ),
+            None,
+        )
+        if target_index is None:
+            raise LookupError(f"找不到資料集：{dataset_id}")
+
+        raw_dataset = dict(datasets[target_index])
+        reviewed = apply_human_review(
+            UnifiedDatasetSpec.model_validate(raw_dataset),
+            review,
+        )
+        # Preserve bridge-only extras such as backend_dataset_id.
+        datasets[target_index] = raw_dataset | reviewed.model_dump(mode="json")
+        payload["datasets"] = datasets
+
+        validated = NormalizedIngestionContract.model_validate(payload)
+        normalized_payload = validated.model_dump(mode="json")
+        updated_ref = await asyncio.to_thread(
+            self._storage.put_json_ref,
+            job.ingestion_object.key,
+            normalized_payload,
+        )
+
+        blocked = [
+            dataset.dataset_id
+            for dataset in validated.datasets
+            if dataset.requires_human_review
+            or dataset.review_status in {"pending", "rejected"}
+        ]
+        message = (
+            f"尚有 {len(blocked)} 個資料集需要人工確認"
+            if blocked
+            else "所有資料集已通過人工確認，可繼續生成"
+        )
+        updated_job = job.model_copy(
+            update={
+                "status": JobStatus.waiting_review,
+                "stage": JobStage.reviewing_data,
+                "progress": 50 if not blocked else 45,
+                "message": message,
+                "review_required_count": len(blocked),
+                "ingestion_object": updated_ref,
+                "updated_at": datetime.now(timezone.utc),
+                "error": None,
+            }
+        )
+        updated_job = await self._repository.update(updated_job)
+        return updated_job, reviewed
+
+    async def resume_job(self, job_id: str) -> JobModel:
+        """Resume generation only when every dataset has cleared review."""
+        job, payload = await self.get_review_payload(job_id)
+        if job.status != JobStatus.waiting_review:
+            raise ValueError("只有 waiting_review 的工作可以續跑")
+
+        ingestion = NormalizedIngestionContract.model_validate(payload)
+        blocked = [
+            dataset.dataset_id
+            for dataset in ingestion.datasets
+            if dataset.requires_human_review
+            or dataset.review_status in {"pending", "rejected"}
+        ]
+        if blocked:
+            raise ValueError(
+                "仍有未通過人工確認的資料集：" + "、".join(blocked)
+            )
+
+        queued = job.model_copy(
+            update={
+                "status": JobStatus.queued,
+                "stage": JobStage.queued,
+                "progress": 50,
+                "message": "人工確認完成，工作已重新排入生成佇列",
+                "review_required_count": 0,
+                "updated_at": datetime.now(timezone.utc),
+                "error": None,
+            }
+        )
+        queued = await self._repository.update(queued)
+        asyncio.create_task(
+            resume_generation_job(
+                queued.job_id,
+                self._repository,
+                self._storage,
+            )
+        )
+        return queued
+
