@@ -9,4 +9,4 @@
 # 要另外裝，且 CPU/GPU 版與 CUDA 版本綁定，請依實機環境挑：
 #   https://www.paddlepaddle.org.cn/install/quick
 # 確認團隊實際使用的版本後把它釘進這份清單。
-paddleocr==3.7.0
+paddleocr[doc-parser]==3.7.0
