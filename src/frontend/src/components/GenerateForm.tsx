@@ -163,15 +163,15 @@ export function GenerateForm({ onSubmit, isSubmitting }: GenerateFormProps) {
           <button
             type="button"
             onClick={() => templateInputRef.current?.click()}
-            className="py-2 px-4 rounded-lg bg-gray-100 text-gray-700 text-sm font-medium hover:bg-gray-200 transition-colors"
+            className="py-2 px-4 rounded-lg bg-red-50 text-red-700 text-sm font-medium hover:bg-red-100 transition-colors"
           >
             {t("templateSelectButton")}
           </button>
-          {template && (
-            <span className="text-sm text-gray-700 truncate">
-              {template.name}
-            </span>
-          )}
+          <span className="text-sm text-gray-500">
+            {template
+              ? t("fileSelected").replace("{count}", "1")
+              : ""}
+          </span>
         </div>
         <input
           type="file"
@@ -184,13 +184,21 @@ export function GenerateForm({ onSubmit, isSubmitting }: GenerateFormProps) {
           <p className="text-sm text-red-600">{templateError}</p>
         )}
         {template && (
-          <button
-            type="button"
-            onClick={() => setTemplate(null)}
-            className="text-sm text-red-600 hover:text-red-700"
-          >
-            {t("templateRemove")}
-          </button>
+          <ul className="mt-2 space-y-1.5">
+            <li className="flex items-center justify-between py-2 px-3 bg-gray-50 border border-gray-200 rounded-lg text-sm">
+              <span className="text-gray-800 truncate mr-2">
+                {template.name}
+              </span>
+              <button
+                type="button"
+                onClick={() => setTemplate(null)}
+                className="shrink-0 w-6 h-6 flex items-center justify-center rounded-full text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors"
+                aria-label={`${t("remove")} ${template.name}`}
+              >
+                ✕
+              </button>
+            </li>
+          </ul>
         )}
       </div>
 
