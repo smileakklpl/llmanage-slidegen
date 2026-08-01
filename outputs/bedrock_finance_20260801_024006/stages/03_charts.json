@@ -1,0 +1,1407 @@
+{
+  "contract_version": "1.0",
+  "plans": [
+    {
+      "slide_title": "整體彙總（各期） 趨勢外推",
+      "chart_type": "line",
+      "chart_title": "整體彙總（各期） 趨勢外推重點觀察",
+      "metric_key": "aggregate_by_period.forecast",
+      "series_names": [
+        "當月轉銷呆帳金額"
+      ],
+      "page_number": 4
+    },
+    {
+      "slide_title": "整體彙總（各期） 期間成長率",
+      "chart_type": "line",
+      "chart_title": "整體彙總（各期） 期間成長率重點觀察",
+      "metric_key": "aggregate_by_period.period_growth",
+      "series_names": [
+        "當月轉銷呆帳金額"
+      ],
+      "page_number": 5
+    },
+    {
+      "slide_title": "整體彙總（各期）",
+      "chart_type": "line",
+      "chart_title": "整體彙總（各期）重點觀察",
+      "metric_key": "aggregate_by_period.value",
+      "series_names": [
+        "當月轉銷呆帳金額"
+      ],
+      "page_number": 6
+    },
+    {
+      "slide_title": "循環信用餘額 排名",
+      "chart_type": "bar",
+      "chart_title": "循環信用餘額 排名重點觀察",
+      "metric_key": "循環信用餘額.rank",
+      "series_names": [
+        "11412"
+      ],
+      "page_number": 8
+    },
+    {
+      "slide_title": "循環信用餘額 占比",
+      "chart_type": "bar",
+      "chart_title": "循環信用餘額 占比重點觀察",
+      "metric_key": "循環信用餘額.share",
+      "series_names": [
+        "11412"
+      ],
+      "page_number": 9
+    },
+    {
+      "slide_title": "循環信用餘額 占比 Top 10",
+      "chart_type": "bar",
+      "chart_title": "循環信用餘額 占比 Top 10重點觀察",
+      "metric_key": "循環信用餘額.share.top10",
+      "series_names": [
+        "11412"
+      ],
+      "page_number": 10
+    },
+    {
+      "slide_title": "循環信用餘額",
+      "chart_type": "bar",
+      "chart_title": "循環信用餘額重點觀察",
+      "metric_key": "循環信用餘額.value",
+      "series_names": [
+        "11412"
+      ],
+      "page_number": 11
+    },
+    {
+      "slide_title": "循環信用餘額 Top 10",
+      "chart_type": "bar",
+      "chart_title": "循環信用餘額 Top 10重點觀察",
+      "metric_key": "循環信用餘額.value.top10",
+      "series_names": [
+        "11412"
+      ],
+      "page_number": 12
+    },
+    {
+      "slide_title": "有效卡數 排名",
+      "chart_type": "bar",
+      "chart_title": "有效卡數 排名重點觀察",
+      "metric_key": "有效卡數.rank",
+      "series_names": [
+        "11412"
+      ],
+      "page_number": 13
+    },
+    {
+      "slide_title": "有效卡數 占比",
+      "chart_type": "bar",
+      "chart_title": "有效卡數 占比重點觀察",
+      "metric_key": "有效卡數.share",
+      "series_names": [
+        "11412"
+      ],
+      "page_number": 14
+    },
+    {
+      "slide_title": "有效卡數 占比 Top 10",
+      "chart_type": "bar",
+      "chart_title": "有效卡數 占比 Top 10重點觀察",
+      "metric_key": "有效卡數.share.top10",
+      "series_names": [
+        "11412"
+      ],
+      "page_number": 15
+    },
+    {
+      "slide_title": "有效卡數",
+      "chart_type": "bar",
+      "chart_title": "有效卡數重點觀察",
+      "metric_key": "有效卡數.value",
+      "series_names": [
+        "11412"
+      ],
+      "page_number": 16
+    },
+    {
+      "slide_title": "有效卡數 Top 10",
+      "chart_type": "bar",
+      "chart_title": "有效卡數 Top 10重點觀察",
+      "metric_key": "有效卡數.value.top10",
+      "series_names": [
+        "11412"
+      ],
+      "page_number": 17
+    },
+    {
+      "slide_title": "未到期分期付款餘額 排名",
+      "chart_type": "bar",
+      "chart_title": "未到期分期付款餘額 排名重點觀察",
+      "metric_key": "未到期分期付款餘額.rank",
+      "series_names": [
+        "11412"
+      ],
+      "page_number": 18
+    },
+    {
+      "slide_title": "未到期分期付款餘額 占比",
+      "chart_type": "bar",
+      "chart_title": "未到期分期付款餘額 占比重點觀察",
+      "metric_key": "未到期分期付款餘額.share",
+      "series_names": [
+        "11412"
+      ],
+      "page_number": 19
+    },
+    {
+      "slide_title": "未到期分期付款餘額 占比 Top 10",
+      "chart_type": "bar",
+      "chart_title": "未到期分期付款餘額 占比 Top 10重點觀察",
+      "metric_key": "未到期分期付款餘額.share.top10",
+      "series_names": [
+        "11412"
+      ],
+      "page_number": 20
+    }
+  ],
+  "failures": {},
+  "attempts": {
+    "整體彙總（各期） 趨勢外推": 0,
+    "整體彙總（各期） 期間成長率": 0,
+    "整體彙總（各期）": 0,
+    "循環信用餘額 排名": 0,
+    "循環信用餘額 占比": 0,
+    "循環信用餘額 占比 Top 10": 0,
+    "循環信用餘額": 0,
+    "循環信用餘額 Top 10": 0,
+    "有效卡數 排名": 0,
+    "有效卡數 占比": 0,
+    "有效卡數 占比 Top 10": 0,
+    "有效卡數": 0,
+    "有效卡數 Top 10": 0,
+    "未到期分期付款餘額 排名": 0,
+    "未到期分期付款餘額 占比": 0,
+    "未到期分期付款餘額 占比 Top 10": 0
+  },
+  "delivery_warnings": {
+    "整體彙總（各期） 趨勢外推": "圖表 LLM 未產生合法規劃，已使用確定性 axis-kind fallback：ProfileNotFound: The config profile (你的-aws-profile) could not be found",
+    "整體彙總（各期） 期間成長率": "圖表 LLM 未產生合法規劃，已使用確定性 axis-kind fallback：ProfileNotFound: The config profile (你的-aws-profile) could not be found",
+    "整體彙總（各期）": "圖表 LLM 未產生合法規劃，已使用確定性 axis-kind fallback：ProfileNotFound: The config profile (你的-aws-profile) could not be found",
+    "循環信用餘額 排名": "圖表 LLM 未產生合法規劃，已使用確定性 axis-kind fallback：ProfileNotFound: The config profile (你的-aws-profile) could not be found",
+    "循環信用餘額 占比": "圖表 LLM 未產生合法規劃，已使用確定性 axis-kind fallback：ProfileNotFound: The config profile (你的-aws-profile) could not be found",
+    "循環信用餘額 占比 Top 10": "圖表 LLM 未產生合法規劃，已使用確定性 axis-kind fallback：ProfileNotFound: The config profile (你的-aws-profile) could not be found",
+    "循環信用餘額": "圖表 LLM 未產生合法規劃，已使用確定性 axis-kind fallback：ProfileNotFound: The config profile (你的-aws-profile) could not be found",
+    "循環信用餘額 Top 10": "圖表 LLM 未產生合法規劃，已使用確定性 axis-kind fallback：ProfileNotFound: The config profile (你的-aws-profile) could not be found",
+    "有效卡數 排名": "圖表 LLM 未產生合法規劃，已使用確定性 axis-kind fallback：ProfileNotFound: The config profile (你的-aws-profile) could not be found",
+    "有效卡數 占比": "圖表 LLM 未產生合法規劃，已使用確定性 axis-kind fallback：ProfileNotFound: The config profile (你的-aws-profile) could not be found",
+    "有效卡數 占比 Top 10": "圖表 LLM 未產生合法規劃，已使用確定性 axis-kind fallback：ProfileNotFound: The config profile (你的-aws-profile) could not be found",
+    "有效卡數": "圖表 LLM 未產生合法規劃，已使用確定性 axis-kind fallback：ProfileNotFound: The config profile (你的-aws-profile) could not be found",
+    "有效卡數 Top 10": "圖表 LLM 未產生合法規劃，已使用確定性 axis-kind fallback：ProfileNotFound: The config profile (你的-aws-profile) could not be found",
+    "未到期分期付款餘額 排名": "圖表 LLM 未產生合法規劃，已使用確定性 axis-kind fallback：ProfileNotFound: The config profile (你的-aws-profile) could not be found",
+    "未到期分期付款餘額 占比": "圖表 LLM 未產生合法規劃，已使用確定性 axis-kind fallback：ProfileNotFound: The config profile (你的-aws-profile) could not be found",
+    "未到期分期付款餘額 占比 Top 10": "圖表 LLM 未產生合法規劃，已使用確定性 axis-kind fallback：ProfileNotFound: The config profile (你的-aws-profile) could not be found"
+  },
+  "resolved_charts": [
+    {
+      "plan": {
+        "slide_title": "整體彙總（各期） 趨勢外推",
+        "chart_type": "line",
+        "chart_title": "整體彙總（各期） 趨勢外推重點觀察",
+        "metric_key": "aggregate_by_period.forecast",
+        "series_names": [
+          "當月轉銷呆帳金額"
+        ],
+        "page_number": 4
+      },
+      "skill_name": "line",
+      "series_names": [
+        "當月轉銷呆帳金額"
+      ],
+      "series_units": {
+        "當月轉銷呆帳金額": null
+      },
+      "metric_key": "aggregate_by_period.forecast",
+      "spec": {
+        "kind": "category",
+        "title": "整體彙總（各期） 趨勢外推重點觀察",
+        "chart_type": "LINE_MARKERS (65)",
+        "categories": [
+          "11401",
+          "11402",
+          "11403",
+          "11404",
+          "11405",
+          "11406",
+          "11407",
+          "11408",
+          "11409",
+          "11410",
+          "11411",
+          "11412",
+          "預測+1",
+          "預測+2",
+          "預測+3"
+        ],
+        "series": {
+          "當月轉銷呆帳金額": [
+            654750.0,
+            611054.0,
+            641539.0,
+            615972.0,
+            600844.0,
+            617225.0,
+            589078.0,
+            572496.0,
+            632705.0,
+            623815.0,
+            601876.0,
+            645165.0,
+            609445.5758,
+            608251.0618,
+            607056.5478
+          ]
+        }
+      }
+    },
+    {
+      "plan": {
+        "slide_title": "整體彙總（各期） 期間成長率",
+        "chart_type": "line",
+        "chart_title": "整體彙總（各期） 期間成長率重點觀察",
+        "metric_key": "aggregate_by_period.period_growth",
+        "series_names": [
+          "當月轉銷呆帳金額"
+        ],
+        "page_number": 5
+      },
+      "skill_name": "line",
+      "series_names": [
+        "當月轉銷呆帳金額"
+      ],
+      "series_units": {
+        "當月轉銷呆帳金額": "%"
+      },
+      "metric_key": "aggregate_by_period.period_growth",
+      "spec": {
+        "kind": "category",
+        "title": "整體彙總（各期） 期間成長率重點觀察",
+        "chart_type": "LINE_MARKERS (65)",
+        "categories": [
+          "11401",
+          "11402",
+          "11403",
+          "11404",
+          "11405",
+          "11406",
+          "11407",
+          "11408",
+          "11409",
+          "11410",
+          "11411",
+          "11412"
+        ],
+        "series": {
+          "當月轉銷呆帳金額": [
+            null,
+            -6.6737,
+            4.9889,
+            -3.9853,
+            -2.456,
+            2.7263,
+            -4.5602,
+            -2.8149,
+            10.5169,
+            -1.4051,
+            -3.5169,
+            7.1923
+          ]
+        }
+      }
+    },
+    {
+      "plan": {
+        "slide_title": "整體彙總（各期）",
+        "chart_type": "line",
+        "chart_title": "整體彙總（各期）重點觀察",
+        "metric_key": "aggregate_by_period.value",
+        "series_names": [
+          "當月轉銷呆帳金額"
+        ],
+        "page_number": 6
+      },
+      "skill_name": "line",
+      "series_names": [
+        "當月轉銷呆帳金額"
+      ],
+      "series_units": {
+        "當月轉銷呆帳金額": null
+      },
+      "metric_key": "aggregate_by_period.value",
+      "spec": {
+        "kind": "category",
+        "title": "整體彙總（各期）重點觀察",
+        "chart_type": "LINE_MARKERS (65)",
+        "categories": [
+          "11401",
+          "11402",
+          "11403",
+          "11404",
+          "11405",
+          "11406",
+          "11407",
+          "11408",
+          "11409",
+          "11410",
+          "11411",
+          "11412"
+        ],
+        "series": {
+          "當月轉銷呆帳金額": [
+            654750.0,
+            611054.0,
+            641539.0,
+            615972.0,
+            600844.0,
+            617225.0,
+            589078.0,
+            572496.0,
+            632705.0,
+            623815.0,
+            601876.0,
+            645165.0
+          ]
+        }
+      }
+    },
+    {
+      "plan": {
+        "slide_title": "循環信用餘額 排名",
+        "chart_type": "bar",
+        "chart_title": "循環信用餘額 排名重點觀察",
+        "metric_key": "循環信用餘額.rank",
+        "series_names": [
+          "11412"
+        ],
+        "page_number": 8
+      },
+      "skill_name": "bar",
+      "series_names": [
+        "11412"
+      ],
+      "series_units": {
+        "11412": "名"
+      },
+      "metric_key": "循環信用餘額.rank",
+      "spec": {
+        "kind": "category",
+        "title": "循環信用餘額 排名重點觀察",
+        "chart_type": "BAR_CLUSTERED (57)",
+        "categories": [
+          "臺灣銀行",
+          "臺灣土地銀行",
+          "合作金庫商業銀行",
+          "第一商業銀行",
+          "華南商業銀行",
+          "彰化商業銀行",
+          "上海商業儲蓄銀行",
+          "台北富邦商業銀行",
+          "國泰世華商業銀行",
+          "高雄銀行",
+          "兆豐國際商業銀行",
+          "花旗(台灣)商業銀行",
+          "臺灣中小企業銀行",
+          "渣打國際商業銀行",
+          "台中商業銀行",
+          "滙豐(台灣)商業銀行",
+          "華泰商業銀行",
+          "臺灣新光商業銀行",
+          "陽信商業銀行",
+          "三信商業銀行",
+          "聯邦商業銀行",
+          "遠東國際商業銀行",
+          "元大商業銀行",
+          "永豐商業銀行",
+          "玉山商業銀行",
+          "凱基商業銀行",
+          "星展(台灣)商業銀行",
+          "台新國際商業銀行",
+          "安泰商業銀行",
+          "中國信託商業銀行",
+          "台灣樂天信用卡股份有限公司",
+          "台灣美國運通國際(股)公司",
+          "總計"
+        ],
+        "series": {
+          "11412": [
+            27.0,
+            22.0,
+            17.0,
+            13.0,
+            15.0,
+            21.0,
+            20.0,
+            4.0,
+            1.0,
+            30.0,
+            12.0,
+            32.0,
+            23.0,
+            19.0,
+            25.0,
+            10.0,
+            31.0,
+            11.0,
+            26.0,
+            29.0,
+            7.0,
+            9.0,
+            16.0,
+            8.0,
+            2.0,
+            14.0,
+            6.0,
+            5.0,
+            28.0,
+            3.0,
+            18.0,
+            24.0,
+            null
+          ]
+        }
+      }
+    },
+    {
+      "plan": {
+        "slide_title": "循環信用餘額 占比",
+        "chart_type": "bar",
+        "chart_title": "循環信用餘額 占比重點觀察",
+        "metric_key": "循環信用餘額.share",
+        "series_names": [
+          "11412"
+        ],
+        "page_number": 9
+      },
+      "skill_name": "bar",
+      "series_names": [
+        "11412"
+      ],
+      "series_units": {
+        "11412": "%"
+      },
+      "metric_key": "循環信用餘額.share",
+      "spec": {
+        "kind": "category",
+        "title": "循環信用餘額 占比重點觀察",
+        "chart_type": "BAR_CLUSTERED (57)",
+        "categories": [
+          "臺灣銀行",
+          "臺灣土地銀行",
+          "合作金庫商業銀行",
+          "第一商業銀行",
+          "華南商業銀行",
+          "彰化商業銀行",
+          "上海商業儲蓄銀行",
+          "台北富邦商業銀行",
+          "國泰世華商業銀行",
+          "高雄銀行",
+          "兆豐國際商業銀行",
+          "花旗(台灣)商業銀行",
+          "臺灣中小企業銀行",
+          "渣打國際商業銀行",
+          "台中商業銀行",
+          "滙豐(台灣)商業銀行",
+          "華泰商業銀行",
+          "臺灣新光商業銀行",
+          "陽信商業銀行",
+          "三信商業銀行",
+          "聯邦商業銀行",
+          "遠東國際商業銀行",
+          "元大商業銀行",
+          "永豐商業銀行",
+          "玉山商業銀行",
+          "凱基商業銀行",
+          "星展(台灣)商業銀行",
+          "台新國際商業銀行",
+          "安泰商業銀行",
+          "中國信託商業銀行",
+          "台灣樂天信用卡股份有限公司",
+          "台灣美國運通國際(股)公司",
+          "總計"
+        ],
+        "series": {
+          "11412": [
+            0.1366,
+            0.2632,
+            0.8347,
+            1.0937,
+            1.0121,
+            0.3232,
+            0.5613,
+            9.6706,
+            18.696,
+            0.0118,
+            1.317,
+            0.0,
+            0.2236,
+            0.6932,
+            0.1865,
+            1.443,
+            0.0061,
+            1.3987,
+            0.1481,
+            0.0314,
+            5.5591,
+            2.6864,
+            0.993,
+            3.2872,
+            15.1429,
+            1.0819,
+            7.5175,
+            9.5411,
+            0.1211,
+            15.1041,
+            0.697,
+            0.2181,
+            null
+          ]
+        }
+      }
+    },
+    {
+      "plan": {
+        "slide_title": "循環信用餘額 占比 Top 10",
+        "chart_type": "bar",
+        "chart_title": "循環信用餘額 占比 Top 10重點觀察",
+        "metric_key": "循環信用餘額.share.top10",
+        "series_names": [
+          "11412"
+        ],
+        "page_number": 10
+      },
+      "skill_name": "bar",
+      "series_names": [
+        "11412"
+      ],
+      "series_units": {
+        "11412": "%"
+      },
+      "metric_key": "循環信用餘額.share.top10",
+      "spec": {
+        "kind": "category",
+        "title": "循環信用餘額 占比 Top 10重點觀察",
+        "chart_type": "BAR_CLUSTERED (57)",
+        "categories": [
+          "國泰世華商業銀行",
+          "玉山商業銀行",
+          "中國信託商業銀行",
+          "台北富邦商業銀行",
+          "台新國際商業銀行",
+          "星展(台灣)商業銀行",
+          "聯邦商業銀行",
+          "永豐商業銀行",
+          "遠東國際商業銀行",
+          "滙豐(台灣)商業銀行"
+        ],
+        "series": {
+          "11412": [
+            18.696,
+            15.1429,
+            15.1041,
+            9.6706,
+            9.5411,
+            7.5175,
+            5.5591,
+            3.2872,
+            2.6864,
+            1.443
+          ]
+        }
+      }
+    },
+    {
+      "plan": {
+        "slide_title": "循環信用餘額",
+        "chart_type": "bar",
+        "chart_title": "循環信用餘額重點觀察",
+        "metric_key": "循環信用餘額.value",
+        "series_names": [
+          "11412"
+        ],
+        "page_number": 11
+      },
+      "skill_name": "bar",
+      "series_names": [
+        "11412"
+      ],
+      "series_units": {
+        "11412": null
+      },
+      "metric_key": "循環信用餘額.value",
+      "spec": {
+        "kind": "category",
+        "title": "循環信用餘額重點觀察",
+        "chart_type": "BAR_CLUSTERED (57)",
+        "categories": [
+          "臺灣銀行",
+          "臺灣土地銀行",
+          "合作金庫商業銀行",
+          "第一商業銀行",
+          "華南商業銀行",
+          "彰化商業銀行",
+          "上海商業儲蓄銀行",
+          "台北富邦商業銀行",
+          "國泰世華商業銀行",
+          "高雄銀行",
+          "兆豐國際商業銀行",
+          "花旗(台灣)商業銀行",
+          "臺灣中小企業銀行",
+          "渣打國際商業銀行",
+          "台中商業銀行",
+          "滙豐(台灣)商業銀行",
+          "華泰商業銀行",
+          "臺灣新光商業銀行",
+          "陽信商業銀行",
+          "三信商業銀行",
+          "聯邦商業銀行",
+          "遠東國際商業銀行",
+          "元大商業銀行",
+          "永豐商業銀行",
+          "玉山商業銀行",
+          "凱基商業銀行",
+          "星展(台灣)商業銀行",
+          "台新國際商業銀行",
+          "安泰商業銀行",
+          "中國信託商業銀行",
+          "台灣樂天信用卡股份有限公司",
+          "台灣美國運通國際(股)公司",
+          "總計"
+        ],
+        "series": {
+          "11412": [
+            161958.0,
+            312106.0,
+            989900.0,
+            1297020.0,
+            1200229.0,
+            383291.0,
+            665672.0,
+            11468186.0,
+            22171305.0,
+            13935.0,
+            1561810.0,
+            0.0,
+            265140.0,
+            822055.0,
+            221131.0,
+            1711263.0,
+            7182.0,
+            1658692.0,
+            175595.0,
+            37236.0,
+            6592497.0,
+            3185712.0,
+            1177581.0,
+            3898214.0,
+            17957715.0,
+            1283066.0,
+            8914937.0,
+            11314621.0,
+            143616.0,
+            17911768.0,
+            826545.0,
+            258604.0,
+            118588582.0
+          ]
+        }
+      }
+    },
+    {
+      "plan": {
+        "slide_title": "循環信用餘額 Top 10",
+        "chart_type": "bar",
+        "chart_title": "循環信用餘額 Top 10重點觀察",
+        "metric_key": "循環信用餘額.value.top10",
+        "series_names": [
+          "11412"
+        ],
+        "page_number": 12
+      },
+      "skill_name": "bar",
+      "series_names": [
+        "11412"
+      ],
+      "series_units": {
+        "11412": null
+      },
+      "metric_key": "循環信用餘額.value.top10",
+      "spec": {
+        "kind": "category",
+        "title": "循環信用餘額 Top 10重點觀察",
+        "chart_type": "BAR_CLUSTERED (57)",
+        "categories": [
+          "國泰世華商業銀行",
+          "玉山商業銀行",
+          "中國信託商業銀行",
+          "台北富邦商業銀行",
+          "台新國際商業銀行",
+          "星展(台灣)商業銀行",
+          "聯邦商業銀行",
+          "永豐商業銀行",
+          "遠東國際商業銀行",
+          "滙豐(台灣)商業銀行"
+        ],
+        "series": {
+          "11412": [
+            22171305.0,
+            17957715.0,
+            17911768.0,
+            11468186.0,
+            11314621.0,
+            8914937.0,
+            6592497.0,
+            3898214.0,
+            3185712.0,
+            1711263.0
+          ]
+        }
+      }
+    },
+    {
+      "plan": {
+        "slide_title": "有效卡數 排名",
+        "chart_type": "bar",
+        "chart_title": "有效卡數 排名重點觀察",
+        "metric_key": "有效卡數.rank",
+        "series_names": [
+          "11412"
+        ],
+        "page_number": 13
+      },
+      "skill_name": "bar",
+      "series_names": [
+        "11412"
+      ],
+      "series_units": {
+        "11412": "名"
+      },
+      "metric_key": "有效卡數.rank",
+      "spec": {
+        "kind": "category",
+        "title": "有效卡數 排名重點觀察",
+        "chart_type": "BAR_CLUSTERED (57)",
+        "categories": [
+          "臺灣銀行",
+          "臺灣土地銀行",
+          "合作金庫商業銀行",
+          "第一商業銀行",
+          "華南商業銀行",
+          "彰化商業銀行",
+          "上海商業儲蓄銀行",
+          "台北富邦商業銀行",
+          "國泰世華商業銀行",
+          "高雄銀行",
+          "兆豐國際商業銀行",
+          "花旗(台灣)商業銀行",
+          "臺灣中小企業銀行",
+          "渣打國際商業銀行",
+          "台中商業銀行",
+          "滙豐(台灣)商業銀行",
+          "華泰商業銀行",
+          "臺灣新光商業銀行",
+          "陽信商業銀行",
+          "三信商業銀行",
+          "聯邦商業銀行",
+          "遠東國際商業銀行",
+          "元大商業銀行",
+          "永豐商業銀行",
+          "玉山商業銀行",
+          "凱基商業銀行",
+          "星展(台灣)商業銀行",
+          "台新國際商業銀行",
+          "安泰商業銀行",
+          "中國信託商業銀行",
+          "台灣樂天信用卡股份有限公司",
+          "台灣美國運通國際(股)公司",
+          "總計"
+        ],
+        "series": {
+          "11412": [
+            21.0,
+            23.0,
+            16.0,
+            9.0,
+            11.0,
+            17.0,
+            19.0,
+            2.0,
+            4.0,
+            32.0,
+            12.0,
+            29.0,
+            25.0,
+            22.0,
+            26.0,
+            13.0,
+            31.0,
+            14.0,
+            28.0,
+            30.0,
+            7.0,
+            10.0,
+            15.0,
+            8.0,
+            3.0,
+            18.0,
+            6.0,
+            5.0,
+            27.0,
+            1.0,
+            20.0,
+            24.0,
+            null
+          ]
+        }
+      }
+    },
+    {
+      "plan": {
+        "slide_title": "有效卡數 占比",
+        "chart_type": "bar",
+        "chart_title": "有效卡數 占比重點觀察",
+        "metric_key": "有效卡數.share",
+        "series_names": [
+          "11412"
+        ],
+        "page_number": 14
+      },
+      "skill_name": "bar",
+      "series_names": [
+        "11412"
+      ],
+      "series_units": {
+        "11412": "%"
+      },
+      "metric_key": "有效卡數.share",
+      "spec": {
+        "kind": "category",
+        "title": "有效卡數 占比重點觀察",
+        "chart_type": "BAR_CLUSTERED (57)",
+        "categories": [
+          "臺灣銀行",
+          "臺灣土地銀行",
+          "合作金庫商業銀行",
+          "第一商業銀行",
+          "華南商業銀行",
+          "彰化商業銀行",
+          "上海商業儲蓄銀行",
+          "台北富邦商業銀行",
+          "國泰世華商業銀行",
+          "高雄銀行",
+          "兆豐國際商業銀行",
+          "花旗(台灣)商業銀行",
+          "臺灣中小企業銀行",
+          "渣打國際商業銀行",
+          "台中商業銀行",
+          "滙豐(台灣)商業銀行",
+          "華泰商業銀行",
+          "臺灣新光商業銀行",
+          "陽信商業銀行",
+          "三信商業銀行",
+          "聯邦商業銀行",
+          "遠東國際商業銀行",
+          "元大商業銀行",
+          "永豐商業銀行",
+          "玉山商業銀行",
+          "凱基商業銀行",
+          "星展(台灣)商業銀行",
+          "台新國際商業銀行",
+          "安泰商業銀行",
+          "中國信託商業銀行",
+          "台灣樂天信用卡股份有限公司",
+          "台灣美國運通國際(股)公司",
+          "總計"
+        ],
+        "series": {
+          "11412": [
+            0.3654,
+            0.3458,
+            0.9763,
+            2.3496,
+            1.9445,
+            0.7465,
+            0.4823,
+            14.4235,
+            12.845,
+            0.0109,
+            1.5124,
+            0.0417,
+            0.2474,
+            0.3497,
+            0.1942,
+            1.4559,
+            0.0122,
+            1.3501,
+            0.1453,
+            0.0333,
+            4.5601,
+            2.2442,
+            1.3281,
+            3.8115,
+            13.1688,
+            0.5025,
+            5.1474,
+            11.9665,
+            0.1545,
+            16.4861,
+            0.4748,
+            0.3236,
+            null
+          ]
+        }
+      }
+    },
+    {
+      "plan": {
+        "slide_title": "有效卡數 占比 Top 10",
+        "chart_type": "bar",
+        "chart_title": "有效卡數 占比 Top 10重點觀察",
+        "metric_key": "有效卡數.share.top10",
+        "series_names": [
+          "11412"
+        ],
+        "page_number": 15
+      },
+      "skill_name": "bar",
+      "series_names": [
+        "11412"
+      ],
+      "series_units": {
+        "11412": "%"
+      },
+      "metric_key": "有效卡數.share.top10",
+      "spec": {
+        "kind": "category",
+        "title": "有效卡數 占比 Top 10重點觀察",
+        "chart_type": "BAR_CLUSTERED (57)",
+        "categories": [
+          "中國信託商業銀行",
+          "台北富邦商業銀行",
+          "玉山商業銀行",
+          "國泰世華商業銀行",
+          "台新國際商業銀行",
+          "星展(台灣)商業銀行",
+          "聯邦商業銀行",
+          "永豐商業銀行",
+          "第一商業銀行",
+          "遠東國際商業銀行"
+        ],
+        "series": {
+          "11412": [
+            16.4861,
+            14.4235,
+            13.1688,
+            12.845,
+            11.9665,
+            5.1474,
+            4.5601,
+            3.8115,
+            2.3496,
+            2.2442
+          ]
+        }
+      }
+    },
+    {
+      "plan": {
+        "slide_title": "有效卡數",
+        "chart_type": "bar",
+        "chart_title": "有效卡數重點觀察",
+        "metric_key": "有效卡數.value",
+        "series_names": [
+          "11412"
+        ],
+        "page_number": 16
+      },
+      "skill_name": "bar",
+      "series_names": [
+        "11412"
+      ],
+      "series_units": {
+        "11412": null
+      },
+      "metric_key": "有效卡數.value",
+      "spec": {
+        "kind": "category",
+        "title": "有效卡數重點觀察",
+        "chart_type": "BAR_CLUSTERED (57)",
+        "categories": [
+          "臺灣銀行",
+          "臺灣土地銀行",
+          "合作金庫商業銀行",
+          "第一商業銀行",
+          "華南商業銀行",
+          "彰化商業銀行",
+          "上海商業儲蓄銀行",
+          "台北富邦商業銀行",
+          "國泰世華商業銀行",
+          "高雄銀行",
+          "兆豐國際商業銀行",
+          "花旗(台灣)商業銀行",
+          "臺灣中小企業銀行",
+          "渣打國際商業銀行",
+          "台中商業銀行",
+          "滙豐(台灣)商業銀行",
+          "華泰商業銀行",
+          "臺灣新光商業銀行",
+          "陽信商業銀行",
+          "三信商業銀行",
+          "聯邦商業銀行",
+          "遠東國際商業銀行",
+          "元大商業銀行",
+          "永豐商業銀行",
+          "玉山商業銀行",
+          "凱基商業銀行",
+          "星展(台灣)商業銀行",
+          "台新國際商業銀行",
+          "安泰商業銀行",
+          "中國信託商業銀行",
+          "台灣樂天信用卡股份有限公司",
+          "台灣美國運通國際(股)公司",
+          "總計"
+        ],
+        "series": {
+          "11412": [
+            148176.0,
+            140249.0,
+            395942.0,
+            952857.0,
+            788586.0,
+            302736.0,
+            195583.0,
+            5849375.0,
+            5209203.0,
+            4435.0,
+            613344.0,
+            16921.0,
+            100320.0,
+            141822.0,
+            78769.0,
+            590428.0,
+            4935.0,
+            547522.0,
+            58937.0,
+            13524.0,
+            1849324.0,
+            910122.0,
+            538589.0,
+            1545721.0,
+            5340523.0,
+            203805.0,
+            2087494.0,
+            4852939.0,
+            62645.0,
+            6685860.0,
+            192537.0,
+            131230.0,
+            40554453.0
+          ]
+        }
+      }
+    },
+    {
+      "plan": {
+        "slide_title": "有效卡數 Top 10",
+        "chart_type": "bar",
+        "chart_title": "有效卡數 Top 10重點觀察",
+        "metric_key": "有效卡數.value.top10",
+        "series_names": [
+          "11412"
+        ],
+        "page_number": 17
+      },
+      "skill_name": "bar",
+      "series_names": [
+        "11412"
+      ],
+      "series_units": {
+        "11412": null
+      },
+      "metric_key": "有效卡數.value.top10",
+      "spec": {
+        "kind": "category",
+        "title": "有效卡數 Top 10重點觀察",
+        "chart_type": "BAR_CLUSTERED (57)",
+        "categories": [
+          "中國信託商業銀行",
+          "台北富邦商業銀行",
+          "玉山商業銀行",
+          "國泰世華商業銀行",
+          "台新國際商業銀行",
+          "星展(台灣)商業銀行",
+          "聯邦商業銀行",
+          "永豐商業銀行",
+          "第一商業銀行",
+          "遠東國際商業銀行"
+        ],
+        "series": {
+          "11412": [
+            6685860.0,
+            5849375.0,
+            5340523.0,
+            5209203.0,
+            4852939.0,
+            2087494.0,
+            1849324.0,
+            1545721.0,
+            952857.0,
+            910122.0
+          ]
+        }
+      }
+    },
+    {
+      "plan": {
+        "slide_title": "未到期分期付款餘額 排名",
+        "chart_type": "bar",
+        "chart_title": "未到期分期付款餘額 排名重點觀察",
+        "metric_key": "未到期分期付款餘額.rank",
+        "series_names": [
+          "11412"
+        ],
+        "page_number": 18
+      },
+      "skill_name": "bar",
+      "series_names": [
+        "11412"
+      ],
+      "series_units": {
+        "11412": "名"
+      },
+      "metric_key": "未到期分期付款餘額.rank",
+      "spec": {
+        "kind": "category",
+        "title": "未到期分期付款餘額 排名重點觀察",
+        "chart_type": "BAR_CLUSTERED (57)",
+        "categories": [
+          "臺灣銀行",
+          "臺灣土地銀行",
+          "合作金庫商業銀行",
+          "第一商業銀行",
+          "華南商業銀行",
+          "彰化商業銀行",
+          "上海商業儲蓄銀行",
+          "台北富邦商業銀行",
+          "國泰世華商業銀行",
+          "高雄銀行",
+          "兆豐國際商業銀行",
+          "花旗(台灣)商業銀行",
+          "臺灣中小企業銀行",
+          "渣打國際商業銀行",
+          "台中商業銀行",
+          "滙豐(台灣)商業銀行",
+          "華泰商業銀行",
+          "臺灣新光商業銀行",
+          "陽信商業銀行",
+          "三信商業銀行",
+          "聯邦商業銀行",
+          "遠東國際商業銀行",
+          "元大商業銀行",
+          "永豐商業銀行",
+          "玉山商業銀行",
+          "凱基商業銀行",
+          "星展(台灣)商業銀行",
+          "台新國際商業銀行",
+          "安泰商業銀行",
+          "中國信託商業銀行",
+          "台灣樂天信用卡股份有限公司",
+          "台灣美國運通國際(股)公司",
+          "總計"
+        ],
+        "series": {
+          "11412": [
+            27.0,
+            24.0,
+            21.0,
+            15.0,
+            8.0,
+            22.0,
+            18.0,
+            1.0,
+            2.0,
+            30.0,
+            12.0,
+            31.0,
+            23.0,
+            19.0,
+            26.0,
+            14.0,
+            29.0,
+            13.0,
+            25.0,
+            28.0,
+            7.0,
+            11.0,
+            10.0,
+            9.0,
+            3.0,
+            17.0,
+            6.0,
+            5.0,
+            16.0,
+            4.0,
+            20.0,
+            31.0,
+            null
+          ]
+        }
+      }
+    },
+    {
+      "plan": {
+        "slide_title": "未到期分期付款餘額 占比",
+        "chart_type": "bar",
+        "chart_title": "未到期分期付款餘額 占比重點觀察",
+        "metric_key": "未到期分期付款餘額.share",
+        "series_names": [
+          "11412"
+        ],
+        "page_number": 19
+      },
+      "skill_name": "bar",
+      "series_names": [
+        "11412"
+      ],
+      "series_units": {
+        "11412": "%"
+      },
+      "metric_key": "未到期分期付款餘額.share",
+      "spec": {
+        "kind": "category",
+        "title": "未到期分期付款餘額 占比重點觀察",
+        "chart_type": "BAR_CLUSTERED (57)",
+        "categories": [
+          "臺灣銀行",
+          "臺灣土地銀行",
+          "合作金庫商業銀行",
+          "第一商業銀行",
+          "華南商業銀行",
+          "彰化商業銀行",
+          "上海商業儲蓄銀行",
+          "台北富邦商業銀行",
+          "國泰世華商業銀行",
+          "高雄銀行",
+          "兆豐國際商業銀行",
+          "花旗(台灣)商業銀行",
+          "臺灣中小企業銀行",
+          "渣打國際商業銀行",
+          "台中商業銀行",
+          "滙豐(台灣)商業銀行",
+          "華泰商業銀行",
+          "臺灣新光商業銀行",
+          "陽信商業銀行",
+          "三信商業銀行",
+          "聯邦商業銀行",
+          "遠東國際商業銀行",
+          "元大商業銀行",
+          "永豐商業銀行",
+          "玉山商業銀行",
+          "凱基商業銀行",
+          "星展(台灣)商業銀行",
+          "台新國際商業銀行",
+          "安泰商業銀行",
+          "中國信託商業銀行",
+          "台灣樂天信用卡股份有限公司",
+          "台灣美國運通國際(股)公司",
+          "總計"
+        ],
+        "series": {
+          "11412": [
+            0.023,
+            0.0813,
+            0.313,
+            0.9324,
+            3.397,
+            0.2366,
+            0.6413,
+            17.5126,
+            14.2404,
+            0.0002,
+            1.6159,
+            0.0,
+            0.1072,
+            0.3489,
+            0.0234,
+            1.0359,
+            0.0013,
+            1.2237,
+            0.0639,
+            0.0098,
+            4.5939,
+            2.1258,
+            2.2076,
+            2.8509,
+            12.8714,
+            0.725,
+            9.1143,
+            10.8644,
+            0.9204,
+            11.594,
+            0.3246,
+            0.0,
+            null
+          ]
+        }
+      }
+    },
+    {
+      "plan": {
+        "slide_title": "未到期分期付款餘額 占比 Top 10",
+        "chart_type": "bar",
+        "chart_title": "未到期分期付款餘額 占比 Top 10重點觀察",
+        "metric_key": "未到期分期付款餘額.share.top10",
+        "series_names": [
+          "11412"
+        ],
+        "page_number": 20
+      },
+      "skill_name": "bar",
+      "series_names": [
+        "11412"
+      ],
+      "series_units": {
+        "11412": "%"
+      },
+      "metric_key": "未到期分期付款餘額.share.top10",
+      "spec": {
+        "kind": "category",
+        "title": "未到期分期付款餘額 占比 Top 10重點觀察",
+        "chart_type": "BAR_CLUSTERED (57)",
+        "categories": [
+          "台北富邦商業銀行",
+          "國泰世華商業銀行",
+          "玉山商業銀行",
+          "中國信託商業銀行",
+          "台新國際商業銀行",
+          "星展(台灣)商業銀行",
+          "聯邦商業銀行",
+          "華南商業銀行",
+          "永豐商業銀行",
+          "元大商業銀行"
+        ],
+        "series": {
+          "11412": [
+            17.5126,
+            14.2404,
+            12.8714,
+            11.594,
+            10.8644,
+            9.1143,
+            4.5939,
+            3.397,
+            2.8509,
+            2.2076
+          ]
+        }
+      }
+    }
+  ],
+  "missing_pages": []
+}

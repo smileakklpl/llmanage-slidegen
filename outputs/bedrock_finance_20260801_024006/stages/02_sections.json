@@ -1,0 +1,249 @@
+{
+  "contract_version": "1.0",
+  "status": "READY",
+  "sections": [
+    {
+      "title": "整體彙總（各期） 趨勢外推",
+      "chapter": "趨勢與變化",
+      "intent": "以可追溯資料說明整體彙總（各期） 趨勢外推的變化、管理意涵與下一步",
+      "metric_scopes": [
+        {
+          "metric_key": "aggregate_by_period.forecast",
+          "series_names": [
+            "當月轉銷呆帳金額"
+          ],
+          "comparison_reason": ""
+        }
+      ],
+      "page_number": null
+    },
+    {
+      "title": "整體彙總（各期） 期間成長率",
+      "chapter": "趨勢與變化",
+      "intent": "以可追溯資料說明整體彙總（各期） 期間成長率的變化、管理意涵與下一步",
+      "metric_scopes": [
+        {
+          "metric_key": "aggregate_by_period.period_growth",
+          "series_names": [
+            "當月轉銷呆帳金額"
+          ],
+          "comparison_reason": ""
+        }
+      ],
+      "page_number": null
+    },
+    {
+      "title": "整體彙總（各期）",
+      "chapter": "趨勢與變化",
+      "intent": "以可追溯資料說明整體彙總（各期）的變化、管理意涵與下一步",
+      "metric_scopes": [
+        {
+          "metric_key": "aggregate_by_period.value",
+          "series_names": [
+            "當月轉銷呆帳金額"
+          ],
+          "comparison_reason": ""
+        }
+      ],
+      "page_number": null
+    },
+    {
+      "title": "循環信用餘額 排名",
+      "chapter": "分群與比較",
+      "intent": "以可追溯資料說明循環信用餘額 排名的變化、管理意涵與下一步",
+      "metric_scopes": [
+        {
+          "metric_key": "循環信用餘額.rank",
+          "series_names": [
+            "11412"
+          ],
+          "comparison_reason": ""
+        }
+      ],
+      "page_number": null
+    },
+    {
+      "title": "循環信用餘額 占比",
+      "chapter": "分群與比較",
+      "intent": "以可追溯資料說明循環信用餘額 占比的變化、管理意涵與下一步",
+      "metric_scopes": [
+        {
+          "metric_key": "循環信用餘額.share",
+          "series_names": [
+            "11412"
+          ],
+          "comparison_reason": ""
+        }
+      ],
+      "page_number": null
+    },
+    {
+      "title": "循環信用餘額 占比 Top 10",
+      "chapter": "分群與比較",
+      "intent": "以可追溯資料說明循環信用餘額 占比 Top 10的變化、管理意涵與下一步",
+      "metric_scopes": [
+        {
+          "metric_key": "循環信用餘額.share.top10",
+          "series_names": [
+            "11412"
+          ],
+          "comparison_reason": ""
+        }
+      ],
+      "page_number": null
+    },
+    {
+      "title": "循環信用餘額",
+      "chapter": "分群與比較",
+      "intent": "以可追溯資料說明循環信用餘額的變化、管理意涵與下一步",
+      "metric_scopes": [
+        {
+          "metric_key": "循環信用餘額.value",
+          "series_names": [
+            "11412"
+          ],
+          "comparison_reason": ""
+        }
+      ],
+      "page_number": null
+    },
+    {
+      "title": "循環信用餘額 Top 10",
+      "chapter": "分群與比較",
+      "intent": "以可追溯資料說明循環信用餘額 Top 10的變化、管理意涵與下一步",
+      "metric_scopes": [
+        {
+          "metric_key": "循環信用餘額.value.top10",
+          "series_names": [
+            "11412"
+          ],
+          "comparison_reason": ""
+        }
+      ],
+      "page_number": null
+    },
+    {
+      "title": "有效卡數 排名",
+      "chapter": "分群與比較",
+      "intent": "以可追溯資料說明有效卡數 排名的變化、管理意涵與下一步",
+      "metric_scopes": [
+        {
+          "metric_key": "有效卡數.rank",
+          "series_names": [
+            "11412"
+          ],
+          "comparison_reason": ""
+        }
+      ],
+      "page_number": null
+    },
+    {
+      "title": "有效卡數 占比",
+      "chapter": "分群與比較",
+      "intent": "以可追溯資料說明有效卡數 占比的變化、管理意涵與下一步",
+      "metric_scopes": [
+        {
+          "metric_key": "有效卡數.share",
+          "series_names": [
+            "11412"
+          ],
+          "comparison_reason": ""
+        }
+      ],
+      "page_number": null
+    },
+    {
+      "title": "有效卡數 占比 Top 10",
+      "chapter": "分群與比較",
+      "intent": "以可追溯資料說明有效卡數 占比 Top 10的變化、管理意涵與下一步",
+      "metric_scopes": [
+        {
+          "metric_key": "有效卡數.share.top10",
+          "series_names": [
+            "11412"
+          ],
+          "comparison_reason": ""
+        }
+      ],
+      "page_number": null
+    },
+    {
+      "title": "有效卡數",
+      "chapter": "分群與比較",
+      "intent": "以可追溯資料說明有效卡數的變化、管理意涵與下一步",
+      "metric_scopes": [
+        {
+          "metric_key": "有效卡數.value",
+          "series_names": [
+            "11412"
+          ],
+          "comparison_reason": ""
+        }
+      ],
+      "page_number": null
+    },
+    {
+      "title": "有效卡數 Top 10",
+      "chapter": "分群與比較",
+      "intent": "以可追溯資料說明有效卡數 Top 10的變化、管理意涵與下一步",
+      "metric_scopes": [
+        {
+          "metric_key": "有效卡數.value.top10",
+          "series_names": [
+            "11412"
+          ],
+          "comparison_reason": ""
+        }
+      ],
+      "page_number": null
+    },
+    {
+      "title": "未到期分期付款餘額 排名",
+      "chapter": "分群與比較",
+      "intent": "以可追溯資料說明未到期分期付款餘額 排名的變化、管理意涵與下一步",
+      "metric_scopes": [
+        {
+          "metric_key": "未到期分期付款餘額.rank",
+          "series_names": [
+            "11412"
+          ],
+          "comparison_reason": ""
+        }
+      ],
+      "page_number": null
+    },
+    {
+      "title": "未到期分期付款餘額 占比",
+      "chapter": "分群與比較",
+      "intent": "以可追溯資料說明未到期分期付款餘額 占比的變化、管理意涵與下一步",
+      "metric_scopes": [
+        {
+          "metric_key": "未到期分期付款餘額.share",
+          "series_names": [
+            "11412"
+          ],
+          "comparison_reason": ""
+        }
+      ],
+      "page_number": null
+    },
+    {
+      "title": "未到期分期付款餘額 占比 Top 10",
+      "chapter": "分群與比較",
+      "intent": "以可追溯資料說明未到期分期付款餘額 占比 Top 10的變化、管理意涵與下一步",
+      "metric_scopes": [
+        {
+          "metric_key": "未到期分期付款餘額.share.top10",
+          "series_names": [
+            "11412"
+          ],
+          "comparison_reason": ""
+        }
+      ],
+      "page_number": null
+    }
+  ],
+  "question_to_user": null,
+  "dropped_metric_keys": {},
+  "delivery_warning": "章節 LLM 無法完成，已使用確定性規劃：The config profile (你的-aws-profile) could not be found"
+}

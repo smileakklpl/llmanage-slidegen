@@ -1,161 +1,243 @@
-"""多模型並排比較 — FR-A1 的驗收證據。
+"""以正式 generation orchestrator 執行多模型端到端 A/B。
 
-驗收條件是「現場切換至地端開源模型仍可跑通」。一次跑完整個模型 × stage 矩陣，
-輸出同一張表，才回答得了三個問題：
+每個模型都從真實 Excel 開始，完整跑過 ingestion、engine、agents、renderer、
+外部稽核 Excel 與 T1 驗證。輸出一張成功率/延遲/頁數/圖表數報表；所有暫存
+產物放在系統 temp 目錄，不會寫入 outputs/。
 
-  1. 哪些缺陷**跟著換模型消失** → 那是該模型的特性，不是你的 prompt 缺陷
-  2. 哪些**留下來** → 那是 prompt 或契約真的有問題，值得修
-  3. 哪些是**新出現的** → 你的 prompt 隱含依賴了原模型的某些行為
-
-實例：繁體中文違規率在 qwen2.5:14b 是 25%、在 gemma2:9b 是 0%——
-只用一個模型的話，你會以為那是自己 prompt 沒寫好，然後去加一個
-根本不需要的繁簡轉換層。
-
-用法:
-    python compare_models.py --models gemma2:9b,qwen2.5:7b,llama3.1:8b
-    python compare_models.py --models gemma2:9b --stages writer --repeat 5
+PowerShell 範例：
+    python -m tools.compare_models --provider ollama --models gemma2:9b,qwen2.5:7b
+    python -m tools.compare_models --provider bedrock --models <model-id> --repeat 3
 """
 
+from __future__ import annotations
+
 import argparse
+import io
+import os
 import statistics
+import sys
+import tempfile
 import time
-import traceback
-from typing import Dict, List, Optional
+from contextlib import contextmanager, redirect_stdout
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Iterator
 
-from evalh.harness import STAGES, RunRecord, run
+REPO_ROOT = Path(__file__).resolve().parent.parent
+SRC_ROOT = str(REPO_ROOT / "src")
+if SRC_ROOT not in sys.path:
+    sys.path.insert(0, SRC_ROOT)
 
+from core.contracts.generation import GenerationRequest  # noqa: E402
+from core.generation_orchestrator import generate_deck  # noqa: E402
 
-def _pad(s: str, width: int) -> str:
-    """以顯示寬度對齊：CJK 字元佔兩格。"""
-    w = sum(2 if ord(c) > 0x2E80 else 1 for c in s)
-    return s + " " * max(0, width - w)
-
-
-class Result:
-    def __init__(self, model: str, records: List[RunRecord]):
-        self.model = model
-        self.records = records
-        n = len(records) or 1
-        self.schema = sum(1 for r in records if r.ok) / n
-        self.first_try = sum(1 for r in records if r.attempts == 1 and r.ok) / n
-        self.fallback = sum(1 for r in records if r.fell_back) / n
-        self.p50 = statistics.median([r.latency_ms for r in records] or [0])
-        self.tok_in = sum(r.input_tokens for r in records)
-        self.tok_out = sum(r.output_tokens for r in records)
-        scored = [r for r in records if r.content_score is not None]
-        self.content: Optional[float] = (
-            sum(r.content_score for r in scored) / len(scored) if scored else None
-        )
-        self.check_fails: Dict[str, int] = {}
-        # 只有次數無法診斷。次數告訴你「有問題」，例句才告訴你「是什麼問題」。
-        self.check_examples: Dict[str, List[str]] = {}
-        for r in records:
-            for c in r.checks:
-                if c.applicable and not c.passed:
-                    self.check_fails[c.name] = self.check_fails.get(c.name, 0) + 1
-                    if c.detail:
-                        self.check_examples.setdefault(c.name, []).append(c.detail)
+MODEL_ENV_NAMES = (
+    "LLM_MODEL_DEFAULT",
+    "LLM_MODEL_INTENT",
+    "LLM_MODEL_WRITER",
+    "LLM_MODEL_WRITER_KEYPAGES",
+    "LLM_MODEL_CHART",
+    "LLM_MODEL_REVIEWER",
+)
 
 
-def compare(
-    models: List[str],
-    stage: str,
+def _prepare_ingestion(source: Path, target: Path) -> Path:
+    """Materialize backend ingestion JSON before invoking core."""
+    backend_root = str(REPO_ROOT / "src" / "backend")
+    if backend_root not in sys.path:
+        sys.path.insert(0, backend_root)
+
+    from app.ingestion.generation_bridge import ingest_excel, save_payload
+
+    return save_payload(ingest_excel(source), target)
+
+
+@dataclass
+class RunRecord:
+    model: str
+    attempt: int
+    ok: bool
+    latency_seconds: float
+    slide_count: int = 0
+    chart_count: int = 0
+    series_checked: int = 0
+    error: str = ""
+
+
+@contextmanager
+def _model_environment(provider: str, model: str) -> Iterator[None]:
+    updates = {"LLM_PROVIDER": provider}
+    updates.update({name: model for name in MODEL_ENV_NAMES})
+    previous = {name: os.environ.get(name) for name in updates}
+
+    try:
+        os.environ.update(updates)
+        yield
+    finally:
+        for name, value in previous.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
+
+
+def run_model(
+    *,
+    provider: str,
+    model: str,
+    ingestion_path: Path,
+    prompt: str,
+    sections: list[str],
     repeat: int,
-    num_ctx: Optional[int],
-    max_examples: int = 3,
-) -> str:
-    results: List[Result] = []
-    errors: Dict[str, str] = {}
+) -> list[RunRecord]:
+    records: list[RunRecord] = []
 
-    for m in models:
-        print(f"  跑 {m} / {stage} …", flush=True)
-        t0 = time.perf_counter()
-        try:
-            results.append(Result(m, run("ollama", m, repeat, stage, num_ctx)))
-            print(f"    完成，耗時 {time.perf_counter() - t0:.0f}s", flush=True)
-        except Exception as e:  # 模型沒 pull、服務沒開等等，不要讓整個矩陣停擺
-            errors[m] = f"{type(e).__name__}: {e}"
-            print(f"    失敗：{errors[m][:120]}", flush=True)
+    with _model_environment(provider, model):
+        for attempt in range(1, repeat + 1):
+            started = time.perf_counter()
+            captured = io.StringIO()
 
-    lines = [f"\n{'=' * 78}", f"stage = {stage}（repeat={repeat}）", "=" * 78]
-    if not results:
-        lines.append("所有模型都失敗了。")
-        for m, e in errors.items():
-            lines.append(f"  {m}: {e[:200]}")
-        return "\n".join(lines)
+            try:
+                with tempfile.TemporaryDirectory(
+                    prefix="slidegen-model-compare-"
+                ) as temp_dir, redirect_stdout(captured):
+                    result = generate_deck(
+                        GenerationRequest(
+                            job_id=f"compare-{attempt}",
+                            prompt=prompt,
+                            ingestion_path=str(ingestion_path),
+                            output_dir=str(Path(temp_dir) / "artifacts"),
+                            sections=sections,
+                            deck_title=f"模型驗收：{model}",
+                            options={
+                                "use_fake_llm": False,
+                                "skip_semantic_review": False,
+                            },
+                        ).model_dump(mode="json")
+                    )
 
-    head = (
-        _pad("模型", 18) + _pad("schema", 9) + _pad("一次過", 9)
-        + _pad("fallback", 10) + _pad("內容", 8) + _pad("p50ms", 9) + "tok in/out"
-    )
-    lines += ["", head, "-" * 78]
-    for r in results:
-        content = f"{r.content:.0%}" if r.content is not None else "—"
+                records.append(
+                    RunRecord(
+                        model=model,
+                        attempt=attempt,
+                        ok=True,
+                        latency_seconds=time.perf_counter() - started,
+                        slide_count=result.slide_count,
+                        chart_count=result.chart_count,
+                        series_checked=result.series_checked,
+                    )
+                )
+            except Exception as error:  # noqa: BLE001 - A/B 不因單一模型中止
+                log_lines = captured.getvalue().strip().splitlines()
+                log_tail = " | ".join(log_lines[-3:])
+                detail = f"{type(error).__name__}: {error}"
+                if log_tail:
+                    detail = f"{detail}；{log_tail}"
+                records.append(
+                    RunRecord(
+                        model=model,
+                        attempt=attempt,
+                        ok=False,
+                        latency_seconds=time.perf_counter() - started,
+                        error=detail[:500],
+                    )
+                )
+
+    return records
+
+
+def report(records: list[RunRecord], repeat: int) -> str:
+    lines = [
+        "",
+        f"{'模型':<34}{'成功率':>8}{'p50 秒':>10}{'slides':>9}{'charts':>9}{'T1':>8}",
+        "-" * 78,
+    ]
+
+    models = list(dict.fromkeys(record.model for record in records))
+    for model in models:
+        model_records = [record for record in records if record.model == model]
+        passed = [record for record in model_records if record.ok]
+        success_rate = len(passed) / repeat
+        p50 = statistics.median(record.latency_seconds for record in model_records)
+        slide_count = round(statistics.mean(r.slide_count for r in passed)) if passed else 0
+        chart_count = round(statistics.mean(r.chart_count for r in passed)) if passed else 0
+        t1 = round(statistics.mean(r.series_checked for r in passed)) if passed else 0
         lines.append(
-            _pad(r.model, 18)
-            + _pad(f"{r.schema:.0%}", 9)
-            + _pad(f"{r.first_try:.0%}", 9)
-            + _pad(f"{r.fallback:.0%}", 10)
-            + _pad(content, 8)
-            + _pad(f"{r.p50:.0f}", 9)
-            + f"{r.tok_in}/{r.tok_out}"
+            f"{model:<34}{success_rate:>7.0%}{p50:>10.1f}"
+            f"{slide_count:>9}{chart_count:>9}{t1:>8}"
         )
 
-    names = sorted({k for r in results for k in r.check_fails})
-    if names:
-        lines += ["", "檢查項失敗次數（越低越好；分母為實際判定數）", "-" * 78]
-        lines.append(_pad("模型", 18) + "".join(_pad(n, 16) for n in names))
-        for r in results:
-            lines.append(
-                _pad(r.model, 18)
-                + "".join(_pad(str(r.check_fails.get(n, 0)), 16) for n in names)
-            )
-        lines.append("")
-        lines.append("讀法：某欄只有一個模型有數字 → 該模型的特性；"
-                     "所有模型都有 → 你的 prompt 或契約的問題。")
-
-        # 三個模型都失敗的檢查項最值得診斷，優先印它的例句
-        shared = [n for n in names if all(r.check_fails.get(n) for r in results)]
-        for name in shared or names:
-            if name == "一次過":  # 重試次數不是內容缺陷，例句沒有診斷價值
-                continue
-            lines += ["", f"--- 「{name}」失敗例句 ---"]
-            for r in results:
-                for ex in r.check_examples.get(name, [])[:max_examples]:
-                    lines.append(f"  [{r.model}] {ex[:150]}")
+    failures = [record for record in records if not record.ok]
+    if failures:
+        lines.extend(["", "失敗明細："])
+        for record in failures:
+            lines.append(f"  [{record.model} #{record.attempt}] {record.error}")
     else:
-        lines += ["", "所有模型的檢查項全數通過。"]
+        lines.extend(["", "所有模型均通過正式 full-pipeline 與 T1 fail-closed 驗證。"])
 
-    for m, e in errors.items():
-        lines.append(f"\n[{m}] 未能執行：{e[:300]}")
     return "\n".join(lines)
 
 
-def main() -> None:
-    ap = argparse.ArgumentParser()
-    ap.add_argument(
+def main() -> int:
+    parser = argparse.ArgumentParser(description="正式 generation pipeline 多模型 A/B")
+    parser.add_argument("--provider", default="ollama")
+    parser.add_argument(
         "--models",
         default="gemma2:9b,qwen2.5:7b,llama3.1:8b",
-        help="逗號分隔的 ollama 模型名稱",
+        help="逗號分隔的模型名稱",
     )
-    ap.add_argument("--stages", default="intent,writer", help="逗號分隔，可用：" + ",".join(STAGES))
-    ap.add_argument("--repeat", type=int, default=3)
-    ap.add_argument("--num-ctx", type=int, default=None)
-    ap.add_argument(
-        "--examples",
-        type=int,
-        default=3,
-        help="每個模型每個檢查項最多印幾則失敗例句，設 0 只看次數",
+    parser.add_argument(
+        "--input",
+        type=Path,
+        default=REPO_ROOT / "fixtures" / "data" / "fsc_114_workbook.xlsx",
     )
-    args = ap.parse_args()
+    parser.add_argument(
+        "--prompt",
+        default="依上傳資料產出管理層簡報，呈現市場概況、趨勢與重點觀察。",
+    )
+    parser.add_argument(
+        "--sections",
+        default="市場概況,趨勢分析,重點觀察",
+        help="逗號分隔；固定章節可避免把章節確認行為混入模型比較",
+    )
+    parser.add_argument("--repeat", type=int, default=1)
+    args = parser.parse_args()
 
-    models = [m.strip() for m in args.models.split(",") if m.strip()]
-    stages = [s.strip() for s in args.stages.split(",") if s.strip()]
-    out: List[str] = []
-    for stage in stages:
-        out.append(compare(models, stage, args.repeat, args.num_ctx, args.examples))
-    print("\n".join(out))
+    input_path = args.input.resolve()
+    if not input_path.is_file():
+        parser.error(f"找不到輸入 Excel：{input_path}")
+    if args.repeat < 1:
+        parser.error("--repeat 必須大於 0")
+
+    models = [item.strip() for item in args.models.split(",") if item.strip()]
+    sections = [item.strip() for item in args.sections.split(",") if item.strip()]
+    if not models:
+        parser.error("--models 不可為空")
+    if not sections:
+        parser.error("--sections 不可為空")
+
+    records: list[RunRecord] = []
+    with tempfile.TemporaryDirectory(prefix="slidegen-model-input-") as temp_dir:
+        ingestion_path = _prepare_ingestion(
+            input_path,
+            Path(temp_dir) / "ingestion.json",
+        )
+        for model in models:
+            print(f"跑 {args.provider}/{model} × {args.repeat} …", flush=True)
+            records.extend(
+                run_model(
+                    provider=args.provider,
+                    model=model,
+                    ingestion_path=ingestion_path,
+                    prompt=args.prompt,
+                    sections=sections,
+                    repeat=args.repeat,
+                )
+            )
+
+    print(report(records, args.repeat))
+    return 0 if records and all(record.ok for record in records) else 1
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

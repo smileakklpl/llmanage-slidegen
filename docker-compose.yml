@@ -8,16 +8,11 @@ services:
       - CORS_ORIGINS=["http://localhost","http://localhost:80"]
       - APP_NAME=slidegen-api
       - DEBUG=false
-      # AWS 通用
-      - AWS_REGION=us-east-1
-      # S3 存儲
-      - S3_ENABLED=true
-      - S3_BUCKET=llmanage-slidegen-files
-      # SES 寄信
-      - EMAIL_PROVIDER=ses
-      - SES_SENDER_EMAIL=ethanlin7890@gmail.com
-      # Bedrock LLM
-      - LLM_PROVIDER=bedrock
+      - AWS_REGION=${AWS_REGION:-ap-northeast-1}
+      - S3_BUCKET=${S3_BUCKET:-}
+      - S3_ENDPOINT_URL=${S3_ENDPOINT_URL:-}
+      - GENERATION_USE_FAKE_LLM=${GENERATION_USE_FAKE_LLM:-false}
+      - GENERATION_SKIP_SEMANTIC_REVIEW=${GENERATION_SKIP_SEMANTIC_REVIEW:-false}
     expose:
       - "8000"
     restart: unless-stopped

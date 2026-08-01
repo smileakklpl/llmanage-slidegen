@@ -198,6 +198,56 @@ class LLMSettings:
         return self.models.get(stage) or self.models["default"]
 
 
+@dataclass(frozen=True)
+class GenerationSettings:
+    """Deadline-aware delivery policy loaded from environment variables."""
+
+    policy: str
+    deadline_seconds: float
+    render_reserve_seconds: float
+    repair_escalate_after: int
+
+
+GENERATION_POLICIES = frozenset({"strict", "required"})
+
+
+def load_generation_settings() -> GenerationSettings:
+    """Load required-output controls without coupling them to one LLM backend."""
+    policy = (os.getenv("GENERATION_POLICY") or "required").strip().lower()
+
+    if policy not in GENERATION_POLICIES:
+        raise ValueError(
+            "環境變數 GENERATION_POLICY 只能是 "
+            f"{sorted(GENERATION_POLICIES)} 之一，實際為 {policy!r}"
+        )
+
+    deadline_seconds = _read_float("GENERATION_DEADLINE_SECONDS", 900.0)
+    render_reserve_seconds = _read_float(
+        "GENERATION_RENDER_RESERVE_SECONDS", 180.0
+    )
+
+    if deadline_seconds <= 0:
+        raise ValueError("GENERATION_DEADLINE_SECONDS 必須大於 0")
+
+    if render_reserve_seconds < 0:
+        raise ValueError("GENERATION_RENDER_RESERVE_SECONDS 不可小於 0")
+
+    if render_reserve_seconds >= deadline_seconds:
+        raise ValueError(
+            "GENERATION_RENDER_RESERVE_SECONDS 必須小於 "
+            "GENERATION_DEADLINE_SECONDS"
+        )
+
+    return GenerationSettings(
+        policy=policy,
+        deadline_seconds=deadline_seconds,
+        render_reserve_seconds=render_reserve_seconds,
+        repair_escalate_after=_read_int(
+            "LLM_REPAIR_ESCALATE_AFTER", 2, minimum=1
+        ),
+    )
+
+
 def _read_int(name: str, default: int, minimum: int = 1) -> int:
     raw = os.getenv(name)
 
@@ -234,7 +284,7 @@ def load_llm_settings() -> LLMSettings:
     | ``LLM_PROVIDER`` | ``openai`` / ``google`` / ``bedrock`` / ``ollama`` / ``vllm`` / ``litellm`` | ``openai`` |
     | ``LLM_BASE_URL`` | OpenAI 相容端點；provider 有捷徑時可省略 | 依 provider |
     | ``LLM_MODEL_DEFAULT`` | 全案預設模型 | ``gpt-4o-mini`` |
-    | ``LLM_MODEL_INTENT`` / ``LLM_MODEL_WRITER`` / ``LLM_MODEL_WRITER_KEYPAGES`` / ``LLM_MODEL_MAILER`` / ``LLM_MODEL_CHART`` / ``LLM_MODEL_REVIEWER`` | per-stage 模型路由 | 回退 default |
+    | ``LLM_MODEL_INTENT`` / ``LLM_MODEL_WRITER`` / ``LLM_MODEL_WRITER_FALLBACK`` / ``LLM_MODEL_WRITER_KEYPAGES`` / ``LLM_MODEL_MAILER`` / ``LLM_MODEL_CHART`` / ``LLM_MODEL_REVIEWER`` | per-stage 模型路由 | 回退 default |
     | ``LLM_MAX_PARALLEL`` | 敘事平行度 | 16（下限 4） |
     | ``LLM_BACKOFF_BASE`` | 重試退避基數（秒） | 1.0 |
     | ``LLM_TOOL_MODE`` | ``native`` / ``json`` | 依模型自動判斷 |
@@ -262,6 +312,7 @@ def load_llm_settings() -> LLMSettings:
     for stage, env_name in (
         ("intent", "LLM_MODEL_INTENT"),
         ("writer", "LLM_MODEL_WRITER"),
+        ("writer_fallback", "LLM_MODEL_WRITER_FALLBACK"),
         ("writer_keypages", "LLM_MODEL_WRITER_KEYPAGES"),
         ("mailer", "LLM_MODEL_MAILER"),
         ("chart", "LLM_MODEL_CHART"),

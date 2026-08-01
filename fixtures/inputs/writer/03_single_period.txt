@@ -1,7 +1,0 @@
-頁碼：3
-narrative_id：n_p3
-頁面主題：本期市場總覽
-
-可用指標（key = 實值）：
-  market_total_cards_11412 = 60485911
-  market_total_spend_11412 = 453663538

@@ -18,7 +18,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Sequence
+from typing import Any, Sequence
 
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
@@ -339,3 +339,16 @@ def _write_index_sheet(workbook: Workbook, charts: Sequence[ResolvedChart]) -> N
             )
 
     _autofit(worksheet, len(headers))
+
+
+def export_audit_workbook_from_spec(
+    payload: dict[str, Any],
+    *,
+    output_path: str | Path,
+) -> ExportReport:
+    """Export audit data from the same validated DeckSpec used by renderer."""
+    from .renderer import bundles_from_deck_spec
+
+    bundles, _, _ = bundles_from_deck_spec(payload)
+    charts = [bundle.chart for bundle in bundles if bundle.chart is not None]
+    return export_audit_workbook(charts, output_path=output_path)

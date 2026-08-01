@@ -17,6 +17,7 @@ from email.mime.application import MIMEApplication
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from pathlib import Path
+from uuid import UUID
 
 from app.core.logging import get_logger
 
@@ -24,6 +25,16 @@ logger = get_logger(__name__)
 
 # Output directory for job artifacts (must match job_runner.py)
 _OUTPUT_BASE = Path(tempfile.gettempdir()) / "slidegen_outputs"
+_ALLOWED_ARTIFACT_FILENAMES = frozenset({"deck.pptx", "deck_data.xlsx"})
+
+
+def _safe_job_output_dir(job_id: str) -> Path | None:
+    try:
+        safe_job_id = str(UUID(job_id))
+    except ValueError:
+        logger.warning("Rejected artifact lookup for invalid job_id: %s", job_id)
+        return None
+    return (_OUTPUT_BASE / safe_job_id).resolve()
 
 
 def _get_provider() -> str:
@@ -64,12 +75,19 @@ async def send_email(
     all_attachments: list[tuple[str, bytes]] = []
 
     # Load job artifact files from disk
-    for filename in artifact_filenames:
-        file_path = _OUTPUT_BASE / job_id / filename
-        if file_path.exists():
-            all_attachments.append((filename, file_path.read_bytes()))
-        else:
-            logger.warning("Artifact file not found: %s", file_path)
+    requested_artifacts = {
+        name for name in artifact_filenames if name in _ALLOWED_ARTIFACT_FILENAMES
+    }
+    output_dir = _safe_job_output_dir(job_id)
+    if output_dir is not None and output_dir.exists():
+        for artifact_path in output_dir.iterdir():
+            if (
+                artifact_path.is_file()
+                and artifact_path.name in requested_artifacts
+            ):
+                all_attachments.append(
+                    (artifact_path.name, artifact_path.read_bytes())
+                )
 
     # Add user-uploaded extra attachments
     all_attachments.extend(extra_attachments)

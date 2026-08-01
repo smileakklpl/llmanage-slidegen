@@ -141,6 +141,12 @@ class ExtractedCell(BaseModel):
     number_format: str | None = None
 
     source: SourceCell
+    sources: list[SourceCell] = Field(
+        default_factory=list
+    )
+    transformations: list[str] = Field(
+        default_factory=list
+    )
 
 
 class TableColumnSpec(BaseModel):
@@ -155,6 +161,9 @@ class TableColumnSpec(BaseModel):
     nullable: bool = True
 
     header_source: SourceCell
+    header_sources: list[SourceCell] = Field(
+        default_factory=list
+    )
 
 
 class TableMetadata(BaseModel):
@@ -197,6 +206,16 @@ class TableDatasetSpec(BaseModel):
 
     columns: list[TableColumnSpec]
     rows: list[ExtractedTableRow]
+
+    # Deterministic layout evidence is persisted as JSON so Refresh can
+    # replay the same normalization plan without reinterpreting the sheet.
+    layout_strategy: str | None = None
+    layout_confidence: float | None = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+    )
+    normalization_spec: dict[str, Any] | None = None
 
     warnings: list[str] = Field(default_factory=list)
 
@@ -654,6 +673,14 @@ class UnifiedDatasetSpec(BaseModel):
     evidence: list[SourceEvidence] = Field(
         default_factory=list
     )
+
+    layout_strategy: str | None = None
+    layout_confidence: float | None = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+    )
+    normalization_spec: dict[str, Any] | None = None
 
     warnings: list[str] = Field(
         default_factory=list

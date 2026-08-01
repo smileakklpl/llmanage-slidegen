@@ -19,10 +19,11 @@ from __future__ import annotations
 import math
 import re
 from dataclasses import dataclass, field
-from typing import Sequence
+from typing import Any, Sequence
 
 import pandas as pd
 
+from .data_profile import DatasetProfile, MeasureProfile, profile_dataset
 from .dataset_loader import ColumnMeta, LoadedDataset, LoadResult
 from .metric_store import MetricSeries, MetricStore, SourceRef
 
@@ -73,12 +74,14 @@ class EngineReport:
     metric_count: int = 0
     blocked: dict[str, list[str]] = field(default_factory=dict)
     notes: list[str] = field(default_factory=list)
+    dataset_profiles: list[dict[str, object]] = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
 # 工具
 # ---------------------------------------------------------------------------
 _YEAR_PATTERN = re.compile(r"(19|20)\d{2}")
+_ROC_YEAR_PATTERN = re.compile(r"^\s*(1\d{2})\s*年?\s*$")
 
 #: 時間軸類別的常見寫法：民國/西元年、季、月、日期、Q1、FY 等。
 _TEMPORAL_PATTERNS = (
@@ -170,7 +173,13 @@ def _clean_values(raw: Sequence[object]) -> list[float | None]:
 
 def _detect_year(label: str) -> int | None:
     match = _YEAR_PATTERN.search(label)
-    return int(match.group()) if match else None
+    if match:
+        return int(match.group())
+
+    # 民國年只接受完整三位年度標籤（113、114年）；11401 是年月，
+    # 不可誤判成年度系列，否則會把相鄰月份拿來計算 YoY。
+    roc_match = _ROC_YEAR_PATTERN.fullmatch(label)
+    return int(roc_match.group(1)) if roc_match else None
 
 
 def _category_column(dataset: LoadedDataset) -> ColumnMeta | None:
@@ -244,6 +253,11 @@ def _blocked_metric(
         series={},
         unit=unit,
         semantic=semantic,
+        value_semantic=base.value_semantic,
+        aggregation_semantic=base.aggregation_semantic,
+        allowed_derivations=list(base.allowed_derivations),
+        shape_kind=base.shape_kind,
+        axis_kind=base.axis_kind,
         computable=False,
         notes=reasons,
     )
@@ -271,41 +285,101 @@ def _evidence_map(
 # ---------------------------------------------------------------------------
 # 基礎指標
 # ---------------------------------------------------------------------------
-def build_base_metric(dataset: LoadedDataset) -> MetricSeries | None:
-    """
-    把一個資料集直接轉為一個「原始值」指標。
-
-    類別軸取第一個非數值欄位，系列取所有數值欄位。
-    這是所有衍生指標的計算基礎。
-    """
-    numeric_columns = sorted(dataset.numeric_columns(), key=lambda m: m.index)
-
-    if not numeric_columns:
-        return None
-
+def _profiled_metric(
+    dataset: LoadedDataset,
+    profile: DatasetProfile,
+    measure: MeasureProfile,
+    numeric_columns: Sequence[ColumnMeta],
+    *,
+    metric_key: str,
+    name: str,
+) -> MetricSeries:
     category_column = _category_column(dataset)
     categories = _categories_of(dataset, category_column)
-
     series = {
         meta.label: _clean_values(dataset.frame[meta.key].tolist())
         for meta in numeric_columns
     }
-
     units = {meta.unit for meta in numeric_columns if meta.unit}
+    notes = list(dataset.warnings)
+    notes.append(f"語意判定：{measure.inference_reason}")
+    if profile.shape_kind == "multi_dimension":
+        notes.append(
+            "資料含多個維度；目前以第一個類別欄為視圖，未進行跨維度加總"
+        )
 
     return MetricSeries(
-        metric_key=f"{_slugify(dataset.dataset_id)}.value",
-        name=dataset.name,
+        metric_key=metric_key,
+        name=name,
         categories=categories,
         series=series,
-        # 各欄位單位不一致時不猜測，留空由敘事層依欄位名說明。
-        unit=units.pop() if len(units) == 1 else None,
+        unit=units.pop() if len(units) == 1 else measure.unit,
+        series_units={meta.label: meta.unit for meta in numeric_columns},
         semantic="value",
+        value_semantic=measure.value_semantic,
+        aggregation_semantic=measure.aggregation_semantic,
+        allowed_derivations=list(measure.allowed_derivations),
+        shape_kind=profile.shape_kind,
         axis_kind=detect_axis_kind(categories, category_column),
         evidence=_evidence_map(dataset, numeric_columns, categories),
         requires_human_review=dataset.requires_human_review,
-        notes=list(dataset.warnings),
+        notes=notes,
     )
+
+
+def build_base_metrics(
+    dataset: LoadedDataset,
+    profile: DatasetProfile | None = None,
+) -> list[MetricSeries]:
+    """Build safe raw metrics, splitting long tables by measure semantics."""
+    numeric_columns = sorted(dataset.numeric_columns(), key=lambda item: item.index)
+    if not numeric_columns:
+        return []
+
+    resolved_profile = profile or profile_dataset(dataset)
+    dataset_slug = _slugify(dataset.dataset_id)
+
+    if resolved_profile.shape_kind == "entity_by_period":
+        measure = resolved_profile.measures[0]
+        return [
+            _profiled_metric(
+                dataset,
+                resolved_profile,
+                measure,
+                numeric_columns,
+                metric_key=f"{dataset_slug}.value",
+                name=dataset.name,
+            )
+        ]
+
+    metrics: list[MetricSeries] = []
+    multiple = len(numeric_columns) > 1
+    profiles = {item.key: item for item in resolved_profile.measures}
+    for column in numeric_columns:
+        measure = profiles[column.key]
+        key = (
+            f"{dataset_slug}.{_slugify(column.label)}.value"
+            if multiple
+            else f"{dataset_slug}.value"
+        )
+        name = f"{dataset.name}－{column.label}" if multiple else dataset.name
+        metrics.append(
+            _profiled_metric(
+                dataset,
+                resolved_profile,
+                measure,
+                [column],
+                metric_key=key,
+                name=name,
+            )
+        )
+    return metrics
+
+
+def build_base_metric(dataset: LoadedDataset) -> MetricSeries | None:
+    """Compatibility wrapper returning the first profiled raw metric."""
+    metrics = build_base_metrics(dataset)
+    return metrics[0] if metrics else None
 
 
 # ---------------------------------------------------------------------------
@@ -318,6 +392,18 @@ def derive_period_growth(base: MetricSeries) -> MetricSeries:
     第一期沒有前期可比，值為 None —— 不編造基期，也不補 0。
     """
     metric_key = base.metric_key.replace(".value", ".period_growth")
+
+    if "period_growth" not in base.allowed_derivations:
+        return _blocked_metric(
+            base,
+            ".period_growth",
+            "期間成長率",
+            "%",
+            "growth",
+            [
+                f"measure semantic={base.value_semantic} 未核准期間成長率推導"
+            ],
+        )
 
     # 橫斷面資料（銀行、科目）相鄰兩項相減沒有「成長」語意，直接擋下。
     if base.axis_kind != AXIS_TEMPORAL:
@@ -369,6 +455,10 @@ def derive_period_growth(base: MetricSeries) -> MetricSeries:
         series=growth,
         unit="%",
         semantic="growth",
+        value_semantic=base.value_semantic,
+        aggregation_semantic=base.aggregation_semantic,
+        allowed_derivations=list(base.allowed_derivations),
+        shape_kind=base.shape_kind,
         axis_kind=base.axis_kind,
         formula="(本期 - 前期) / 前期 × 100%",
         requires_human_review=base.requires_human_review,
@@ -383,6 +473,16 @@ def derive_yoy(base: MetricSeries) -> MetricSeries:
     對應產品原則 4「僅有單年資料時不得計算/呈現 YoY」。
     """
     metric_key = base.metric_key.replace(".value", ".yoy")
+
+    if "yoy" not in base.allowed_derivations:
+        return _blocked_metric(
+            base,
+            ".yoy",
+            "年增率",
+            "%",
+            "growth",
+            [f"measure semantic={base.value_semantic} 未核准 YoY 推導"],
+        )
 
     years: list[tuple[int, str]] = []
 
@@ -437,6 +537,10 @@ def derive_yoy(base: MetricSeries) -> MetricSeries:
         series=yoy,
         unit="%",
         semantic="growth",
+        value_semantic=base.value_semantic,
+        aggregation_semantic=base.aggregation_semantic,
+        allowed_derivations=list(base.allowed_derivations),
+        shape_kind=base.shape_kind,
         axis_kind=base.axis_kind,
         formula="(當年 - 去年) / 去年 × 100%",
         requires_human_review=base.requires_human_review,
@@ -456,6 +560,22 @@ def derive_share(base: MetricSeries) -> MetricSeries:
     與其他人不同性質的長條。
     """
     metric_key = base.metric_key.replace(".value", ".share")
+
+    if (
+        "share" not in base.allowed_derivations
+        or base.aggregation_semantic != "sum"
+    ):
+        return _blocked_metric(
+            base,
+            ".share",
+            "占比",
+            "%",
+            "share",
+            [
+                f"measure semantic={base.value_semantic}、"
+                f"aggregation={base.aggregation_semantic} 非可加總占比"
+            ],
+        )
 
     # 時間軸上算「各月占全年的比例」不是市占率，商業意義薄弱且易誤導，
     # 因此占比只在橫斷面分類（銀行、通路、卡種）上計算。
@@ -553,6 +673,16 @@ def derive_rank(base: MetricSeries) -> MetricSeries:
     """
     metric_key = base.metric_key.replace(".value", ".rank")
 
+    if "rank" not in base.allowed_derivations:
+        return _blocked_metric(
+            base,
+            ".rank",
+            "排名",
+            "名",
+            "rank",
+            [f"measure semantic={base.value_semantic} 未核准排名推導"],
+        )
+
     # 對月份排名（「3月是第 1 名」）不具商業意義，排名限橫斷面分類。
     if base.axis_kind == AXIS_TEMPORAL:
         return _blocked_metric(
@@ -649,8 +779,8 @@ def build_market_timeline(
     *,
     # 鍵尾一律是 .value：衍生指標是用 ``metric_key.replace(".value", suffix)``
     # 換出來的，少了這個尾巴，period_growth 與 forecast 會拿到同一個鍵而相撞。
-    metric_key: str = "market_by_period.value",
-    name: str = "市場整體（各期）",
+    metric_key: str = "aggregate_by_period.value",
+    name: str = "整體彙總（各期）",
 ) -> MetricSeries | None:
     """
     把多份 entity × period 交叉表轉成一條市場層級的期間序列。
@@ -685,6 +815,8 @@ def build_market_timeline(
         if metric.computable
         and metric.semantic == "value"
         and metric.axis_kind == AXIS_CATEGORICAL
+        and metric.aggregation_semantic == "sum"
+        and metric.shape_kind in {"entity_by_period", "unknown"}
         and len(metric.series) >= MIN_PERIODS_FOR_GROWTH
         and all(is_period_label(series) for series in metric.series_names)
     ]
@@ -694,6 +826,7 @@ def build_market_timeline(
 
     periods = usable[0].series_names
     series: dict[str, list[float | None]] = {}
+    series_units: dict[str, str | None] = {}
     notes: list[str] = []
     evidence: dict[str, SourceRef] = {}
 
@@ -727,9 +860,12 @@ def build_market_timeline(
             if source is not None:
                 evidence[f"{metric.name}|{period}"] = source
 
+        source_units = {metric.unit_for(period) for period in periods}
+        series_unit = source_units.pop() if len(source_units) == 1 else None
         series[metric.name] = totals
+        series_units[metric.name] = series_unit
         notes.append(
-            f"{metric.name}（{metric.unit or '未標示單位'}）"
+            f"{metric.name}（{series_unit or '未標示單位'}）"
             f"每期總量取自：{'、'.join(sorted(sources))}"
         )
 
@@ -742,7 +878,12 @@ def build_market_timeline(
         categories=list(periods),
         series=series,
         unit=None,
+        series_units=series_units,
         semantic="value",
+        value_semantic="aggregate",
+        aggregation_semantic="sum",
+        allowed_derivations=["period_growth", "yoy", "forecast"],
+        shape_kind="aggregate_timeline",
         axis_kind=AXIS_TEMPORAL,
         formula="各期市場總量（優先取來源報表總計列，否則為各機構加總）",
         notes=notes,
@@ -787,9 +928,18 @@ def derive_top(
             series={},
             unit=metric.unit,
             semantic=metric.semantic,
+            value_semantic=metric.value_semantic,
+            aggregation_semantic=metric.aggregation_semantic,
+            allowed_derivations=list(metric.allowed_derivations),
+            shape_kind=metric.shape_kind,
             axis_kind=metric.axis_kind,
             computable=False,
             notes=reasons,
+        )
+
+    if "top" not in metric.allowed_derivations:
+        return blocked(
+            [f"measure semantic={metric.value_semantic} 未核准 Top N 推導"]
         )
 
     # 對月份取「前 10 名」不具商業意義——時間軸的順序本身就是資訊，
@@ -836,7 +986,14 @@ def derive_top(
             for name, values in metric.series.items()
         },
         unit=metric.unit,
+        series_units={
+            name: metric.unit_for(name) for name in metric.series_names
+        },
         semantic=metric.semantic,
+        value_semantic=metric.value_semantic,
+        aggregation_semantic=metric.aggregation_semantic,
+        allowed_derivations=list(metric.allowed_derivations),
+        shape_kind=metric.shape_kind,
         axis_kind=metric.axis_kind,
         formula=(
             f"依「{ranking_series}」由大到小取前 {n} 名"
@@ -865,6 +1022,16 @@ def derive_forecast(base: MetricSeries, periods: int = 3) -> MetricSeries:
     外推結果的類別標記為「預測」，避免與實際值混淆。
     """
     metric_key = base.metric_key.replace(".value", ".forecast")
+
+    if "forecast" not in base.allowed_derivations:
+        return _blocked_metric(
+            base,
+            ".forecast",
+            "趨勢外推",
+            base.unit,
+            "forecast",
+            [f"measure semantic={base.value_semantic} 未核准趨勢外推"],
+        )
 
     # 外推只在時間軸上有意義。把銀行名稱當 x 軸做回歸會得到
     # 「預測+1 期的銀行卡數」這種無意義甚至負值的結果。
@@ -936,7 +1103,12 @@ def derive_forecast(base: MetricSeries, periods: int = 3) -> MetricSeries:
         categories=categories,
         series=forecast,
         unit=base.unit,
+        series_units={name: base.unit_for(name) for name in forecast},
         semantic="forecast",
+        value_semantic=base.value_semantic,
+        aggregation_semantic=base.aggregation_semantic,
+        allowed_derivations=list(base.allowed_derivations),
+        shape_kind=base.shape_kind,
         axis_kind=base.axis_kind,
         formula="最小平方法線性回歸 y = ax + b，外推後續期數",
         notes=notes,
@@ -969,65 +1141,51 @@ def build_metric_store(
     load_result: LoadResult,
     config: EngineConfig | None = None,
 ) -> tuple[MetricStore, EngineReport]:
-    """
-    從已載入的資料集建立 MetricStore。
-
-    對每個資料集先建立 ``.value`` 基礎指標，再依設定衍生
-    ``.period_growth`` / ``.yoy`` / ``.share`` / ``.rank`` / ``.forecast``。
-
-    Returns:
-        (MetricStore, EngineReport)。Report 含被防呆擋下的指標與原因，
-        呼叫端應把這些原因回報給使用者，而非靜默忽略。
-    """
+    """Build the single MetricStore through deterministic profiled rules."""
     settings = config or EngineConfig()
     store = MetricStore(source_files=list(load_result.source_files))
     report = EngineReport()
 
     for dataset in load_result.datasets:
-        base = build_base_metric(dataset)
+        profile = profile_dataset(dataset)
+        report.dataset_profiles.append(profile.model_dump(mode="json"))
+        report.notes.extend(profile.warnings)
+        bases = build_base_metrics(dataset, profile)
 
-        if base is None:
+        if not bases:
             report.notes.append(
                 f"資料集 {dataset.dataset_id} 沒有數值欄位，已跳過"
             )
             continue
 
-        store.add(base)
+        for base in bases:
+            store.add(base)
+            derivations: list[MetricSeries] = []
 
-        derivations: list[MetricSeries] = []
+            if settings.enable_period_growth:
+                derivations.append(derive_period_growth(base))
+            if settings.enable_yoy:
+                derivations.append(derive_yoy(base))
+            if settings.enable_share:
+                derivations.append(derive_share(base))
+            if settings.enable_rank:
+                derivations.append(derive_rank(base))
+            if settings.enable_forecast:
+                derivations.append(
+                    derive_forecast(base, settings.forecast_periods)
+                )
 
-        if settings.enable_period_growth:
-            derivations.append(derive_period_growth(base))
+            for derived in derivations:
+                store.add(derived)
 
-        if settings.enable_yoy:
-            derivations.append(derive_yoy(base))
+            if settings.enable_top_n:
+                for source in [base, *derivations]:
+                    if source.semantic not in {"value", "share"}:
+                        continue
+                    if not source.computable:
+                        continue
+                    store.add(derive_top(source, settings.top_n))
 
-        if settings.enable_share:
-            derivations.append(derive_share(base))
-
-        if settings.enable_rank:
-            derivations.append(derive_rank(base))
-
-        if settings.enable_forecast:
-            derivations.append(derive_forecast(base, settings.forecast_periods))
-
-        for derived in derivations:
-            store.add(derived)
-
-        if settings.enable_top_n:
-            # Top N 切片建立在 base 與 share 之上（兩者都是「可以排名的量」）。
-            # rank 不切：Top 10 的排名就是 1–10，沒有資訊量。
-            for source in [base, *derivations]:
-                if source.semantic not in {"value", "share"}:
-                    continue
-
-                if not source.computable:
-                    continue
-
-                store.add(derive_top(source, settings.top_n))
-
-    # 交叉表（機構 × 期間）本身算不出趨勢。額外提供一條市場層級的期間序列，
-    # 讓雙軸趨勢圖與「未來趨勢推測」章節有指標可用（見 build_market_timeline）。
     if settings.enable_market_timeline:
         timeline = build_market_timeline(
             [
@@ -1039,11 +1197,11 @@ def build_metric_store(
 
         if timeline is None:
             report.notes.append(
-                "資料不是「機構 × 期間」交叉表形狀，未建立市場期間序列指標"
+                "資料中沒有可安全加總的 entity × period 視圖，"
+                "未建立跨實體期間彙總指標"
             )
         else:
             store.add(timeline)
-
             for derived in (
                 derive_period_growth(timeline),
                 derive_yoy(timeline),
@@ -1056,5 +1214,29 @@ def build_metric_store(
 
     report.metric_count = len(store.computable_metric_keys())
     report.blocked = store.blocked_metrics()
-
     return store, report
+
+
+def build_metric_store_from_contract(
+    ingestion_payload: dict[str, Any],
+) -> dict[str, Any]:
+    """JSON-only deterministic engine boundary for normalized ingestion."""
+    from ..contracts import stages as stage_contracts
+    from . import dataset_loader
+
+    loaded = dataset_loader.load_ingestion_result(ingestion_payload)
+    store, report = build_metric_store(loaded)
+    return stage_contracts.metric_engine_result_payload(
+        {
+            "dataset_ids": [dataset.dataset_id for dataset in loaded.datasets],
+            "engine_report": {
+                "metric_count": report.metric_count,
+                "blocked": report.blocked,
+                "notes": report.notes,
+                "dataset_profiles": report.dataset_profiles,
+            },
+            "metric_store": stage_contracts.metric_store_payload(
+                store.to_dict()
+            ),
+        }
+    )

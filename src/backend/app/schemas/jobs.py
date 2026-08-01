@@ -32,11 +32,14 @@ class JobStage(StrEnum):
 
 
 class Artifact(BaseModel):
-    """An output artifact produced by a completed job."""
+    """An output artifact produced by a completed job and persisted in S3."""
 
     type: str
     filename: str
     download_url: str
+    object_key: str | None = None
+    sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    size_bytes: int | None = Field(default=None, ge=0)
 
 
 class JobError(BaseModel):

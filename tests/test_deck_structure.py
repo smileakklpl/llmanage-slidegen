@@ -92,11 +92,12 @@ def test_chapter_order_follows_first_appearance():
     ]
 
 
-def test_default_chapters_match_the_spec():
-    """FR-2.6 明列的八章節。改動這份清單等於改規格，要有意識。"""
-    assert len(DEFAULT_CHAPTERS) == 8
+def test_default_chapters_are_domain_neutral():
+    """預設骨架需適用金融、餐飲、旅遊與股票資料。"""
+    assert len(DEFAULT_CHAPTERS) == 7
     assert DEFAULT_CHAPTERS[0] == "Executive Summary"
-    assert "未來趨勢推測" in DEFAULT_CHAPTERS
+    assert "預測與情境" in DEFAULT_CHAPTERS
+    assert DEFAULT_CHAPTERS[-1] == "建議與下一步"
 
 
 # ---------------------------------------------------------------------------

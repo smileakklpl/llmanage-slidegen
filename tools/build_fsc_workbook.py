@@ -142,12 +142,13 @@ def build(
 
 
 def main() -> None:
-    from paths import FSC_RAW
+    repo_root = Path(__file__).resolve().parent.parent
+    default_source = repo_root / "fixtures" / "data" / "金融業務資訊揭露"
 
     parser = argparse.ArgumentParser(
         description="把金管會月報整理成單一多工作表 xlsx（附件四版型）",
     )
-    parser.add_argument("--src", default=str(FSC_RAW))
+    parser.add_argument("--src", default=str(default_source))
     parser.add_argument(
         "--out",
         required=True,

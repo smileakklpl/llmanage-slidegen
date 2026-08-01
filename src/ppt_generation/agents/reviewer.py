@@ -67,16 +67,30 @@ _NEGATIVE_TERMS = (
     "縮減",
 )
 
-SYSTEM_PROMPT = """你是一位嚴格的簡報品質審查員，負責審查給銀行高階主管的簡報頁面。
+_TRADING_ADVICE_PATTERNS = (
+    re.compile(
+        r"(?:建議|應|宜|可考慮|適合|逢低|逢高).{0,8}"
+        r"(?:買進|買入|賣出|持有|加碼|減碼|布局|進場|出場)"
+    ),
+    re.compile(r"(?:停損|止損|停利|目標價|買點|賣點)"),
+    re.compile(
+        r"(?:保證|必然|穩賺|無風險).{0,8}"
+        r"(?:獲利|報酬|上漲|下跌|賺錢)"
+    ),
+)
+
+SYSTEM_PROMPT = """你是一位嚴格的簡報品質審查員，負責審查給管理層的資料簡報頁面。
 
 你要檢查的是**邏輯與語意層面**的問題，數值正確性已由程式驗證，不需你重複檢查。
 
+資料領域可能是餐飲、旅遊、零售、股票或金融，不可預設銀行情境。
 請檢查：
 1. 圖表類型是否適合這份資料的形狀與語意
 2. 敘事的因果推論是否有資料支撐，是否過度延伸
 3. 敘事是否與「資料注意事項」衝突（例如把外推預測值當成已實現結果）
 4. 敘事的比較方向是否合理（例如把較小的數字說成領先）
 5. 敘事風格是否符合顧問報告水準（結論先行、避免只是複述數字）
+6. 股票或價格資料是否出現無資料支撐的買賣建議、報酬保證或過度預測
 
 若發現問題，status 回傳 "REJECTED"，並在 target_agent 指出應由哪個 Agent 修正：
 - "chart_agent"：圖表類型或指標選擇有問題
@@ -275,10 +289,27 @@ def run_rule_layer(
     issues: list[str] = []
 
     issues.extend(
-        check_narrative(narrative, store, {chart.metric.metric_key})
+        check_narrative(
+            narrative,
+            store,
+            {chart.metric.metric_key},
+            {chart.metric.metric_key: chart.series_names},
+        )
     )
     issues.extend(check_chart_narrative_alignment(narrative, chart))
     issues.extend(check_direction_consistency(narrative, store))
+
+    if chart.metric.value_semantic == "price":
+        normalized_text = re.sub(r"\s+", "", narrative.all_text)
+        forbidden = [
+            match.group(0)
+            for pattern in _TRADING_ADVICE_PATTERNS
+            for match in pattern.finditer(normalized_text)
+        ]
+        if forbidden:
+            issues.append(
+                f"價格資料不得產生買賣或保證報酬建議：{forbidden}"
+            )
 
     # 去重但保留順序，避免同一問題重複回報給 LLM。
     seen: dict[str, None] = {}
@@ -351,6 +382,7 @@ def review_page(
     *,
     llm_call: Callable[..., Any] | None = None,
     enable_semantic_layer: bool = True,
+    deadline_monotonic: float | None = None,
 ) -> ReviewResult:
     """
     審查單頁。
@@ -383,6 +415,7 @@ def review_page(
         REVIEW_SCHEMA,
         system_prompt=SYSTEM_PROMPT,
         stage="reviewer",
+        deadline_monotonic=deadline_monotonic,
     )
 
     status = payload.get("status", STATUS_APPROVED)
@@ -400,3 +433,67 @@ def review_page(
             else None
         ),
     )
+
+
+def _hydrate_review_contracts(
+    narrative_payload: dict[str, Any],
+    chart_plan_payload: dict[str, Any],
+    metric_store_payload: dict[str, Any],
+) -> tuple[PageNarrative, ResolvedChart, MetricStore]:
+    """Validate JSON contracts and hydrate objects privately inside reviewer."""
+    from ..charts.chart_planner import ChartPlan, resolve_chart_plan
+    from ..contracts import stages as stage_contracts
+
+    narrative_json = stage_contracts.narrative_payload(narrative_payload)
+    chart_json = stage_contracts.ChartPlanContract.model_validate(
+        chart_plan_payload
+    ).model_dump(mode="json")
+    store_json = stage_contracts.metric_store_payload(metric_store_payload)
+    store_body = dict(store_json)
+    store_body.pop("contract_version", None)
+    store = MetricStore.from_dict(store_body)
+    narrative = PageNarrative.from_dict(narrative_json)
+    chart = resolve_chart_plan(ChartPlan.from_dict(chart_json), store)
+    return narrative, chart, store
+
+
+def run_rule_layer_from_contract(
+    narrative_payload: dict[str, Any],
+    chart_plan_payload: dict[str, Any],
+    metric_store_payload: dict[str, Any],
+) -> list[str]:
+    """JSON-only deterministic reviewer boundary."""
+    narrative, chart, store = _hydrate_review_contracts(
+        narrative_payload,
+        chart_plan_payload,
+        metric_store_payload,
+    )
+    return run_rule_layer(narrative, chart, store)
+
+
+def review_page_from_contract(
+    narrative_payload: dict[str, Any],
+    chart_plan_payload: dict[str, Any],
+    metric_store_payload: dict[str, Any],
+    *,
+    llm_call: Callable[..., Any] | None = None,
+    enable_semantic_layer: bool = True,
+    deadline_monotonic: float | None = None,
+) -> dict[str, Any]:
+    """JSON-only stage boundary for deterministic and semantic review."""
+    from ..contracts import stages as stage_contracts
+
+    narrative, chart, store = _hydrate_review_contracts(
+        narrative_payload,
+        chart_plan_payload,
+        metric_store_payload,
+    )
+    result = review_page(
+        narrative,
+        chart,
+        store,
+        llm_call=llm_call,
+        enable_semantic_layer=enable_semantic_layer,
+        deadline_monotonic=deadline_monotonic,
+    )
+    return stage_contracts.review_payload(result.to_dict())

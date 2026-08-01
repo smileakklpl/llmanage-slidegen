@@ -1,0 +1,191 @@
+{
+  "status": "READY",
+  "sections": [
+    {
+      "title": "Executive Summary",
+      "chapter": "Executive Summary",
+      "intent": "市場規模與成長動能概覽：流通卡數、有效卡數、簽帳金額、循環信用與分期餘額的整體趨勢",
+      "suggested_metric_keys": [
+        "market_by_period.value"
+      ],
+      "metric_scopes": [
+        {
+          "metric_key": "market_by_period.value",
+          "series_names": [
+            "流通卡數",
+            "有效卡數",
+            "當月簽帳金額",
+            "循環信用餘額",
+            "未到期分期付款餘額"
+          ],
+          "comparison_reason": "呈現市場五大核心指標的絕對規模與演進，為後續分析奠定基礎"
+        }
+      ],
+      "page_number": 4
+    },
+    {
+      "title": "市場成長動能分析",
+      "chapter": "市場整體概況",
+      "intent": "市場各項指標的期間成長率是否均衡，還是特定指標驅動整體成長？",
+      "suggested_metric_keys": [
+        "market_by_period.period_growth"
+      ],
+      "metric_scopes": [
+        {
+          "metric_key": "market_by_period.period_growth",
+          "series_names": [
+            "流通卡數",
+            "有效卡數",
+            "當月簽帳金額",
+            "循環信用餘額",
+            "未到期分期付款餘額"
+          ],
+          "comparison_reason": "比較五大指標的成長率軌跡，識別市場成長的驅動力來源"
+        }
+      ],
+      "page_number": 6
+    },
+    {
+      "title": "呆帳風險趨勢",
+      "chapter": "市場整體概況",
+      "intent": "轉銷呆帳金額的市場趨勢是否穩定，是否反映信用風險的變化？",
+      "suggested_metric_keys": [
+        "market_by_period.value"
+      ],
+      "metric_scopes": [
+        {
+          "metric_key": "market_by_period.value",
+          "series_names": [
+            "當月轉銷呆帳金額"
+          ],
+          "comparison_reason": ""
+        }
+      ],
+      "page_number": 7
+    },
+    {
+      "title": "客戶活躍度指標：有效卡數與簽帳金額的關係",
+      "chapter": "客戶活躍度",
+      "intent": "有效卡數與簽帳金額的成長是否同步，反映客戶活躍度與消費意願的變化",
+      "suggested_metric_keys": [
+        "market_by_period.value"
+      ],
+      "metric_scopes": [
+        {
+          "metric_key": "market_by_period.value",
+          "series_names": [
+            "有效卡數",
+            "當月簽帳金額"
+          ],
+          "comparison_reason": "比較兩項指標的時間序列軌跡，判斷客戶基數擴張是否帶動簽帳成長"
+        }
+      ],
+      "page_number": 9
+    },
+    {
+      "title": "消費信貸結構：循環信用與分期付款的占比",
+      "chapter": "獲利能力",
+      "intent": "循環信用與分期付款在消費信貸中的相對規模，反映銀行的信貸產品結構與收益來源",
+      "suggested_metric_keys": [
+        "market_by_period.value"
+      ],
+      "metric_scopes": [
+        {
+          "metric_key": "market_by_period.value",
+          "series_names": [
+            "循環信用餘額",
+            "未到期分期付款餘額"
+          ],
+          "comparison_reason": "比較兩類消費信貸產品的規模演進，評估銀行信貸結構的多元化程度"
+        }
+      ],
+      "page_number": 11
+    },
+    {
+      "title": "呆帳風險與簽帳金額的關係",
+      "chapter": "風險與警訊",
+      "intent": "轉銷呆帳金額與簽帳金額的比例關係是否惡化，反映信用風險是否上升？",
+      "suggested_metric_keys": [
+        "market_by_period.value"
+      ],
+      "metric_scopes": [
+        {
+          "metric_key": "market_by_period.value",
+          "series_names": [
+            "當月簽帳金額",
+            "當月轉銷呆帳金額"
+          ],
+          "comparison_reason": "比較簽帳與呆帳的時間序列，評估市場信用風險的相對變化"
+        }
+      ],
+      "page_number": 13
+    },
+    {
+      "title": "市場未來趨勢預測",
+      "chapter": "未來趨勢推測",
+      "intent": "市場各項核心指標（流通卡數、有效卡數、簽帳金額、循環信用、分期餘額、呆帳）的未來走向如何？",
+      "suggested_metric_keys": [
+        "market_by_period.forecast"
+      ],
+      "metric_scopes": [
+        {
+          "metric_key": "market_by_period.forecast",
+          "series_names": [
+            "流通卡數",
+            "有效卡數",
+            "當月簽帳金額",
+            "循環信用餘額",
+            "未到期分期付款餘額",
+            "當月轉銷呆帳金額"
+          ],
+          "comparison_reason": "呈現六大指標的外推趨勢，為策略規劃提供前瞻性洞察"
+        }
+      ],
+      "page_number": 15
+    },
+    {
+      "title": "台新的戰略建議與行動方向",
+      "chapter": "對台新的策略建議",
+      "intent": "基於市場趨勢、競爭格局與台新的相對位置，台新應如何調整產品組合、客戶策略與風險管理，以在未來市場中保持或提升競爭力？",
+      "suggested_metric_keys": [
+        "market_by_period.forecast"
+      ],
+      "metric_scopes": [
+        {
+          "metric_key": "market_by_period.forecast",
+          "series_names": [
+            "流通卡數",
+            "有效卡數",
+            "當月簽帳金額",
+            "循環信用餘額",
+            "未到期分期付款餘額"
+          ],
+          "comparison_reason": "參考市場未來趨勢，為台新的策略決策提供方向"
+        }
+      ],
+      "page_number": 17
+    }
+  ],
+  "question_to_user": "",
+  "dropped_metric_keys": {
+    "簽帳金額市場競爭格局:當月簽帳金額.share.top10": "同一頁選取多個系列時必須提供 comparison_reason，明確說明 title/intent 要比較的關係；否則 fail-closed",
+    "（章節）簽帳金額市場競爭格局": "本頁所有 metric scope 均未通過確定性清洗，整頁不產出",
+    "有效卡數市場競爭格局:有效卡數.share.top10": "同一頁選取多個系列時必須提供 comparison_reason，明確說明 title/intent 要比較的關係；否則 fail-closed",
+    "（章節）有效卡數市場競爭格局": "本頁所有 metric scope 均未通過確定性清洗，整頁不產出",
+    "流通卡數市場競爭格局:流通卡數.share.top10": "同一頁選取多個系列時必須提供 comparison_reason，明確說明 title/intent 要比較的關係；否則 fail-closed",
+    "（章節）流通卡數市場競爭格局": "本頁所有 metric scope 均未通過確定性清洗，整頁不產出",
+    "循環信用餘額市場競爭格局:循環信用餘額.share.top10": "同一頁選取多個系列時必須提供 comparison_reason，明確說明 title/intent 要比較的關係；否則 fail-closed",
+    "（章節）循環信用餘額市場競爭格局": "本頁所有 metric scope 均未通過確定性清洗，整頁不產出",
+    "分期付款餘額市場競爭格局:未到期分期付款餘額.share.top10": "同一頁選取多個系列時必須提供 comparison_reason，明確說明 title/intent 要比較的關係；否則 fail-closed",
+    "（章節）分期付款餘額市場競爭格局": "本頁所有 metric scope 均未通過確定性清洗，整頁不產出",
+    "呆帳風險同業比較:當月轉銷呆帳金額.share.top10": "同一頁選取多個系列時必須提供 comparison_reason，明確說明 title/intent 要比較的關係；否則 fail-closed",
+    "（章節）呆帳風險同業比較": "本頁所有 metric scope 均未通過確定性清洗，整頁不產出",
+    "台新在市場中的位置與機會:當月簽帳金額.value.top10": "同一頁選取多個系列時必須提供 comparison_reason，明確說明 title/intent 要比較的關係；否則 fail-closed",
+    "台新在市場中的位置與機會:有效卡數.value.top10": "同一頁選取多個系列時必須提供 comparison_reason，明確說明 title/intent 要比較的關係；否則 fail-closed",
+    "台新在市場中的位置與機會:循環信用餘額.value.top10": "同一頁選取多個系列時必須提供 comparison_reason，明確說明 title/intent 要比較的關係；否則 fail-closed",
+    "台新在市場中的位置與機會:未到期分期付款餘額.value.top10": "同一頁選取多個系列時必須提供 comparison_reason，明確說明 title/intent 要比較的關係；否則 fail-closed",
+    "（章節）台新在市場中的位置與機會": "本頁所有 metric scope 均未通過確定性清洗，整頁不產出",
+    "台新的風險管理表現:當月轉銷呆帳金額.value.top10": "同一頁選取多個系列時必須提供 comparison_reason，明確說明 title/intent 要比較的關係；否則 fail-closed",
+    "（章節）台新的風險管理表現": "本頁所有 metric scope 均未通過確定性清洗，整頁不產出"
+  }
+}

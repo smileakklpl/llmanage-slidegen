@@ -20,7 +20,7 @@ ChartPlan 驗證與查表組裝
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Literal, Sequence
+from typing import Any, Collection, Literal, Mapping, Sequence
 
 from ..data.metric_engine import AXIS_TEMPORAL, is_total_category
 from ..data.metric_store import (
@@ -62,6 +62,10 @@ TEMPORAL_ONLY_CHARTS = frozenset({"line"})
 #: 不允許用於時間序列軸的圖表類型。
 #: 圓餅圖表達「組成比例」，各月份占全年比例不是有意義的組成。
 CATEGORICAL_ONLY_CHARTS = frozenset({"pie"})
+
+#: 一般單軸圖最多同時呈現兩組 series。超過兩組時圖例與線條難以判讀，
+#: 且很容易把同一 aggregate metric 中不同主題的資料全部帶入。
+MAX_STANDARD_SERIES = 2
 
 #: 圓餅圖類別數上限。超過此數量的圓餅圖無法閱讀，應改用橫條圖。
 MAX_PIE_CATEGORIES = 12
@@ -152,7 +156,7 @@ class ResolvedChart:
     skill_name: str
     spec: ChartSpec | ScatterSpec
     metric: MetricSeries
-    #: 實際採用的系列名稱（plan 未指定時為該指標的全部系列）
+    #: 實際採用的系列名稱；多系列指標必須由 plan 明確指定。
     series_names: list[str] = field(default_factory=list)
 
     @property
@@ -171,6 +175,10 @@ class ResolvedChart:
 def validate_chart_plan(
     plan: ChartPlan,
     store: MetricStore,
+    *,
+    allowed_metric_keys: Collection[str] | None = None,
+    allowed_series_by_metric: Mapping[str, Sequence[str]] | None = None,
+    comparison_reasons_by_metric: Mapping[str, str] | None = None,
 ) -> list[str]:
     """
     確定性檢查 ChartPlan 是否可執行。不呼叫 LLM。
@@ -200,6 +208,16 @@ def validate_chart_plan(
         errors.append("metric_key 不可為空")
         return errors
 
+    if (
+        allowed_metric_keys is not None
+        and plan.metric_key not in set(allowed_metric_keys)
+    ):
+        errors.append(
+            f"metric_key {plan.metric_key!r} 不在本頁 section planner 核准的"
+            f"指標白名單中：{sorted(allowed_metric_keys)}"
+        )
+        return errors
+
     try:
         metric = store.get(plan.metric_key)
     except MetricNotFoundError:
@@ -212,7 +230,22 @@ def validate_chart_plan(
         errors.append(str(error))
         return errors
 
-    selected = plan.series_names or metric.series_names
+    if plan.series_names is None:
+        if len(metric.series_names) == 1:
+            selected = list(metric.series_names)
+        else:
+            errors.append(
+                f"指標 {plan.metric_key!r} 有多個系列，必須明確指定 "
+                "series_names；省略不得解讀為全部系列"
+            )
+            return errors
+    else:
+        selected = list(plan.series_names)
+
+    if len(selected) != len(set(selected)):
+        errors.append(
+            f"series_names 含重複系列：{selected}。每個系列只能指定一次"
+        )
 
     unknown = [name for name in selected if name not in metric.series]
 
@@ -222,14 +255,62 @@ def validate_chart_plan(
             f"可用系列：{metric.series_names}"
         )
 
+    if allowed_series_by_metric is not None:
+        allowed_series = set(
+            allowed_series_by_metric.get(plan.metric_key, [])
+        )
+        outside_scope = [
+            name for name in selected if name not in allowed_series
+        ]
+        if outside_scope:
+            errors.append(
+                f"系列 {outside_scope} 與本頁核准主題範圍不符；"
+                f"本頁只允許：{sorted(allowed_series)}"
+            )
+
+    if (
+        len(selected) > 1
+        and comparison_reasons_by_metric is not None
+        and not comparison_reasons_by_metric.get(plan.metric_key, "").strip()
+    ):
+        errors.append(
+            f"本頁選了多個系列 {selected}，但 section planner 未提供 "
+            "comparison_reason；無法確認這是明確比較而非誤選全部系列"
+        )
+
     if not selected:
         errors.append(f"指標 {plan.metric_key!r} 沒有任何可用系列")
         return errors
 
     errors.extend(_validate_axis_compatibility(plan, metric))
+    errors.extend(_validate_series_units(plan, metric, selected))
     errors.extend(_validate_chart_type_limits(plan, metric, selected))
 
     return errors
+
+
+def _validate_series_units(
+    plan: ChartPlan,
+    metric: MetricSeries,
+    selected: Sequence[str],
+) -> list[str]:
+    """Prevent unrelated units from sharing one value axis."""
+    if len(selected) <= 1 or plan.chart_type in {"combo", "scatter"}:
+        return []
+
+    units = {metric.unit_for(name) for name in selected if name in metric.series}
+    if len(units) <= 1:
+        return []
+
+    detail = {
+        name: metric.unit_for(name)
+        for name in selected
+        if name in metric.series
+    }
+    return [
+        f"{plan.chart_type} 是單一 value axis，不能混用不同單位系列：{detail}。"
+        "請只選同一主題/單位的系列，或明確改用恰好兩系列的 combo。"
+    ]
 
 
 def _validate_axis_compatibility(
@@ -263,6 +344,16 @@ def _validate_chart_type_limits(
 ) -> list[str]:
     """檢查各圖表類型特有的資料形狀限制。"""
     errors: list[str] = []
+
+    if (
+        plan.chart_type in {"column", "bar", "line"}
+        and len(selected) > MAX_STANDARD_SERIES
+    ):
+        errors.append(
+            f"{plan.chart_type} 圖最多允許 {MAX_STANDARD_SERIES} 組系列，"
+            f"目前選了 {len(selected)} 組（{list(selected)}）。"
+            "請依頁面主題只保留直接相關系列。"
+        )
 
     if plan.chart_type == "pie":
         if len(selected) != 1:
@@ -298,13 +389,12 @@ def _validate_chart_type_limits(
             f"目前選了 {len(selected)} 組（{list(selected)}）。"
         )
 
-    if plan.chart_type == "combo" and len(selected) < 2:
-        # 只有一個系列的「雙軸圖」沒有次軸可掛，等於一張普通長條圖，
-        # 卻多帶了一組隱藏軸。這種圖應該一開始就用 column。
+    if plan.chart_type == "combo" and len(selected) != 2:
+        # 雙軸圖固定為一個主軸系列 + 一個次軸系列。把其餘指標都掛到
+        # 次軸會重現「所有資料塞在同一張圖」的不可讀問題。
         errors.append(
-            "雙軸圖需要至少兩個系列（第一個畫長條、其餘畫折線掛次軸），"
+            "雙軸圖需要恰好兩個系列（第一個畫長條、第二個畫折線掛次軸），"
             f"目前選了 {len(selected)} 組（{list(selected)}）。"
-            "單一系列請改用 column 或 line。"
         )
 
     if plan.chart_type in TABLE_LIKE_CHARTS:
@@ -334,29 +424,35 @@ def _validate_chart_type_limits(
 def resolve_chart_plan(
     plan: ChartPlan,
     store: MetricStore,
-    *,
-    skip_validation: bool = False,
 ) -> ResolvedChart:
     """
     驗證通過後，從 MetricStore 查表取出實際數值組成 spec。
 
     **這是系統中唯一把數字填進圖表的地方**，數字全部來自 MetricStore，
-    與 LLM 的輸出完全無關。
+    與 LLM 的輸出完全無關。驗證不可略過，避免其他呼叫端繞過 series scope、
+    單位與圖表形狀限制。
 
     Raises:
         ChartPlanError: 驗證未通過。
     """
-    if not skip_validation:
-        errors = validate_chart_plan(plan, store)
+    errors = validate_chart_plan(plan, store)
 
-        if errors:
-            raise ChartPlanError(
-                f"ChartPlan 未通過檢查（metric_key={plan.metric_key!r}）："
-                + "；".join(errors)
-            )
+    if errors:
+        raise ChartPlanError(
+            f"ChartPlan 未通過檢查（metric_key={plan.metric_key!r}）："
+            + "；".join(errors)
+        )
 
     metric = store.get(plan.metric_key)
-    selected = list(plan.series_names or metric.series_names)
+    selected = (
+        list(plan.series_names)
+        if plan.series_names is not None
+        else list(metric.series_names)
+    )
+    selected_units = {metric.unit_for(name) for name in selected}
+    display_unit = (
+        next(iter(selected_units)) if len(selected_units) == 1 else None
+    )
 
     if plan.chart_type == "scatter":
         spec = _build_scatter_spec(plan, metric, selected)
@@ -372,7 +468,7 @@ def resolve_chart_plan(
                 series=values,
                 heatmap=plan.chart_type == "heatmap",
                 row_header=_row_header_for(metric),
-                unit=metric.unit,
+                unit=display_unit,
                 emphasize_rows=tuple(
                     label
                     for label in metric.categories
@@ -484,7 +580,7 @@ def resolve_all(
             continue
 
         try:
-            resolved.append(resolve_chart_plan(plan, store, skip_validation=True))
+            resolved.append(resolve_chart_plan(plan, store))
         except ChartPlanError as error:
             failures[index] = [str(error)]
 

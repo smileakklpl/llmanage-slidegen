@@ -8,9 +8,22 @@ from openpyxl.cell.cell import MergedCell
 from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.worksheet import Worksheet
 
+from app.ingestion.cell_tokenizer import (
+    assemble_accounting_values,
+)
 from app.ingestion.classifier import (
     inspect_excel_content,
     is_period_like_header,
+)
+from app.ingestion.layout_analyzer import (
+    analyze_sheet_layouts,
+)
+from app.ingestion.normalization_spec import (
+    AUTO_ACCEPT_CONFIDENCE,
+    NormalizationSpec,
+)
+from app.ingestion.workbook_ir import (
+    build_workbook_ir,
 )
 from app.ingestion.schemas import (
     ColumnDataType,
@@ -48,6 +61,17 @@ NEGATIVE_PARENTHESES_PATTERN = re.compile(
 )
 
 
+NORMALIZED_EMPTY_MARKERS = {
+    "-",
+    "--",
+    "—",
+    "–",
+    "N/A",
+    "NA",
+    "不適用",
+}
+
+
 def _is_empty(value: Any) -> bool:
     """判斷儲存格是否為空。"""
     return value is None or (
@@ -81,6 +105,9 @@ def _normalize_scalar(value: Any) -> Any:
     text = value.strip()
 
     if not text:
+        return None
+
+    if text.upper() in NORMALIZED_EMPTY_MARKERS:
         return None
 
     negative_match = NEGATIVE_PARENTHESES_PATTERN.fullmatch(
@@ -610,6 +637,323 @@ def _infer_data_type(
     return ColumnDataType.MIXED
 
 
+def _select_layout_cell(
+    formula_worksheet: Worksheet,
+    value_worksheet: Worksheet,
+    row_number: int,
+    source_columns: list[int],
+    selection_rule: str,
+) -> tuple[Any, Any, str | None, Any, list[Any], list[str]]:
+    """Select or assemble one value while retaining every source cell."""
+    candidates: list[tuple[Any, Any, str | None, Any]] = []
+
+    for column_number in source_columns:
+        formula_cell = formula_worksheet.cell(
+            row=row_number,
+            column=column_number,
+        )
+        value_cell = value_worksheet.cell(
+            row=row_number,
+            column=column_number,
+        )
+        formula = (
+            formula_cell.value
+            if isinstance(formula_cell.value, str)
+            and formula_cell.value.startswith("=")
+            else None
+        )
+        raw_value = (
+            value_cell.value
+            if formula is not None
+            else formula_cell.value
+        )
+        candidates.append(
+            (
+                formula_cell,
+                raw_value,
+                formula,
+                _normalize_scalar(raw_value),
+            )
+        )
+
+    if selection_rule == "first_numeric":
+        assembled = assemble_accounting_values(
+            [candidate[1] for candidate in candidates]
+        )
+        if assembled.source_indexes:
+            primary = candidates[assembled.source_indexes[0]]
+            source_cells = [
+                candidates[index][0]
+                for index in assembled.source_indexes
+            ]
+            return (
+                primary[0],
+                assembled.raw_value,
+                primary[2],
+                assembled.value,
+                source_cells,
+                list(assembled.transformations),
+            )
+    else:
+        selected = next(
+            (
+                candidate
+                for candidate in candidates
+                if candidate[3] is not None
+            ),
+            None,
+        )
+        if selected is not None:
+            return (
+                selected[0],
+                selected[1],
+                selected[2],
+                selected[3],
+                [selected[0]],
+                [],
+            )
+
+    observed = next(
+        (
+            candidate
+            for candidate in candidates
+            if not _is_empty(candidate[1])
+        ),
+        candidates[0],
+    )
+    return (
+        observed[0],
+        observed[1],
+        observed[2],
+        None if selection_rule == "first_numeric" else observed[3],
+        [observed[0]],
+        [],
+    )
+
+
+def _extract_sheet_from_spec(
+    filename: str,
+    formula_worksheet: Worksheet,
+    value_worksheet: Worksheet,
+    classification: SheetContentInspection,
+    spec: NormalizationSpec,
+) -> TableDatasetSpec:
+    """Execute a validated normalization plan against source cells."""
+    warnings = list(spec.warnings)
+    if spec.confidence < AUTO_ACCEPT_CONFIDENCE:
+        warnings.append(
+            "人工確認：版面正規化信心分數為 "
+            f"{spec.confidence:.2f}，低於自動接受門檻 "
+            f"{AUTO_ACCEPT_CONFIDENCE:.2f}"
+        )
+
+    existing_keys: set[str] = set()
+    column_definitions: list[tuple[str, Any]] = []
+    for index, output_column in enumerate(spec.output_columns):
+        key = _create_column_key(
+            label=output_column.label,
+            index=index,
+            existing_keys=existing_keys,
+        )
+        existing_keys.add(key)
+        column_definitions.append((key, output_column))
+
+    extracted_rows: list[ExtractedTableRow] = []
+    column_values: dict[str, list[Any]] = {
+        key: [] for key, _ in column_definitions
+    }
+    column_empty_counts: dict[str, int] = {
+        key: 0 for key, _ in column_definitions
+    }
+    missing_formula_cache_cells: list[str] = []
+
+    for row_number in spec.data_rows:
+        row_cells: dict[str, ExtractedCell] = {}
+        row_has_value = False
+
+        for key, output_column in column_definitions:
+            (
+                formula_cell,
+                raw_value,
+                formula,
+                normalized_value,
+                selected_source_cells,
+                value_transformations,
+            ) = _select_layout_cell(
+                formula_worksheet=formula_worksheet,
+                value_worksheet=value_worksheet,
+                row_number=row_number,
+                source_columns=output_column.source_columns,
+                selection_rule=output_column.selection_rule,
+            )
+
+            if formula is not None and raw_value is None:
+                missing_formula_cache_cells.append(
+                    formula_cell.coordinate
+                )
+
+            if normalized_value is None:
+                column_empty_counts[key] += 1
+            else:
+                row_has_value = True
+
+            column_values[key].append(normalized_value)
+            row_cells[key] = ExtractedCell(
+                raw_value=raw_value,
+                value=normalized_value,
+                formula=formula,
+                number_format=formula_cell.number_format,
+                source=SourceCell(
+                    sheet=formula_worksheet.title,
+                    cell=formula_cell.coordinate,
+                    row=row_number,
+                    column=formula_cell.column,
+                ),
+                sources=[
+                    SourceCell(
+                        sheet=formula_worksheet.title,
+                        cell=source_cell.coordinate,
+                        row=row_number,
+                        column=source_cell.column,
+                    )
+                    for source_cell in selected_source_cells
+                ],
+                transformations=value_transformations,
+            )
+
+        if row_has_value:
+            extracted_rows.append(
+                ExtractedTableRow(
+                    excel_row=row_number,
+                    cells=row_cells,
+                )
+            )
+
+    columns: list[TableColumnSpec] = []
+    for index, (key, output_column) in enumerate(column_definitions):
+        header_source = (
+            output_column.header_sources[0]
+            if output_column.header_sources
+            else None
+        )
+        header_row = (
+            header_source.row
+            if header_source is not None
+            else spec.header_rows[-1]
+        )
+        header_column = (
+            header_source.column
+            if header_source is not None
+            else output_column.source_columns[0]
+        )
+        columns.append(
+            TableColumnSpec(
+                key=key,
+                label=output_column.label,
+                index=index,
+                data_type=_infer_data_type(column_values[key]),
+                unit=(
+                    output_column.unit
+                    or (
+                        spec.metadata.unit
+                        if output_column.semantic_role
+                        != "dimension"
+                        else None
+                    )
+                ),
+                nullable=column_empty_counts[key] > 0,
+                header_source=SourceCell(
+                    sheet=formula_worksheet.title,
+                    cell=(
+                        f"{get_column_letter(header_column)}"
+                        f"{header_row}"
+                    ),
+                    row=header_row,
+                    column=header_column,
+                ),
+                header_sources=[
+                    SourceCell(
+                        sheet=formula_worksheet.title,
+                        cell=source.cell,
+                        row=source.row,
+                        column=source.column,
+                    )
+                    for source in output_column.header_sources
+                ],
+            )
+        )
+
+    if missing_formula_cache_cells:
+        warnings.append(
+            "部分公式沒有儲存的計算結果："
+            + "、".join(missing_formula_cache_cells[:10])
+        )
+
+    source_columns = [
+        column
+        for output_column in spec.output_columns
+        for column in output_column.source_columns
+    ]
+    min_column = min(source_columns)
+    max_column = max(source_columns)
+    first_header_row = min(spec.header_rows)
+    last_header_row = max(spec.header_rows)
+    last_data_row = max(spec.data_rows, default=last_header_row)
+    first_data_row = min(spec.data_rows, default=last_header_row)
+    header_start = (
+        f"{get_column_letter(min_column)}{first_header_row}"
+    )
+    header_end = (
+        f"{get_column_letter(max_column)}{last_header_row}"
+    )
+    full_end = f"{get_column_letter(max_column)}{last_data_row}"
+    data_range = (
+        f"{formula_worksheet.title}!"
+        f"{get_column_letter(min_column)}{first_data_row}:"
+        f"{get_column_letter(max_column)}{last_data_row}"
+        if spec.data_rows
+        else None
+    )
+    table_kind = classification.primary_content_type
+    if table_kind not in {
+        SheetContentType.STRUCTURED_TABLE,
+        SheetContentType.FINANCIAL_STATEMENT,
+        SheetContentType.MIXED_CONTENT,
+    }:
+        table_kind = SheetContentType.STRUCTURED_TABLE
+
+    return TableDatasetSpec(
+        filename=filename,
+        sheet_name=formula_worksheet.title,
+        table_kind=table_kind,
+        financial_statement_subtype=(
+            classification.financial_statement_subtype
+        ),
+        metadata=TableMetadata(
+            title=spec.metadata.title,
+            entity=None,
+            unit=spec.metadata.unit,
+            notes=spec.metadata.notes,
+        ),
+        header_row=first_header_row,
+        header_range=(
+            f"{formula_worksheet.title}!{header_start}:{header_end}"
+        ),
+        data_range=data_range,
+        full_range=(
+            f"{formula_worksheet.title}!{header_start}:{full_end}"
+        ),
+        row_count=len(extracted_rows),
+        column_count=len(columns),
+        columns=columns,
+        rows=extracted_rows,
+        layout_strategy=spec.strategy.value,
+        layout_confidence=spec.confidence,
+        normalization_spec=spec.model_dump(mode="json"),
+        warnings=warnings,
+    )
+
+
 def _extract_single_sheet(
     filename: str,
     formula_worksheet: Worksheet,
@@ -941,11 +1285,15 @@ def _sheet_contains_extractable_table(
 def extract_excel_tables(
     file_path: str | Path,
     sheet_name: str | None = None,
+    normalization_specs: (
+        list[NormalizationSpec | dict[str, Any]] | None
+    ) = None,
 ) -> WorkbookTableExtraction:
-    """
-    抽取 Excel 中所有可辨識的表格。
+    """Extract all recognized tables from an Excel workbook.
 
-    sheet_name 有值時，只抽取指定工作表。
+    When ``normalization_specs`` is supplied, the validated versioned plans
+    are replayed verbatim. This is the deterministic Refresh path; no layout
+    reinterpretation occurs.
     """
     path = Path(file_path)
 
@@ -975,6 +1323,19 @@ def extract_excel_tables(
         data_only=True,
     )
 
+    workbook_ir = build_workbook_ir(
+        formula_workbook,
+        value_workbook,
+    )
+    specs_by_sheet: dict[str, list[NormalizationSpec]] = {}
+    if normalization_specs is not None:
+        for raw_spec in normalization_specs:
+            spec = NormalizationSpec.model_validate(raw_spec)
+            specs_by_sheet.setdefault(
+                spec.sheet_name,
+                [],
+            ).append(spec)
+
     tables: list[TableDatasetSpec] = []
     skipped_sheets: list[str] = []
     warnings: list[str] = []
@@ -983,6 +1344,14 @@ def extract_excel_tables(
         available_sheet_names = (
             formula_workbook.sheetnames
         )
+        unknown_spec_sheets = sorted(
+            set(specs_by_sheet) - set(available_sheet_names)
+        )
+        if unknown_spec_sheets:
+            raise ValueError(
+                "正規化規格引用不存在的工作表："
+                + "、".join(unknown_spec_sheets)
+            )
 
         if (
             sheet_name is not None
@@ -1007,47 +1376,60 @@ def extract_excel_tables(
                     current_sheet_name
                 ]
             )
-
-            if not _sheet_contains_extractable_table(
-                classification
-            ):
-                skipped_sheets.append(
-                    current_sheet_name
-                )
-                continue
-
             formula_worksheet = (
                 formula_workbook[
                     current_sheet_name
                 ]
             )
-
             value_worksheet = (
                 value_workbook[
                     current_sheet_name
                 ]
             )
-
-            try:
-                table = _extract_single_sheet(
-                    filename=path.name,
-                    formula_worksheet=(
-                        formula_worksheet
-                    ),
-                    value_worksheet=(
-                        value_worksheet
-                    ),
-                    classification=classification,
+            specs = (
+                specs_by_sheet.get(
+                    current_sheet_name,
+                    [],
                 )
+                if normalization_specs is not None
+                else analyze_sheet_layouts(
+                    workbook_ir.sheets[
+                        current_sheet_name
+                    ]
+                )
+            )
 
-                tables.append(table)
-
-            except ValueError as error:
+            if not specs:
                 skipped_sheets.append(
                     current_sheet_name
                 )
+                continue
 
-                warnings.append(str(error))
+            extracted_before = len(tables)
+            for spec in specs:
+                try:
+                    tables.append(
+                        _extract_sheet_from_spec(
+                            filename=path.name,
+                            formula_worksheet=(
+                                formula_worksheet
+                            ),
+                            value_worksheet=(
+                                value_worksheet
+                            ),
+                            classification=(
+                                classification
+                            ),
+                            spec=spec,
+                        )
+                    )
+                except ValueError as error:
+                    warnings.append(str(error))
+
+            if len(tables) == extracted_before:
+                skipped_sheets.append(
+                    current_sheet_name
+                )
 
     finally:
         formula_workbook.close()

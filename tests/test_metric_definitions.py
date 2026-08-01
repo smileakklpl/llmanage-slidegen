@@ -4,16 +4,26 @@
 缺檔時整份 skip，不影響驗收。見 fixtures/README.md。
 """
 
-import sys
+import os
 from pathlib import Path
 
 import pandas as pd
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from paths import find_xlsx
+REPO_ROOT = Path(__file__).resolve().parent.parent
 
-XLSX = find_xlsx()
+
+def _find_reference_xlsx() -> Path | None:
+    configured = os.getenv("SLIDEGEN_XLSX")
+    candidates = [
+        Path(configured).expanduser() if configured else None,
+        REPO_ROOT / "source" / "附件四_預期修正參照資料.xlsx",
+        REPO_ROOT / "fixtures" / "data" / "附件四_預期修正參照資料.xlsx",
+    ]
+    return next((path for path in candidates if path and path.is_file()), None)
+
+
+XLSX = _find_reference_xlsx()
 CASES = [
     ("P.7預期修正_流通卡數", "流通卡數市佔率"),
     ("P.7預期修正_當月簽帳金額", "簽帳金額市占率"),

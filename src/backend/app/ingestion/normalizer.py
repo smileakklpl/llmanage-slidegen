@@ -156,23 +156,20 @@ def _visual_maps(
 
 def _apply_validation_penalty(
     confidence: float,
-    validation: (
-        WorkbookQualityReport | None
-    ),
+    validation_status: QualityStatus | None,
 ) -> tuple[float, list[str]]:
     reasons: list[str] = []
 
-    if validation is None:
+    if validation_status is None:
         return confidence, reasons
 
-    if validation.status == QualityStatus.WARNING:
+    if validation_status == QualityStatus.WARNING:
+        # Source-level warnings such as repeated totals reduce confidence but
+        # do not by themselves imply an uncertain extraction. Structural
+        # layout/invariant warnings carry explicit 人工確認 messages instead.
         confidence -= 0.05
 
-        reasons.append(
-            "資料品質驗證產生警告"
-        )
-
-    elif validation.status == QualityStatus.FAIL:
+    elif validation_status == QualityStatus.FAIL:
         confidence -= 0.15
 
         reasons.append(
@@ -192,9 +189,8 @@ def _table_confidence(
         str,
         float,
     ],
-    validation: (
-        WorkbookQualityReport | None
-    ),
+    validation_status: QualityStatus | None,
+    layout_confidence: float | None = None,
 ) -> tuple[float, list[str]]:
     confidence = SOURCE_BASE_CONFIDENCE[
         source_kind
@@ -207,9 +203,15 @@ def _table_confidence(
             ]
         )
 
+    if layout_confidence is not None:
+        confidence = min(
+            confidence,
+            layout_confidence,
+        )
+
     return _apply_validation_penalty(
         confidence,
-        validation,
+        validation_status,
     )
 
 
@@ -231,9 +233,9 @@ def _review_reasons(
             "資料由 OCR 與版面模型辨識"
         )
 
-    if confidence < 0.85:
+    if confidence < 0.90:
         reasons.append(
-            "資料集信心分數低於 0.85"
+            "資料集信心分數低於 0.90"
         )
 
     if (
@@ -350,7 +352,7 @@ def build_unified_datasets(
         page_review_map,
     ) = _visual_maps(visual)
 
-    for table in extraction.tables:
+    for table_position, table in enumerate(extraction.tables):
         source_kind = (
             _determine_source_kind(
                 inspection=inspection,
@@ -371,6 +373,15 @@ def build_unified_datasets(
             table.sheet_name
         )
 
+        table_validation_status = None
+        if validation is not None:
+            if table_position < len(validation.tables):
+                table_validation_status = (
+                    validation.tables[table_position].status
+                )
+            else:
+                table_validation_status = validation.status
+
         (
             table_confidence,
             validation_reasons,
@@ -380,7 +391,10 @@ def build_unified_datasets(
             visual_confidence_map=(
                 visual_confidence_map
             ),
-            validation=validation,
+            validation_status=table_validation_status,
+            layout_confidence=(
+                table.layout_confidence
+            ),
         )
 
         review_reasons = _review_reasons(
@@ -454,8 +468,27 @@ def build_unified_datasets(
                     )
 
                 source = extracted_cell.source
-
-                cell_evidence = (
+                evidence_sources = (
+                    extracted_cell.sources
+                    or [source]
+                )
+                evidence_note_parts: list[str] = []
+                if extracted_cell.formula is not None:
+                    evidence_note_parts.append(
+                        f"公式：{extracted_cell.formula}"
+                    )
+                if extracted_cell.transformations:
+                    evidence_note_parts.append(
+                        "轉換："
+                        + ", ".join(
+                            extracted_cell.transformations
+                        )
+                    )
+                evidence_note = (
+                    "；".join(evidence_note_parts)
+                    or None
+                )
+                cell_evidence = [
                     SourceEvidence(
                         evidence_type=(
                             EvidenceType.CELL
@@ -463,7 +496,7 @@ def build_unified_datasets(
                         source_kind=source_kind,
                         filename=table.filename,
                         sheet_name=(
-                            source.sheet
+                            evidence_source.sheet
                         ),
                         page_number=(
                             page_number
@@ -471,24 +504,17 @@ def build_unified_datasets(
                         table_index=(
                             table_index
                         ),
-                        cell=source.cell,
+                        cell=evidence_source.cell,
                         extraction_method=(
                             extraction_method
                         ),
                         confidence=(
                             cell_confidence
                         ),
-                        note=(
-                            "公式："
-                            f"{extracted_cell.formula}"
-                            if (
-                                extracted_cell.formula
-                                is not None
-                            )
-                            else None
-                        ),
+                        note=evidence_note,
                     )
-                )
+                    for evidence_source in evidence_sources
+                ]
 
                 unified_values[column.key] = (
                     UnifiedDataValue(
@@ -502,9 +528,9 @@ def build_unified_datasets(
                         confidence=(
                             cell_confidence
                         ),
-                        evidence=[
+                        evidence=(
                             cell_evidence
-                        ],
+                        ),
                         requires_human_review=(
                             requires_review
                         ),
@@ -602,6 +628,15 @@ def build_unified_datasets(
                 evidence=[
                     table_evidence
                 ],
+                layout_strategy=(
+                    table.layout_strategy
+                ),
+                layout_confidence=(
+                    table.layout_confidence
+                ),
+                normalization_spec=(
+                    table.normalization_spec
+                ),
                 warnings=table.warnings,
             )
         )

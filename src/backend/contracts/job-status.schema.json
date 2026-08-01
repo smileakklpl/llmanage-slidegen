@@ -104,7 +104,21 @@
         },
         "download_url": {
           "type": "string",
-          "description": "URL to download the artifact."
+          "description": "Presigned S3 URL to download the artifact."
+        },
+        "object_key": {
+          "type": ["string", "null"],
+          "description": "Durable S3 key for the artifact."
+        },
+        "sha256": {
+          "type": ["string", "null"],
+          "pattern": "^[0-9a-f]{64}$",
+          "description": "SHA-256 digest of the generated file."
+        },
+        "size_bytes": {
+          "type": ["integer", "null"],
+          "minimum": 0,
+          "description": "Generated file size in bytes."
         }
       },
       "additionalProperties": false

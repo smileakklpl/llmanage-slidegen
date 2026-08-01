@@ -1,0 +1,47 @@
+{
+  "contract_version": "1.0",
+  "input": {
+    "source": "fixtures\\data\\fsc_113_114",
+    "kind": "directory",
+    "file_count": 6,
+    "sha256": "7135d26822d480e3e2dbba6bbf5c9f03c89a5229409c3607d8218115a2fab1b3"
+  },
+  "request": {
+    "user_prompt_sha256": "75d5f84fda1a1bbd5f99d294601c9efd72230c09f40a563338bd236961d68842",
+    "sections": null,
+    "deck_title": "信用卡市場分析與經營洞察",
+    "generation_policy": "required",
+    "deadline_seconds": 900.0,
+    "render_reserve_seconds": 180.0
+  },
+  "configured_system_prompt_sha256": {
+    "sections": "1af14a926eceb9ac52f474d6776eb857e8e38d95e1373bc34fd8dd30abb4f3b4",
+    "charts": "ea55b5d9562d508bae62646f46b869b7ed73e12e98eefcf5d3223e8ea8d2b195",
+    "narratives": "3636f5307826bf63c2250837495d169988d1de8e08efbe4f1bef452a013a7029",
+    "review": "5b54d3b4ded36cc4134a595adda17326000989eeffe06440e2d0c8add86c6063"
+  },
+  "llm": {
+    "mode": "live",
+    "provider": "bedrock",
+    "aws_region": "ap-northeast-1",
+    "configured_stage_models": {
+      "sections": "global.anthropic.claude-haiku-4-5-20251001-v1:0",
+      "charts": "global.anthropic.claude-haiku-4-5-20251001-v1:0",
+      "narratives": "global.anthropic.claude-haiku-4-5-20251001-v1:0",
+      "narratives_fallback": "global.anthropic.claude-sonnet-4-5-20250929-v1:0",
+      "review": "global.anthropic.claude-sonnet-4-5-20250929-v1:0"
+    },
+    "capabilities": {
+      "tool_mode": "native",
+      "json_mode": "prompt",
+      "system_mode": "native"
+    },
+    "semantic_review_enabled": true,
+    "calls_by_stage": {
+      "sections": 1,
+      "charts": 10,
+      "narratives": 34,
+      "review": 25
+    }
+  }
+}

@@ -11,6 +11,10 @@ from datetime import datetime
 from pydantic import BaseModel, Field
 
 from app.schemas.jobs import Artifact, JobError, JobStage, JobStatus
+from core.contracts.generation import (
+    GenerationOptions,
+    StoredObjectRef,
+)
 
 
 class JobModel(BaseModel):
@@ -33,7 +37,11 @@ class JobModel(BaseModel):
     summary: str | None = None
     prompt: str
     filenames: list[str]
-    file_paths: list[str] = Field(default_factory=list)
+    input_objects: list[StoredObjectRef] = Field(default_factory=list)
+    ingestion_object: StoredObjectRef | None = None
+    generation_options: GenerationOptions = Field(
+        default_factory=GenerationOptions
+    )
 
 
 class JobRepository(ABC):

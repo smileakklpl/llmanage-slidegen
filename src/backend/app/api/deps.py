@@ -1,17 +1,40 @@
-"""Dependency injection helpers for API routes.
+"""Dependency injection for the S3-backed job service."""
 
-Provides singleton instances of services/repositories so all endpoints
-share the same in-memory state.
-"""
+from functools import lru_cache
 
-from app.repositories.memory_job_repository import MemoryJobRepository
+from app.core.config import settings
+from app.repositories.s3_job_repository import S3JobRepository
 from app.services.job_service import JobService
-
-# Singleton instances (shared across the process lifetime).
-_repository = MemoryJobRepository()
-_job_service = JobService(repository=_repository)
+from app.storage.s3_storage import S3ObjectStorage
+from core.contracts.generation import GenerationOptions
 
 
+@lru_cache(maxsize=1)
+def get_object_storage() -> S3ObjectStorage:
+    """Return the process-wide S3 adapter with an explicitly configured region."""
+
+    return S3ObjectStorage(
+        bucket=settings.s3_bucket,
+        region=settings.aws_region,
+        endpoint_url=settings.s3_endpoint_url,
+        presign_expires_seconds=settings.s3_presign_expires_seconds,
+    )
+
+
+@lru_cache(maxsize=1)
 def get_job_service() -> JobService:
-    """Return the global JobService instance."""
-    return _job_service
+    storage = get_object_storage()
+    repository = S3JobRepository(storage)
+    return JobService(
+        repository=repository,
+        storage=storage,
+        default_generation_options=GenerationOptions(
+            policy=settings.generation_policy,
+            deadline_seconds=settings.generation_deadline_seconds,
+            render_reserve_seconds=(
+                settings.generation_render_reserve_seconds
+            ),
+            use_fake_llm=settings.generation_use_fake_llm,
+            skip_semantic_review=settings.generation_skip_semantic_review,
+        ),
+    )

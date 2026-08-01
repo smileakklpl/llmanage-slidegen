@@ -355,11 +355,12 @@ TABLE_SKILL_TOOL_SCHEMAS = [
                 "series_names": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": "要列出的系列（表格的欄），留空代表全取。",
+                    "minItems": 1,
+                    "description": "必填；只列出與本頁主題直接相關的系列。",
                 },
                 "chart_title": {"type": "string"},
             },
-            "required": ["metric_key", "chart_title"],
+            "required": ["metric_key", "series_names", "chart_title"],
         },
     },
     {
@@ -379,11 +380,12 @@ TABLE_SKILL_TOOL_SCHEMAS = [
                 "series_names": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": "要上色的系列（欄），留空代表全取。",
+                    "minItems": 1,
+                    "description": "必填；只列出與本頁主題直接相關的系列。",
                 },
                 "chart_title": {"type": "string"},
             },
-            "required": ["metric_key", "chart_title"],
+            "required": ["metric_key", "series_names", "chart_title"],
         },
     },
 ]

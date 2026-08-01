@@ -37,6 +37,7 @@ import re
 from dataclasses import dataclass
 from typing import Any, Sequence
 
+from ..data.metric_engine import is_total_category
 from ..data.metric_store import (
     MetricNotComputableError,
     MetricNotFoundError,
@@ -235,6 +236,7 @@ def resolve_placeholder(
         ) from error
 
     series_name = _resolve_series_name(placeholder, metric)
+    series_unit = metric.unit_for(series_name)
     values = metric.values_for(series_name)
     pairs = _present_pairs(metric.categories, values)
 
@@ -247,7 +249,8 @@ def resolve_placeholder(
     selector = placeholder.selector
 
     # 類別名稱優先於彙總關鍵字：若使用者資料中真有一欄叫 "max"，
-    # 以實際類別為準，避免誤判。
+    # 以實際類別為準，避免誤判。明確選取「總計」時回傳官方總量數值；
+    # 只有回傳實體名稱或做機構比較的 selector 才排除合計列。
     if selector in metric.categories:
         index = metric.categories.index(selector)
         value = values[index]
@@ -258,7 +261,7 @@ def resolve_placeholder(
                 f"在類別 {selector!r} 沒有數值"
             )
 
-        return format_value(value, metric.unit)
+        return format_value(value, series_unit)
 
     if selector not in AGGREGATE_SELECTORS:
         raise PlaceholderError(
@@ -268,30 +271,59 @@ def resolve_placeholder(
             f"可用關鍵字：{sorted(AGGREGATE_SELECTORS)}"
         )
 
+    aggregate_pairs = pairs
+    official_total: float | None = None
+
+    if metric.axis_kind == "categorical":
+        total_pairs = [pair for pair in pairs if is_total_category(pair[0])]
+        entity_pairs = [pair for pair in pairs if not is_total_category(pair[0])]
+
+        if total_pairs:
+            # 來源總計可能包含未逐家揭露機構，權威性高於自行加總。
+            official_total = total_pairs[0][1]
+
+        aggregate_pairs = entity_pairs
+
+        if not aggregate_pairs and not (
+            selector == "sum" and official_total is not None
+        ):
+            raise PlaceholderError(
+                f"指標 {placeholder.metric_key!r} 排除合計列後沒有可用實體"
+            )
+
     if selector == "latest":
-        return format_value(pairs[-1][1], metric.unit)
+        return format_value(aggregate_pairs[-1][1], series_unit)
 
     if selector == "first":
-        return format_value(pairs[0][1], metric.unit)
+        return format_value(aggregate_pairs[0][1], series_unit)
 
     if selector == "max":
-        return format_value(max(value for _, value in pairs), metric.unit)
+        return format_value(
+            max(value for _, value in aggregate_pairs), series_unit
+        )
 
     if selector == "min":
-        return format_value(min(value for _, value in pairs), metric.unit)
+        return format_value(
+            min(value for _, value in aggregate_pairs), series_unit
+        )
 
     if selector == "sum":
-        return format_value(sum(value for _, value in pairs), metric.unit)
+        total = (
+            official_total
+            if official_total is not None
+            else sum(value for _, value in aggregate_pairs)
+        )
+        return format_value(total, series_unit)
 
     if selector == "avg":
-        total = sum(value for _, value in pairs)
-        return format_value(total / len(pairs), metric.unit)
+        total = sum(value for _, value in aggregate_pairs)
+        return format_value(total / len(aggregate_pairs), series_unit)
 
     if selector == "max_category":
-        return max(pairs, key=lambda pair: pair[1])[0]
+        return max(aggregate_pairs, key=lambda pair: pair[1])[0]
 
     if selector == "min_category":
-        return min(pairs, key=lambda pair: pair[1])[0]
+        return min(aggregate_pairs, key=lambda pair: pair[1])[0]
 
     # AGGREGATE_SELECTORS 已窮舉，理論上不會到這裡。
     raise PlaceholderError(f"未實作的 selector：{selector!r}")
@@ -458,6 +490,9 @@ def describe_available_placeholders(store: MetricStore) -> list[dict[str, Any]]:
                 "metric_key": metric_key,
                 "name": metric.name,
                 "unit": metric.unit,
+                "series_units": {
+                    name: metric.unit_for(name) for name in metric.series_names
+                },
                 "series_names": metric.series_names,
                 "categories": list(metric.categories),
                 "example": (

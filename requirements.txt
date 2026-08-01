@@ -13,20 +13,16 @@ numpy==1.26.4
 # --- 趨勢外推（缺此套件時 metric_engine 自動回退 numpy.polyfit）---
 scikit-learn==1.8.0
 
-# --- 資料契約（src/core/contracts 的 IntentSpec / SheetMap / MetricStore / PageNarrative）---
+# --- 資料契約（core generation boundary 與 backend/ppt_generation schemas）---
 pydantic==2.13.4
 
 # --- LLM 後端（依 LLM_PROVIDER 擇一安裝即可）---
 # openai：涵蓋 OpenAI 與所有 OpenAI 相容端點（地端 vLLM / Ollama / LiteLLM）
 openai==2.49.0
-# boto3：AWS Bedrock Converse API
+# boto3 / botocore：AWS Bedrock 與 S3，共用同一組精確釘版 SDK。
 boto3==1.43.57
 # botocore[crt]：`aws login` / SSO 憑證需要 CRT，否則連 STS 都打不通。
-# 不另外釘版，由上面的 boto3 決定，避免兩邊版本打架。
-botocore[crt]
-# requests：src/core/llm/ollama.py 直接打 Ollama 的 HTTP API
-# TODO 待有 .venv 後依實裝版本釘死
-requests>=2.28
+botocore[crt]==1.43.61
 
 # --- 測試 ---
 pytest==9.1.1

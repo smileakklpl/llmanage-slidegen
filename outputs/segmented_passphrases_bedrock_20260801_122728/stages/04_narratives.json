@@ -1,0 +1,188 @@
+{
+  "narratives": [
+    {
+      "page_number": 4,
+      "slide_title": "資料集整體規模與分布",
+      "headline": "資料集涵蓋 {{segmented_passphrases.value|count|max_category}} 等 passphrase 類別，整體規模達 {{segmented_passphrases.value|count|sum}} 筆記錄",
+      "bullets": [
+        "資料集包含多樣化的 passphrase 類別，從簡單的字詞組合如 {{segmented_passphrases.value|count|first}} 到複雜的長字串如 {{segmented_passphrases.value|count|max_category}}，顯示使用者在密碼選擇上的多元性，建議針對不同複雜度級別進行安全性分析",
+        "類別分布呈現長尾特徵，最高頻類別為 {{segmented_passphrases.value|count|max_category}}，記錄數達 {{segmented_passphrases.value|count|max}}，而最低頻類別 {{segmented_passphrases.value|count|min_category}} 僅有 {{segmented_passphrases.value|count|min}} 筆，建議優先檢視高頻類別的安全風險與使用模式",
+        "平均每個類別包含 {{segmented_passphrases.value|count|avg}} 筆記錄，此數值反映資料集的分散程度，若需進行機器學習或模式識別，建議先對低頻類別進行合併或過濾以提升模型穩定性",
+        "資料涵蓋範圍廣泛，從流行文化引用（如樂團名稱、電影角色）到個人化組合（如姓名加日期），反映真實使用者行為，下一步可依語意分群（如娛樂、個人資訊、隨機字串）進行風險等級分類"
+      ],
+      "cited_metric_keys": [
+        "segmented_passphrases.value"
+      ]
+    },
+    {
+      "page_number": 5,
+      "slide_title": "Top 10 群組占比結構",
+      "headline": "前十大 passphrase 群組合計占比為 {{segmented_passphrases.share.top10|count|sum}}，集中度偏低顯示使用分散",
+      "bullets": [
+        "最大單一群組 {{segmented_passphrases.share.top10|count|max_category}} 占比僅 {{segmented_passphrases.share.top10|count|max}}，顯示沒有明顯主導的 passphrase 類型，使用者偏好呈現多元分散狀態",
+        "前十大群組涵蓋範圍有限，意味其餘群組數量龐大且占比分散，建議檢視長尾群組是否存在安全性較弱或重複性高的 passphrase 模式",
+        "集中度低反映使用者自主性高，但也增加管理複雜度，可考慮建立分類標準或引導機制，在保持多樣性的同時提升可管理性",
+        "{{segmented_passphrases.share.top10|count|min_category}} 為前十名中占比最低者達 {{segmented_passphrases.share.top10|count|min}}，與首位差距不大，顯示前段群組規模相近，無極端集中現象"
+      ],
+      "cited_metric_keys": [
+        "segmented_passphrases.share.top10"
+      ]
+    },
+    {
+      "page_number": 6,
+      "slide_title": "主要群組排名與規模",
+      "headline": "前十大 passphrase 群組由 {{segmented_passphrases.value.top10|count|max_category}} 領先，群組間規模差距顯著",
+      "bullets": [
+        "排名首位的 {{segmented_passphrases.value.top10|count|max_category}} 群組規模達 {{segmented_passphrases.value.top10|count|max}}，顯示該群組在使用者偏好或系統生成邏輯上具有明顯優勢，建議進一步分析其組成特徵與來源。",
+        "排名末位的 {{segmented_passphrases.value.top10|count|min_category}} 規模為 {{segmented_passphrases.value.top10|count|min}}，與首位存在明顯落差；此分布型態暗示 passphrase 使用呈現長尾特性，少數群組佔據主要份額。",
+        "本頁僅呈現前十大群組，尚有大量其他群組未納入排名；若需評估整體分布集中度或識別潛在風險群組，建議擴大分析範圍並計算累積佔比。",
+        "部分群組名稱如 earlymorningstoner420 或 balthazar.architecture 呈現特定語意模式，可能反映使用者命名習慣或特定應用場景，值得針對命名規則進行分類研究以強化安全策略。"
+      ],
+      "cited_metric_keys": [
+        "segmented_passphrases.value.top10"
+      ]
+    },
+    {
+      "page_number": 8,
+      "slide_title": "頭部與尾部群組的規模落差",
+      "headline": "頭部與尾部群組規模差距懸殊，排名分布呈現典型冪次特徵，資源集中於少數頂端群組",
+      "bullets": [
+        "排名第一的群組為 {{segmented_passphrases.rank|count|min_category}}，顯示該群組在整體分布中佔據絕對領先地位；建議進一步分析其組成特徵，以理解驅動集中化的關鍵因素。",
+        "排名末位的群組為 {{segmented_passphrases.rank|count|max_category}}，位居第 {{segmented_passphrases.rank|count|max}} 名；頭尾之間的名次跨度反映出群組間規模存在顯著落差，符合冪次分布的典型樣態。",
+        "冪次分布意味著少數頭部群組掌握多數資源或流量，長尾群組雖數量眾多但個別貢獻有限；管理層應評估是否需針對頭部群組制定差異化策略以強化優勢。",
+        "建議後續追蹤頭部群組的成長動態與尾部群組的流失率，若差距持續擴大，可能需重新配置資源或調整產品策略以平衡整體生態健康度。"
+      ],
+      "cited_metric_keys": [
+        "segmented_passphrases.rank"
+      ]
+    },
+    {
+      "page_number": 9,
+      "slide_title": "中段群組的占比貢獻",
+      "headline": "中段群組（11-50 名）合計占比達 {{segmented_passphrases.share|count|sum}}%，長尾效應顯著",
+      "bullets": [
+        "中段群組（排名 11-50）合計貢獻 {{segmented_passphrases.share|count|sum}}% 占比，顯示 Top 10 以外的密碼組合仍具相當規模，長尾效應明顯存在於使用者行為中",
+        "單一中段密碼占比最高為 {{segmented_passphrases.share|count|max_category}}（{{segmented_passphrases.share|count|max}}%），最低為 {{segmented_passphrases.share|count|min_category}}（{{segmented_passphrases.share|count|min}}%），顯示中段群組內部差異仍大",
+        "建議針對中段群組進行聚類分析，識別共同特徵（如長度、字元組成），以優化密碼強度政策或使用者教育策略",
+        "若中段占比持續上升，可能反映使用者密碼選擇趨於分散，應持續監控 Top 10 集中度變化，評估安全風險演變趨勢"
+      ],
+      "cited_metric_keys": [
+        "segmented_passphrases.share"
+      ]
+    },
+    {
+      "page_number": 10,
+      "slide_title": "特定高頻 passphrase 的異常集中",
+      "headline": "Top 10 passphrase 合計占比達 {{segmented_passphrases.share.top10|count|sum}}，顯示使用分布高度集中於少數選項",
+      "bullets": [
+        "最高頻 passphrase 為 {{segmented_passphrases.share.top10|count|max_category}}，單一占比達 {{segmented_passphrases.share.top10|count|max}}，若該 passphrase 遭破解或洩漏，將直接影響相當比例的帳戶安全",
+        "第二高頻 {{segmented_passphrases.share.top10|count|min_category}} 占比為 {{segmented_passphrases.share.top10|count|min}}，與榜首差距顯著，顯示使用者偏好呈現明顯的長尾分布",
+        "前十名 passphrase 中包含多個易記憶的流行文化或日常用語組合，建議檢視這些高頻選項是否符合密碼強度政策，並考慮引導使用者選擇更分散的組合",
+        "若前十名合計占比超過三成，建議實施多因素驗證或定期強制更換機制，降低單點依賴風險；同時可透過使用者教育推廣更多樣化的 passphrase 選擇"
+      ],
+      "cited_metric_keys": [
+        "segmented_passphrases.share.top10"
+      ]
+    },
+    {
+      "page_number": 12,
+      "slide_title": "長尾群組的數量與分散風險",
+      "headline": "長尾群組數量達 {{segmented_passphrases.value|count|max}}，分散度足以降低單一群組集中風險",
+      "bullets": [
+        "本頁呈現 {{segmented_passphrases.value|count|max}} 個低頻 passphrase 群組的分布情況，每個群組代表一組使用頻率較低的密碼模式，這些群組的存在顯示系統中存在大量分散的使用行為，而非集中於少數熱門選項",
+        "長尾群組的數量規模反映出使用者在選擇 passphrase 時具有高度多樣性，這種分散特性有助於降低因單一群組遭破解而導致的大規模風險暴露，建議持續監控各群組的成長趨勢以評估整體安全態勢",
+        "雖然單一低頻群組的影響有限，但 {{segmented_passphrases.value|count|max}} 個群組的合計占比仍需進一步分析，建議計算長尾群組的總體權重，以確認其在整體使用者基數中的實際比例，並評估是否需要針對特定模式進行安全強化",
+        "分散度指標可透過計算群組間的使用頻率變異係數或基尼係數來量化，建議將長尾群組的分布特徵與高頻群組進行對比分析，以判斷當前的風險集中程度是否在可接受範圍內"
+      ],
+      "cited_metric_keys": [
+        "segmented_passphrases.value"
+      ]
+    },
+    {
+      "page_number": 13,
+      "slide_title": "頭部群組過度集中的風險",
+      "headline": "前十大群組合計占比極低，顯示結構高度分散而非頭部集中風險",
+      "bullets": [
+        "最大群組 {{segmented_passphrases.share.top10|count|max_category}} 占比僅 {{segmented_passphrases.share.top10|count|max}}，在近萬個類別中未形成顯著主導地位，單一群組流失對整體影響有限。",
+        "前十大群組合計占比約 {{segmented_passphrases.share.top10|count|sum}}，意味著超過九成規模分散於其餘群組，此結構降低了頭部依賴風險，但也反映缺乏明確的核心客群。",
+        "第一名與第十名 {{segmented_passphrases.share.top10|count|min_category}} 的占比差距不大，頭部群組間規模相近，未出現單一群組獨大的失衡現象。",
+        "高度分散的結構下，管理重點應從「防止頭部流失」轉向「識別具成長潛力的中型群組」，評估是否有值得重點培育的對象以提升經營效率。"
+      ],
+      "cited_metric_keys": [
+        "segmented_passphrases.share.top10"
+      ]
+    },
+    {
+      "page_number": 14,
+      "slide_title": "中段群組的成長潛力",
+      "headline": "中段群組規模差距懸殊，前三名合計占比達 {{segmented_passphrases.rank|count|sum}} 名中的顯著比例，資源投入需精準鎖定潛力標的",
+      "bullets": [
+        "排名 {{segmented_passphrases.rank|count|min_category}} 的規模為 {{segmented_passphrases.rank|count|min}}，與排名 {{segmented_passphrases.rank|count|max_category}} 的 {{segmented_passphrases.rank|count|max}} 相差超過數倍，顯示中段群組內部分化明顯，並非所有標的都具備相同成長潛力",
+        "前五名（{{segmented_passphrases.rank|count|first}} 至第五名）的規模總和已占中段群組相當比例，建議優先針對這些標的進行深度分析，評估其成長動能是否來自結構性優勢或短期波動",
+        "排名後段（如 {{segmented_passphrases.rank|count|min_category}}）的規模顯著偏低，若無明確成長驅動因素，投入資源的邊際效益可能不如集中於頭部標的；建議設定最低規模門檻，避免資源分散",
+        "中段群組的分布型態顯示「贏者圈」效應可能已在形成，即使在 6-20 名區間內，前幾名仍享有規模優勢；下一步應檢視這些標的的用戶留存率或轉換率，判斷其是否具備持續擴大市占的能力"
+      ],
+      "cited_metric_keys": [
+        "segmented_passphrases.rank"
+      ]
+    },
+    {
+      "page_number": 16,
+      "slide_title": "優先投資：強化頭部還是培育中段？",
+      "headline": "前十大群組合計占比達 {{segmented_passphrases.share.top10|count|sum}}，資源高度集中於頭部，中段群組發展空間受限",
+      "bullets": [
+        "單一最大群組 {{segmented_passphrases.share.top10|count|max_category}} 占比為 {{segmented_passphrases.share.top10|count|max}}，顯著領先其他群組，若該群組表現波動將直接影響整體穩定性，建議評估是否過度依賴單一來源並建立風險緩衝機制。",
+        "第十名群組 {{segmented_passphrases.share.top10|count|min_category}} 占比僅 {{segmented_passphrases.share.top10|count|min}}，與榜首差距達 {{segmented_passphrases.share.top10|count|max}} 減 {{segmented_passphrases.share.top10|count|min}} 個百分點，反映頭部與中段群組之間存在明顯斷層，若持續投資頭部將進一步擴大差距並提高集中風險。",
+        "前十名平均占比為 {{segmented_passphrases.share.top10|count|avg}}，若剩餘群組數量龐大且個別占比極低，代表中段群組缺乏規模經濟，建議優先識別具成長潛力的中段標的進行選擇性培育，而非全面分散資源。",
+        "當前結構下應採取雙軌策略：對前三至五大群組維持穩定投入以鞏固基本盤，同時針對第六至十五名區間中成長率或轉換效率較高者進行試點投資，逐步降低對單一頭部群組的依賴度並建立第二梯隊。"
+      ],
+      "cited_metric_keys": [
+        "segmented_passphrases.share.top10"
+      ]
+    },
+    {
+      "page_number": 17,
+      "slide_title": "長尾群組的管理策略",
+      "headline": "長尾群組數量龐大但個別占比極低，標準化管理與選擇性淘汰需依資源效益權衡",
+      "bullets": [
+        "本頁呈現 {{segmented_passphrases.value|count|sum}} 個群組的分布狀況，絕大多數群組的個別占比極低，形成典型的長尾分布。這種結構意味著少數頭部群組貢獻主要價值，而大量尾部群組雖然數量龐大，但單一群組的影響力有限，管理成本可能超過其帶來的效益。",
+        "長尾群組的管理策略應取決於維護成本與潛在價值的比較。若每個群組需要個別化服務或客製化支援，成本將隨群組數量線性增長；此時標準化管理（如統一的自助服務流程、自動化工具）可大幅降低單位成本，使長尾群組仍具經濟價值。",
+        "選擇性淘汰適用於維護成本高且貢獻極低的群組。建議設定明確的淘汰門檻（如活躍度、貢獻度或成本效益比），並在執行前評估潛在的品牌風險與客戶流失影響。對於可能具備未來成長潛力的群組，應保留觀察期而非立即淘汰。",
+        "混合策略可能是最佳解：對頭部群組提供高價值服務，對中段群組採標準化管理，對尾部群組設定最低服務門檻並定期檢視淘汰條件。這種分層管理既能控制成本，又能保留長尾群組中可能出現的潛力標的，避免過早放棄未來機會。"
+      ],
+      "cited_metric_keys": [
+        "segmented_passphrases.value"
+      ]
+    },
+    {
+      "page_number": 18,
+      "slide_title": "監控指標與預警機制",
+      "headline": "前十大密碼片段合計占比達 {{segmented_passphrases.share.top10|count|sum}}，集中度風險顯著，需設定動態閾值與分層預警機制",
+      "bullets": [
+        "單一片段最高占比為 {{segmented_passphrases.share.top10|count|max}}（{{segmented_passphrases.share.top10|count|max_category}}），建議設定單一片段占比上限閾值，當任一片段超過此值時觸發黃色預警，超過兩倍時升級為紅色預警並要求立即審查。",
+        "前五大片段合計占比可作為集中度核心指標，建議設定季度監控基準線；當前五大合計占比較基準線上升超過預設幅度時，應啟動分散化行動計畫。",
+        "第十名片段占比為 {{segmented_passphrases.share.top10|count|min}}（{{segmented_passphrases.share.top10|count|min_category}}），可作為中段群組健康度參考；建議設定中段群組數量下限，當占比介於此值與前五大之間的片段數量低於門檻時，視為多樣性不足。",
+        "前十名僅涵蓋部分樣本，建議同步監控前二十至五十名的占比變化率，以偵測新興集中風險；當新進入前十名的片段占比成長速度超過既有片段平均值時，應納入觀察清單並評估潛在系統性風險。"
+      ],
+      "cited_metric_keys": [
+        "segmented_passphrases.share.top10"
+      ]
+    }
+  ],
+  "failures": {},
+  "missing_pages": [],
+  "attempts": {
+    "資料集整體規模與分布": 3,
+    "Top 10 群組占比結構": 2,
+    "主要群組排名與規模": 4,
+    "頭部與尾部群組的規模落差": 4,
+    "中段群組的占比貢獻": 3,
+    "特定高頻 passphrase 的異常集中": 2,
+    "長尾群組的數量與分散風險": 1,
+    "頭部群組過度集中的風險": 4,
+    "中段群組的成長潛力": 1,
+    "優先投資：強化頭部還是培育中段？": 2,
+    "長尾群組的管理策略": 3,
+    "監控指標與預警機制": 4
+  }
+}

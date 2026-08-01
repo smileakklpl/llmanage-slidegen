@@ -1,0 +1,203 @@
+{
+  "contract_version": "1.0",
+  "status": "READY",
+  "sections": [
+    {
+      "title": "資料集整體規模與分布",
+      "chapter": "資料概況與分群",
+      "intent": "資料集涵蓋多少個不同的 passphrase 類別，整體規模如何？",
+      "metric_scopes": [
+        {
+          "metric_key": "segmented_passphrases.value",
+          "series_names": [
+            "count"
+          ],
+          "comparison_reason": ""
+        }
+      ],
+      "page_number": 4
+    },
+    {
+      "title": "Top 10 群組占比結構",
+      "chapter": "資料概況與分群",
+      "intent": "前十大 passphrase 群組合計占整體多少比例，集中度是高還是低？",
+      "metric_scopes": [
+        {
+          "metric_key": "segmented_passphrases.share.top10",
+          "series_names": [
+            "count"
+          ],
+          "comparison_reason": ""
+        }
+      ],
+      "page_number": 5
+    },
+    {
+      "title": "主要群組排名與規模",
+      "chapter": "資料概況與分群",
+      "intent": "哪些 passphrase 群組位居前列，它們的絕對規模分別是多少？",
+      "metric_scopes": [
+        {
+          "metric_key": "segmented_passphrases.value.top10",
+          "series_names": [
+            "count"
+          ],
+          "comparison_reason": ""
+        }
+      ],
+      "page_number": 6
+    },
+    {
+      "title": "頭部與尾部群組的規模落差",
+      "chapter": "群組差異與關鍵特徵",
+      "intent": "排名第一與排名第十的群組之間，規模差距有多大？是否呈現冪次分布？",
+      "metric_scopes": [
+        {
+          "metric_key": "segmented_passphrases.rank",
+          "series_names": [
+            "count"
+          ],
+          "comparison_reason": ""
+        }
+      ],
+      "page_number": 8
+    },
+    {
+      "title": "中段群組的占比貢獻",
+      "chapter": "群組差異與關鍵特徵",
+      "intent": "除了 Top 10 之外，中段群組（例如 11-50 名）合計貢獻多少占比？長尾效應是否顯著？",
+      "metric_scopes": [
+        {
+          "metric_key": "segmented_passphrases.share",
+          "series_names": [
+            "count"
+          ],
+          "comparison_reason": ""
+        }
+      ],
+      "page_number": 9
+    },
+    {
+      "title": "特定高頻 passphrase 的異常集中",
+      "chapter": "群組差異與關鍵特徵",
+      "intent": "是否有單一或少數幾個 passphrase 占比異常高，形成潛在的單點依賴？",
+      "metric_scopes": [
+        {
+          "metric_key": "segmented_passphrases.share.top10",
+          "series_names": [
+            "count"
+          ],
+          "comparison_reason": ""
+        }
+      ],
+      "page_number": 10
+    },
+    {
+      "title": "長尾群組的數量與分散風險",
+      "chapter": "風險與機會",
+      "intent": "有多少個低頻 passphrase 群組？它們合計占比多少？分散度是否足以降低集中風險？",
+      "metric_scopes": [
+        {
+          "metric_key": "segmented_passphrases.value",
+          "series_names": [
+            "count"
+          ],
+          "comparison_reason": ""
+        }
+      ],
+      "page_number": 12
+    },
+    {
+      "title": "頭部群組過度集中的風險",
+      "chapter": "風險與機會",
+      "intent": "若 Top 3 或 Top 5 群組占比過高，一旦這些群組流失或變動，對整體影響有多大？",
+      "metric_scopes": [
+        {
+          "metric_key": "segmented_passphrases.share.top10",
+          "series_names": [
+            "count"
+          ],
+          "comparison_reason": ""
+        }
+      ],
+      "page_number": 13
+    },
+    {
+      "title": "中段群組的成長潛力",
+      "chapter": "風險與機會",
+      "intent": "排名 6-20 的群組是否有機會透過資源投入提升占比，分散對頭部的依賴？",
+      "metric_scopes": [
+        {
+          "metric_key": "segmented_passphrases.rank",
+          "series_names": [
+            "count"
+          ],
+          "comparison_reason": ""
+        }
+      ],
+      "page_number": 14
+    },
+    {
+      "title": "優先投資：強化頭部還是培育中段？",
+      "chapter": "行動建議",
+      "intent": "基於當前分布結構，我們應該鞏固既有頭部群組的領先地位，還是分散資源培育中段群組以降低集中風險？",
+      "metric_scopes": [
+        {
+          "metric_key": "segmented_passphrases.share.top10",
+          "series_names": [
+            "count"
+          ],
+          "comparison_reason": ""
+        },
+        {
+          "metric_key": "segmented_passphrases.rank",
+          "series_names": [
+            "count"
+          ],
+          "comparison_reason": ""
+        }
+      ],
+      "page_number": 16
+    },
+    {
+      "title": "長尾群組的管理策略",
+      "chapter": "行動建議",
+      "intent": "對於數量龐大但個別占比極低的長尾群組，應該採取標準化管理降低成本，還是選擇性淘汰？",
+      "metric_scopes": [
+        {
+          "metric_key": "segmented_passphrases.value",
+          "series_names": [
+            "count"
+          ],
+          "comparison_reason": ""
+        }
+      ],
+      "page_number": 17
+    },
+    {
+      "title": "監控指標與預警機制",
+      "chapter": "行動建議",
+      "intent": "我們應該設定哪些關鍵監控指標（例如 Top 5 占比上限、中段群組數量下限），以及觸發管理介入的預警閾值？",
+      "metric_scopes": [
+        {
+          "metric_key": "segmented_passphrases.share.top10",
+          "series_names": [
+            "count"
+          ],
+          "comparison_reason": ""
+        },
+        {
+          "metric_key": "segmented_passphrases.rank",
+          "series_names": [
+            "count"
+          ],
+          "comparison_reason": ""
+        }
+      ],
+      "page_number": 18
+    }
+  ],
+  "question_to_user": "",
+  "dropped_metric_keys": {},
+  "delivery_warning": null
+}

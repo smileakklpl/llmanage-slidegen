@@ -1,0 +1,36 @@
+{
+  "pptx": "C:\\git-repo\\llmanage-slidegen\\outputs\\bedrock_finance_20260801_024006\\deck.pptx",
+  "xlsx": "C:\\git-repo\\llmanage-slidegen\\outputs\\bedrock_finance_20260801_024006\\deck_data.xlsx",
+  "deckspec": "C:\\git-repo\\llmanage-slidegen\\outputs\\bedrock_finance_20260801_024006\\deckspec.json",
+  "page_count": 16,
+  "slide_count": 22,
+  "divider_count": 2,
+  "chapters": [
+    "趨勢與變化",
+    "分群與比較"
+  ],
+  "chart_count": 16,
+  "warnings": [
+    "已移除模板中 4 張示範頁（保留首頁）"
+  ],
+  "placeholder_errors": {},
+  "sheet_names": [
+    "索引",
+    "P.4_整體彙總（各期） 趨勢外推",
+    "P.5_整體彙總（各期） 期間成長率",
+    "P.6_整體彙總（各期）",
+    "P.8_循環信用餘額 排名",
+    "P.9_循環信用餘額 占比",
+    "P.10_循環信用餘額 占比 Top 10",
+    "P.11_循環信用餘額",
+    "P.12_循環信用餘額 Top 10",
+    "P.13_有效卡數 排名",
+    "P.14_有效卡數 占比",
+    "P.15_有效卡數 占比 Top 10",
+    "P.16_有效卡數",
+    "P.17_有效卡數 Top 10",
+    "P.18_未到期分期付款餘額 排名",
+    "P.19_未到期分期付款餘額 占比",
+    "P.20_未到期分期付款餘額 占比 Top 10"
+  ]
+}

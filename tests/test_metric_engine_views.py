@@ -289,3 +289,41 @@ def test_forecast_categories_are_labelled_as_estimates():
         for category in forecast.categories[-3:]
     )
     assert any("外推值" in note for note in forecast.notes)
+
+
+# ---------------------------------------------------------------------------
+# derive_yoy（FR-1.5：資料決定是否可算）
+# ---------------------------------------------------------------------------
+def test_yoy_is_blocked_without_a_base_year():
+    base = MetricSeries(
+        metric_key="跨域指標.value",
+        name="跨域指標",
+        categories=["A", "B"],
+        series={"114年": [120.0, 80.0]},
+        unit="單位",
+    )
+
+    yoy = metric_engine.derive_yoy(base)
+
+    assert yoy.computable is False
+    assert yoy.series == {}
+    assert yoy.notes
+
+
+def test_yoy_is_computed_when_two_years_exist():
+    base = MetricSeries(
+        metric_key="跨域指標.value",
+        name="跨域指標",
+        categories=["A", "B", "C"],
+        series={
+            "113年": [100.0, 80.0, 0.0],
+            "114年": [120.0, 60.0, 10.0],
+        },
+        unit="單位",
+    )
+
+    yoy = metric_engine.derive_yoy(base)
+
+    assert yoy.computable is True
+    assert yoy.series == {"114 vs 113": [20.0, -25.0, None]}
+    assert yoy.formula == "(當年 - 去年) / 去年 × 100%"

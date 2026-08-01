@@ -24,7 +24,7 @@ import logging
 import random
 import re
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Callable, Sequence
 
 from . import config
@@ -40,8 +40,39 @@ class LLMError(RuntimeError):
     """LLM 呼叫或回應驗證失敗。"""
 
 
+class LLMDeadlineExceeded(LLMError):
+    """Raised before another LLM attempt would consume the render reserve."""
+
+
 class SchemaValidationError(LLMError):
     """LLM 回傳的 JSON 不符合要求的 schema。"""
+
+
+def _resolve_settings(
+    settings: config.LLMSettings | None,
+) -> config.LLMSettings:
+    """Resolve settings while preserving strict-mode configuration errors."""
+    return settings or config.load_llm_settings()
+
+
+def _cap_request_timeout(
+    settings: config.LLMSettings,
+    deadline_monotonic: float | None,
+) -> config.LLMSettings:
+    """Cap one in-flight SDK request so it cannot consume render reserve."""
+    if deadline_monotonic is None:
+        return settings
+
+    remaining = deadline_monotonic - time.monotonic()
+    if remaining < 0.1:
+        raise LLMDeadlineExceeded(
+            "LLM 剩餘時間不足 0.1 秒，保留時間給 render/verify"
+        )
+
+    return replace(
+        settings,
+        timeout_seconds=min(settings.timeout_seconds, remaining),
+    )
 
 
 @dataclass
@@ -262,6 +293,8 @@ def _call_openai_compatible(
         api_key=settings.api_key or "not-required",
         base_url=settings.base_url,
         timeout=settings.timeout_seconds,
+        # 外層 _with_retry 才能在每次 attempt 前重新計算 monotonic deadline。
+        max_retries=0,
     )
 
     request: dict[str, Any] = {
@@ -309,6 +342,7 @@ def _call_bedrock(
     """
     try:
         import boto3
+        from botocore.config import Config as BotoConfig
     except ImportError as error:
         raise LLMError(
             "尚未安裝 boto3 套件。請執行 python -m pip install boto3"
@@ -319,7 +353,15 @@ def _call_bedrock(
             "LLM_PROVIDER=bedrock 需要顯式指定 AWS_REGION 環境變數"
         )
 
-    client = boto3.client("bedrock-runtime", region_name=settings.aws_region)
+    client = boto3.client(
+        "bedrock-runtime",
+        region_name=settings.aws_region,
+        config=BotoConfig(
+            connect_timeout=settings.timeout_seconds,
+            read_timeout=settings.timeout_seconds,
+            retries={"total_max_attempts": 1},
+        ),
+    )
 
     system_prompts = [
         {"text": message["content"]}
@@ -452,6 +494,7 @@ def _with_retry(
     operation: Callable[[], Any],
     max_retries: int,
     backoff_base: float,
+    deadline_monotonic: float | None = None,
 ) -> Any:
     """
     指數退避重試。
@@ -466,6 +509,12 @@ def _with_retry(
     last_error: BaseException | None = None
 
     for attempt in range(max_retries + 1):
+        if (
+            deadline_monotonic is not None
+            and time.monotonic() >= deadline_monotonic
+        ):
+            raise LLMDeadlineExceeded("LLM 階段已達時間上限，保留時間給 render/verify")
+
         try:
             return operation()
         except (LLMError, json.JSONDecodeError) as error:
@@ -498,7 +547,16 @@ def _with_retry(
                 delay,
                 error,
             )
-            time.sleep(delay)
+
+        if (
+            deadline_monotonic is not None
+            and time.monotonic() + delay >= deadline_monotonic
+        ):
+            raise LLMDeadlineExceeded(
+                "LLM 重試退避會超過時間上限，保留時間給 render/verify"
+            ) from last_error
+
+        time.sleep(delay)
 
     raise LLMError(f"LLM 呼叫重試 {max_retries + 1} 次仍失敗：{last_error}")
 
@@ -515,6 +573,7 @@ def complete_json(
     temperature: float = 0.0,
     max_retries: int = DEFAULT_MAX_RETRIES,
     settings: config.LLMSettings | None = None,
+    deadline_monotonic: float | None = None,
 ) -> Any:
     """
     要求 LLM 回傳符合 ``schema`` 的 JSON，驗證通過後回傳解析結果。
@@ -531,7 +590,7 @@ def complete_json(
     Raises:
         LLMError: 重試用盡仍無法取得合法回應。
     """
-    resolved = settings or config.load_llm_settings()
+    resolved = _resolve_settings(settings)
     backend = _dispatch_backend(resolved)
     model = resolved.model_for(stage)
 
@@ -566,7 +625,8 @@ def complete_json(
     messages.append({"role": "user", "content": user_content})
 
     def operation() -> Any:
-        raw = backend(resolved, model, messages, None, temperature)
+        request_settings = _cap_request_timeout(resolved, deadline_monotonic)
+        raw = backend(request_settings, model, messages, None, temperature)
         content = raw.get("content") or ""
 
         if not content.strip():
@@ -576,7 +636,12 @@ def complete_json(
         validate_against_schema(payload, schema)
         return payload
 
-    return _with_retry(operation, max_retries, resolved.backoff_base)
+    return _with_retry(
+        operation,
+        max_retries,
+        resolved.backoff_base,
+        deadline_monotonic=deadline_monotonic,
+    )
 
 
 def complete_tool_call(
@@ -588,6 +653,7 @@ def complete_tool_call(
     temperature: float = 0.0,
     max_retries: int = DEFAULT_MAX_RETRIES,
     settings: config.LLMSettings | None = None,
+    deadline_monotonic: float | None = None,
 ) -> ToolCall:
     """
     要求 LLM 從 ``tool_schemas`` 白名單中選一個工具並填入參數。
@@ -597,7 +663,7 @@ def complete_tool_call(
     MetricStore）由 ``chart_planner.validate_chart_plan()`` 負責，
     本函式不越權判斷。
     """
-    resolved = settings or config.load_llm_settings()
+    resolved = _resolve_settings(settings)
 
     # 沒有原生 tool calling 的模型（如 Gemma），改以 JSON 輸出模擬工具選擇。
     if resolved.tool_mode == "json":
@@ -609,6 +675,7 @@ def complete_tool_call(
             temperature=temperature,
             max_retries=max_retries,
             settings=resolved,
+            deadline_monotonic=deadline_monotonic,
         )
 
     backend = _dispatch_backend(resolved)
@@ -624,7 +691,10 @@ def complete_tool_call(
     messages.append({"role": "user", "content": prompt})
 
     def operation() -> ToolCall:
-        raw = backend(resolved, model, messages, tool_schemas, temperature)
+        request_settings = _cap_request_timeout(resolved, deadline_monotonic)
+        raw = backend(
+            request_settings, model, messages, tool_schemas, temperature
+        )
         calls = raw.get("tool_calls") or []
 
         if not calls:
@@ -648,7 +718,12 @@ def complete_tool_call(
         validate_against_schema(arguments, selected["parameters"])
         return ToolCall(name=name, arguments=arguments)
 
-    return _with_retry(operation, max_retries, resolved.backoff_base)
+    return _with_retry(
+        operation,
+        max_retries,
+        resolved.backoff_base,
+        deadline_monotonic=deadline_monotonic,
+    )
 
 
 #: 模擬工具呼叫時要求 LLM 回傳的外層結構。
@@ -671,6 +746,7 @@ def _emulate_tool_call(
     temperature: float,
     max_retries: int,
     settings: config.LLMSettings,
+    deadline_monotonic: float | None,
 ) -> ToolCall:
     """
     以 JSON 輸出模擬工具呼叫，供不支援原生 tool calling 的模型使用。
@@ -712,6 +788,7 @@ def _emulate_tool_call(
         temperature=temperature,
         max_retries=max_retries,
         settings=settings,
+        deadline_monotonic=deadline_monotonic,
     )
 
     name = payload["tool_name"]

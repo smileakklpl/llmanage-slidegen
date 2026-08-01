@@ -1,0 +1,67 @@
+{
+  "contract_version": "1.0",
+  "input": {
+    "source": "C:\\git-repo\\llmanage-slidegen\\outputs\\segmented_passphrases_bedrock_20260801_122728\\ingestion.json",
+    "kind": "normalized_json",
+    "file_count": 0,
+    "sha256": "52207e0083dd0d9b1a159687cc7fd710efc6b51c69e89f45a03b7a6800045adc",
+    "ingestion_sha256": "52207e0083dd0d9b1a159687cc7fd710efc6b51c69e89f45a03b7a6800045adc",
+    "source_objects": [],
+    "source_objects_sha256_complete": false
+  },
+  "contracts": {
+    "generation_request": "1.1",
+    "ingestion": "1.0",
+    "metric_store": "1.0",
+    "section_plan": "1.0",
+    "chart_plan": "1.0",
+    "narrative": "1.0",
+    "review": "1.0",
+    "deckspec": "1.0",
+    "deckspec_sha256": "c5637a9e5bd60fd2c2e0281e55c365a21a015224f64b7ac8ef5186304f4046a1"
+  },
+  "request": {
+    "user_prompt_sha256": "ea69a5ca997c356afb9a3e4128374eb308253be6e09a892eaac5b675a8236f1e",
+    "sections": [
+      "資料概況與分群",
+      "群組差異與關鍵特徵",
+      "風險與機會",
+      "行動建議"
+    ],
+    "deck_title": "Segmented Passphrases 資料洞察",
+    "generation_policy": "required",
+    "deadline_seconds": 900.0,
+    "render_reserve_seconds": 180.0,
+    "llm_budget_exhausted": false
+  },
+  "configured_system_prompt_sha256": {
+    "sections": "f44bb5c898cf8938874b26808519e824cbdf970237895dc80035217f8795830e",
+    "charts": "ea55b5d9562d508bae62646f46b869b7ed73e12e98eefcf5d3223e8ea8d2b195",
+    "narratives": "3e8387372731dd453e3282f3c48239e3b6fa02fb55183fca070c2d5f84362bfe",
+    "review": "a412cf9f7a662b7b3628cec181de97c096f3141f466ee3e4b4be2229142dd844"
+  },
+  "llm": {
+    "mode": "live",
+    "provider": "bedrock",
+    "aws_region": "us-west-2",
+    "configured_stage_models": {
+      "sections": "global.anthropic.claude-sonnet-4-5-20250929-v1:0",
+      "charts": "global.anthropic.claude-sonnet-4-5-20250929-v1:0",
+      "narratives": "global.anthropic.claude-sonnet-4-5-20250929-v1:0",
+      "narratives_fallback": "global.anthropic.claude-opus-4-5-20251101-v1:0",
+      "review": "global.anthropic.claude-opus-4-5-20251101-v1:0"
+    },
+    "capabilities": {
+      "tool_mode": "native",
+      "json_mode": "native",
+      "system_mode": "native"
+    },
+    "semantic_review_enabled": true,
+    "calls_by_stage": {
+      "sections": 1,
+      "charts": 13,
+      "narratives": 35,
+      "review": 13
+    }
+  }
+}

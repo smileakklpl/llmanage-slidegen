@@ -1,0 +1,166 @@
+{
+  "reviews": [
+    {
+      "page_number": 4,
+      "section_title": "Executive Summary",
+      "status": "REJECTED",
+      "rule_issues": [],
+      "semantic_issues": [
+        "要點1邏輯錯誤：「流通卡數於58,799,464達58,799,464張，至60,485,911成長至60,485,911張，兩年累計增幅僅60,485,911減58,799,464」—— 這段文字將數值本身當成期別，且「增幅僅60,485,911減58,799,464」未完成計算，應明確寫出增幅數值與百分比",
+        "要點1與要點4重複使用「60,485,911」作為期別描述，但實際上這是數值而非時間點，造成語意混淆",
+        "要點2的因果推論過度延伸：從簽帳金額波動直接推論「銀行應預先配置授信額度與風控資源」缺乏中間論證，波動可能來自正常季節性而非風險事件",
+        "要點3的結論「簽帳金額成長幅度明顯超越流通卡數增速」需要明確的增長率數據支撐，目前僅有絕對值比較",
+        "要點4再次出現「於60,485,911分別達60,485,911與453,663,538」的錯誤表述，將數值誤用為時間點",
+        "整體敘事未明確標示時間範圍（11301-11412代表113年1月至114年12月），導致「兩年」等時間描述缺乏上下文",
+        "headline與要點的邏輯順序不佳：headline提到「存量競爭」但要點1才解釋原因，應調整為結論先行後再展開論證"
+      ],
+      "target_agent": "narrative_writer",
+      "delivery_status": "APPROVED_WITH_WARNING",
+      "hard_rules_passed": true,
+      "selected_candidate_hard_issues": [],
+      "candidate_source": "writer_fallback",
+      "delivery_warning": "升級模型後仍無法產生合法修正版：Read timeout on endpoint URL: \"https://bedrock-runtime.ap-northeast-1.amazonaws.com/model/global.anthropic.claude-sonnet-4-5-20250929-v1%3A0/converse\"；頁面修正期限已到；語意審查未核准，採用期限內最佳合法候選",
+      "writer_attempts": 5,
+      "reviewer_attempts": 4
+    },
+    {
+      "page_number": 6,
+      "section_title": "市場成長動能分析",
+      "status": "REJECTED",
+      "rule_issues": [],
+      "semantic_issues": [
+        "敘事中提到「排除11407異常值後，113年其餘月份簽帳金額成長率平均約3.0%」，但圖表呈現的是折線圖，折線圖適合展示趨勢變化，若要強調排除異常值後的平均水準，應考慮使用柱狀圖或在圖表中標示平均線，當前圖表類型與敘事重點不完全匹配",
+        "敘事中大量使用「研判」、「建議」等詞彙進行因果推論（如「可能受該月大型促銷活動或低基期效應影響」），但資料本身僅呈現成長率數值，並無促銷活動、基期效應等佐證資料，此推論缺乏數據支撐，屬過度延伸",
+        "敘事稱「循環信用餘額成長率全期間介於-2.6%至3.4%之間，遠低於簽帳金額成長幅度」，但未說明簽帳金額成長率的完整區間（僅提及11407的65.9%極端值），比較基礎不完整，且若排除異常值後簽帳金額平均成長3.0%，則與循環餘額的-2.6%至3.4%區間並非「遠低於」的關係，比較結論與數據不符",
+        "敘事風格過於冗長且充斥建議性語句（如「建議排除」、「建議評估」、「應強化」），不符合顧問報告「結論先行、數據支撐、簡潔有力」的標準，應先陳述核心發現，再以數據佐證，避免過多操作性建議稀釋洞察重點"
+      ],
+      "target_agent": "narrative_writer",
+      "delivery_status": "APPROVED_WITH_WARNING",
+      "hard_rules_passed": true,
+      "selected_candidate_hard_issues": [],
+      "candidate_source": "writer_fallback",
+      "delivery_warning": "升級模型後仍無法產生合法修正版：Read timeout on endpoint URL: \"https://bedrock-runtime.ap-northeast-1.amazonaws.com/model/global.anthropic.claude-sonnet-4-5-20250929-v1%3A0/converse\"；頁面修正期限已到；語意審查未核准，採用期限內最佳合法候選",
+      "writer_attempts": 5,
+      "reviewer_attempts": 4
+    },
+    {
+      "page_number": 7,
+      "section_title": "呆帳風險趨勢",
+      "status": "REJECTED",
+      "rule_issues": [],
+      "semantic_issues": [
+        "敘事中多次提及「11312達到峰值703,963」、「114年全年轉銷呆帳金額整體維持在654,750至645,165區間」等具體數值，但圖表單位標示為「未標示」，在銀行高階簡報中缺乏單位（千元/百萬元）會造成解讀困難",
+        "第二點要點稱「114年全年」維持在某區間，但類別軸顯示資料僅到11412（114年12月），若資料確實涵蓋全年則表述合理，但需確認「全年」用詞是否準確，避免給人資料不完整的印象",
+        "第一點提及「該期可能集中處理逾期帳款」屬於推測性因果解釋，但並無資料支撐此推論（例如逾期率、催收政策變動等佐證），建議改為較中性的描述如「該期轉銷金額達到峰值」",
+        "第三點「若未來經濟環境轉差或失業率攀升，可能觸發新一波呆帳壓力」屬於情境假設而非資料洞察，雖可作為風險提示，但在結論先行的顧問報告中應將重點放在已觀察到的趨勢，而非未來可能性",
+        "第四點「反映銀行業可能已完成前期集中清理」同樣是推測性結論，缺乏直接證據（如政策文件、清理計畫時程等），建議改為「波動幅度收斂，顯示轉銷金額進入相對穩定期」"
+      ],
+      "target_agent": "narrative_writer",
+      "delivery_status": "APPROVED_WITH_WARNING",
+      "hard_rules_passed": true,
+      "selected_candidate_hard_issues": [],
+      "candidate_source": "writer_fallback",
+      "delivery_warning": "Reviewer 無法在期限內完成：Read timeout on endpoint URL: \"https://bedrock-runtime.ap-northeast-1.amazonaws.com/model/global.anthropic.claude-sonnet-4-5-20250929-v1%3A0/converse\"；頁面修正期限已到；語意審查未核准，採用期限內最佳合法候選",
+      "writer_attempts": 5,
+      "reviewer_attempts": 5
+    },
+    {
+      "page_number": 9,
+      "section_title": "客戶活躍度指標：有效卡數與簽帳金額的關係",
+      "status": "REJECTED",
+      "rule_issues": [],
+      "semantic_issues": [
+        "圖表類型不適合：combo 圖通常用於展示不同量綱或不同性質的指標（如金額與比率），但「有效卡數」與「簽帳金額」都是絕對數值且量綱差異極大（卡數約 4000 萬，金額可能數千億），兩者放在同一座標軸會導致其中一條線被壓縮而無法辨識趨勢，應改用雙軸折線圖或分別呈現成長率",
+        "敘事過度延伸因果推論：「有效卡數增長未能帶動簽帳金額同步擴張」的結論缺乏關鍵數據支撐——未提供「單卡平均簽帳金額」的實際計算值，僅憑兩條絕對值曲線的視覺差異就推論單卡金額下降，但若簽帳金額也在成長（只是斜率不同），結論可能不成立",
+        "數值比較方向錯誤：敘事稱「累計增幅達 40,554,453 相較 37,887,426」，但 40,554,453 是期末值而非增幅，增幅應為 40,554,453 - 37,887,426 = 2,667,027，這是基本的數值表述錯誤",
+        "敘事與資料形狀衝突：稱「11407 達到高點」但未說明這是否為資料期間內的真實高點，且若簽帳金額在下半年「出現回落」，應明確指出是哪幾個月份，否則讀者無法驗證此論述",
+        "缺乏結論先行結構：headline 雖點出「步調不一致」，但四個要點都在鋪陳現象，直到第四點才提出「建議按客群分層分析」，應將核心洞察（如「單卡消費力下降 X%」或「新客活躍度僅為既有客戶 Y%」）前置，並用數據量化支撐"
+      ],
+      "target_agent": "chart_agent",
+      "delivery_status": "APPROVED_WITH_WARNING",
+      "hard_rules_passed": true,
+      "selected_candidate_hard_issues": [],
+      "candidate_source": "writer",
+      "delivery_warning": "語意 Reviewer 建議重新規劃圖表；既有圖表已通過確定性驗證；語意審查未核准，採用期限內最佳合法候選",
+      "writer_attempts": 1,
+      "reviewer_attempts": 1
+    },
+    {
+      "page_number": 11,
+      "section_title": "消費信貸結構：循環信用與分期付款的占比",
+      "status": "REJECTED",
+      "rule_issues": [],
+      "semantic_issues": [
+        "敘事第二點存在明顯的數值邏輯錯誤：未到期分期付款餘額從 194,262,158 到 187,216,932 實際上是下降而非「大幅成長」，敘事卻描述為成長幅度明顯高於循環信用",
+        "敘事第二點的因果推論與數據矛盾：若分期付款餘額實際下降，則無法支撐「消費者偏好將大額消費轉為固定期數攤還」的結論",
+        "敘事第三點提及「分期付款餘額持續擴大與循環信用的差距」與實際數據趨勢不符，若分期付款餘額下降而循環信用上升，差距應該是縮小而非擴大",
+        "headline 宣稱「分期付款餘額在觀察期間內超越循環信用」，但從數據來看分期付款在期初就已經高於循環信用（194M vs 106M），並非在觀察期間內發生的超越事件",
+        "敘事第四點提及分期付款在 11407 達到高點 241,120,341，但期初值為 194,262,158、期末值為 187,216,932，若中間確實有高點 241M，則整體趨勢應描述為「先升後降」而非單純的成長"
+      ],
+      "target_agent": "narrative_writer",
+      "delivery_status": "APPROVED_WITH_WARNING",
+      "hard_rules_passed": true,
+      "selected_candidate_hard_issues": [],
+      "candidate_source": "writer_fallback",
+      "delivery_warning": "Reviewer 無法在期限內完成：Read timeout on endpoint URL: \"https://bedrock-runtime.ap-northeast-1.amazonaws.com/model/global.anthropic.claude-sonnet-4-5-20250929-v1%3A0/converse\"；頁面修正期限已到；語意審查未核准，採用期限內最佳合法候選",
+      "writer_attempts": 7,
+      "reviewer_attempts": 5
+    },
+    {
+      "page_number": 13,
+      "section_title": "呆帳風險與簽帳金額的關係",
+      "status": "REJECTED",
+      "rule_issues": [],
+      "semantic_issues": [
+        "敘事中多次提及「轉銷呆帳金額與簽帳金額比例」、「呆帳與簽帳的比例關係」、「每單位簽帳所對應的風險資產」，但圖表僅呈現兩個絕對值系列，並未計算或展示比例指標。若要論述比例趨勢，應使用折線圖呈現「呆帳率」（轉銷呆帳金額/簽帳金額）的時間序列變化",
+        "敘事稱「轉銷呆帳金額在11312達到高峰」，但類別軸最後一期為11412，且未提供各期數值，無法確認11312是否為峰值。若11412期數值更高，此論述即為錯誤",
+        "敘事中「較113年1月增幅顯著」、「簽帳金額385,195,508至453,663,538的成長速度相對平穩」、「轉銷呆帳金額502,737至645,165的波動幅度更大」等表述，僅引用起訖點數值，未說明中間期間的波動模式，無法支撐「持續上升」、「平穩」、「波動幅度更大」等結論",
+        "標題稱「信用風險惡化趨勢明顯」，但combo圖同時呈現兩個量級差異極大的指標（簽帳金額4-5億 vs 轉銷呆帳50-60萬），視覺上難以判讀比例關係變化，不適合用於論證「比例惡化」此一相對性結論"
+      ],
+      "target_agent": "chart_agent",
+      "delivery_status": "APPROVED_WITH_WARNING",
+      "hard_rules_passed": true,
+      "selected_candidate_hard_issues": [],
+      "candidate_source": "writer",
+      "delivery_warning": "語意 Reviewer 建議重新規劃圖表；既有圖表已通過確定性驗證；語意審查未核准，採用期限內最佳合法候選",
+      "writer_attempts": 1,
+      "reviewer_attempts": 1
+    },
+    {
+      "page_number": 15,
+      "section_title": "市場未來趨勢預測",
+      "status": "REJECTED",
+      "rule_issues": [],
+      "semantic_issues": [
+        "要點1存在嚴重數值邏輯錯誤：聲稱流通卡數從58,799,464在11412達到高點後下滑至60,485,911，但60,485,911明顯大於58,799,464，這是上升而非下滑，敘事方向完全相反",
+        "要點1的因果推論過度延伸：即使流通卡數真的下滑，也不能直接推論出「新戶開發難度提升」和「應轉向提升活化率」等策略建議，這些結論需要更多維度的數據支撐",
+        "要點2存在數值比較錯誤：聲稱簽帳金額從385,195,508成長至453,663,538，但預測未來三期將維持上升趨勢至448,119,388.1，而448,119,388.1小於453,663,538，這是下降而非上升",
+        "要點2違反資料注意事項：將預測值448,119,388.1與歷史實際值453,663,538直接比較，並聲稱「仍將維持上升趨勢」，混淆了預測值與實際值的性質",
+        "headline的結論「流通卡數進入負成長」與數據呈現的趨勢矛盾，需要先確認實際數據走勢再下結論"
+      ],
+      "target_agent": "narrative_writer",
+      "delivery_status": "APPROVED_WITH_WARNING",
+      "hard_rules_passed": true,
+      "selected_candidate_hard_issues": [],
+      "candidate_source": "writer_fallback",
+      "delivery_warning": "升級模型後仍無法產生合法修正版：第 3 個要點代入數值後 134 字，超過上限 120 字，請拆句或精簡；語意審查未核准，採用期限內最佳合法候選",
+      "writer_attempts": 6,
+      "reviewer_attempts": 4
+    },
+    {
+      "page_number": 17,
+      "section_title": "台新的戰略建議與行動方向",
+      "status": "APPROVED",
+      "rule_issues": [],
+      "semantic_issues": [],
+      "target_agent": null,
+      "delivery_status": "APPROVED",
+      "hard_rules_passed": true,
+      "selected_candidate_hard_issues": [],
+      "candidate_source": "writer",
+      "delivery_warning": null,
+      "writer_attempts": 2,
+      "reviewer_attempts": 1
+    }
+  ]
+}

@@ -2,30 +2,24 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
-# Install backend dependencies
-COPY src/backend/requirements.txt ./requirements-backend.txt
-RUN pip install --no-cache-dir -r requirements-backend.txt
+# The backend now invokes core and ppt_generation in-process, so the image is
+# built from the repository root and installs both pinned requirement sets.
+COPY requirements.txt /tmp/requirements-root.txt
+COPY src/backend/requirements.txt /tmp/requirements-backend.txt
+RUN pip install --no-cache-dir \
+    -r /tmp/requirements-root.txt \
+    -r /tmp/requirements-backend.txt
 
-# Install ppt_generation dependencies (python-pptx, pandas, numpy, etc.)
-COPY requirements.txt ./requirements-ppt.txt
-RUN pip install --no-cache-dir -r requirements-ppt.txt
-
-# Copy backend application code
-COPY src/backend/app/ ./app/
-
-# Copy ppt_generation module into src/ppt_generation/
-# (config.py uses parents[3] from src/ppt_generation/core/config.py to find PROJECT_ROOT)
-# Layout: /app/src/ppt_generation/core/config.py → parents[3] = /app = PROJECT_ROOT
+COPY src/core/ ./src/core/
 COPY src/ppt_generation/ ./src/ppt_generation/
-
-# Copy template.pptx where config.py expects it (PROJECT_ROOT/source/)
+COPY src/backend/app/ ./src/backend/app/
+COPY prompts/ ./prompts/
+COPY config/ ./config/
 COPY source/template.pptx ./source/template.pptx
+COPY main.py ./main.py
 
-# Create outputs directory
-RUN mkdir -p ./outputs
+ENV PYTHONPATH=/app/src:/app/src/backend
 
-# Expose port
 EXPOSE 8000
 
-# Run with uvicorn
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["python", "main.py"]
