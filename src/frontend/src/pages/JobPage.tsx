@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { getJobStatus, sendJobEmail } from "@/api/jobsApi";
 import { JobProgress } from "@/components/JobProgress";
@@ -9,6 +9,7 @@ import { useI18n } from "@/i18n";
 
 export function JobPage() {
   const { jobId } = useParams<{ jobId: string }>();
+  const navigate = useNavigate();
   const { t } = useI18n();
 
   const { data: job, error, refetch } = useQuery({
@@ -17,12 +18,18 @@ export function JobPage() {
     enabled: !!jobId,
     refetchInterval: (query) => {
       const status = query.state.data?.status;
-      if (status === "succeeded" || status === "failed") {
+      if (status === "succeeded" || status === "failed" || status === "waiting_review") {
         return false;
       }
       return 2500;
     },
   });
+
+  // Redirect to review page when job needs human review
+  if (job?.status === "waiting_review" && jobId) {
+    navigate(`/jobs/${jobId}/review`, { replace: true });
+    return null;
+  }
 
   if (error) {
     return (

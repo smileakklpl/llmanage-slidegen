@@ -7,6 +7,21 @@ import type { JobCreateResponse, JobStatusResponse } from "@/types";
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "";
 
+export interface JobReviewResponse {
+  job_id: string;
+  review_required_count: number;
+  can_resume: boolean;
+  datasets: Record<string, unknown>[];
+  sources: { filename: string; preview_url: string }[];
+}
+
+export interface ResumeJobResponse {
+  job_id: string;
+  status: string;
+  stage: string;
+  message: string;
+}
+
 export async function generateJob(
   files: File[],
   prompt: string
@@ -24,7 +39,7 @@ export async function generateJob(
 
   if (!res.ok) {
     const error = await res.json().catch(() => ({ message: "未知錯誤" }));
-    throw new Error(error.message || `HTTP ${res.status}`);
+    throw new Error(error.detail || error.message || `HTTP ${res.status}`);
   }
 
   const data = await res.json();
@@ -34,6 +49,42 @@ export async function generateJob(
 export async function getJobStatus(jobId: string): Promise<JobStatusResponse> {
   const data = await apiFetch<unknown>(`/api/v1/jobs/${jobId}`);
   return jobStatusResponseSchema.parse(data);
+}
+
+export async function getJobReview(jobId: string): Promise<JobReviewResponse> {
+  return apiFetch<JobReviewResponse>(`/api/v1/jobs/${jobId}/review`);
+}
+
+export async function reviewJobDataset(
+  jobId: string,
+  datasetId: string,
+  review: { decision: "approve" | "reject"; reviewer: string; notes?: string; corrections: unknown[] }
+): Promise<Record<string, unknown>> {
+  const res = await fetch(`${BASE_URL}/api/v1/jobs/${jobId}/datasets/${datasetId}/review`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(review),
+  });
+
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({ message: "未知錯誤" }));
+    throw new Error(error.detail || error.message || `HTTP ${res.status}`);
+  }
+
+  return res.json();
+}
+
+export async function resumeJob(jobId: string): Promise<ResumeJobResponse> {
+  const res = await fetch(`${BASE_URL}/api/v1/jobs/${jobId}/resume`, {
+    method: "POST",
+  });
+
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({ message: "未知錯誤" }));
+    throw new Error(error.detail || error.message || `HTTP ${res.status}`);
+  }
+
+  return res.json();
 }
 
 export interface SendEmailRequest {
