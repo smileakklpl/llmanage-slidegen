@@ -46,16 +46,30 @@ Windows PowerShell，從 repo root 執行：
 服務需要 S3 bucket 與 AWS credentials；所有 AWS client 明確使用 `AWS_REGION`。
 
 ```powershell
-$env:AWS_REGION = "ap-northeast-1"
-$env:S3_BUCKET = "your-bucket"
+$env:AWS_REGION = "us-west-2"
+$env:S3_BUCKET = "llmanage-slidegen-files"
 docker compose up --build
 ```
+
+Compose 預設使用 `us-west-2` 的 Amazon SES，並以已驗證的
+`ethanlin7890@gmail.com` 寄信。若要覆寫設定，可在重新建立 backend 容器前設定：
+
+```powershell
+$env:EMAIL_PROVIDER = "ses"
+$env:SES_SENDER_EMAIL = "ethanlin7890@gmail.com"
+docker compose up --build -d
+```
+
+本機 Docker 會轉傳標準的 `AWS_ACCESS_KEY_ID`、`AWS_SECRET_ACCESS_KEY` 與
+`AWS_SESSION_TOKEN`；部署到 AWS 時則建議使用具備 `ses:SendRawEmail` 權限的 IAM Role。
+若 SES 帳號仍在 sandbox，收件地址也必須先完成驗證。若只想在本機模擬寄送，
+可設定 `EMAIL_PROVIDER=mock`，此時 API 不會真的寄出郵件。
 
 主要 API：
 
 - `POST /api/v1/jobs/generate`：multipart `files` + `prompt`，回傳 `202` 與 `job_id`
 - `GET /api/v1/jobs/{job_id}`：輪詢狀態及 artifacts
-- `POST /api/v1/jobs/{job_id}/send`：模擬寄送完成 artifacts
+- `POST /api/v1/jobs/{job_id}/send`：依 `EMAIL_PROVIDER` 模擬寄送或透過 SES 寄送 artifacts
 - `GET /health`、`GET /ready`：服務檢查
 
 ### 本地 deterministic CLI smoke
@@ -75,7 +89,7 @@ python -m ppt_generation.run_pipeline --excel .\fixtures\data\fsc_114_workbook.x
 
 ```powershell
 $env:LLM_PROVIDER = "bedrock"
-$env:AWS_REGION = "ap-northeast-1"
+$env:AWS_REGION = "us-west-2"
 $env:LLM_MODEL_DEFAULT = "your-model-id"
 $env:LLM_MODEL_INTENT = "your-intent-model-id"
 $env:LLM_MODEL_WRITER = "your-writer-model-id"
