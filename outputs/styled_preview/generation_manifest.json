@@ -1,0 +1,57 @@
+{
+  "contract_version": "1.0",
+  "input": {
+    "source": "../outputs/styled_preview/ingestion.json",
+    "kind": "file",
+    "file_count": 1,
+    "sha256": "0f95a77f6108ff68236cdca6f9ed0fa5307a3cddf84676ea0eb08b4ea0db0ed3",
+    "ingestion_sha256": "0f95a77f6108ff68236cdca6f9ed0fa5307a3cddf84676ea0eb08b4ea0db0ed3",
+    "source_objects": [],
+    "source_objects_sha256_complete": false
+  },
+  "contracts": {
+    "generation_request": "1.1",
+    "ingestion": "1.0",
+    "metric_store": "1.0",
+    "section_plan": "1.0",
+    "chart_plan": "1.0",
+    "narrative": "1.0",
+    "review": "1.0",
+    "deckspec": "1.0",
+    "deckspec_sha256": "fce5ee34dd48bd366aee557e7c2dea390cebf06db5d4713fae93b5ce94a1e93f"
+  },
+  "request": {
+    "user_prompt_sha256": "69247e7abca73788c27e78fddced7afbb4b43a4672e5e685f211e434f72a0bb1",
+    "sections": null,
+    "deck_title": "信用卡市場分析與經營洞察",
+    "generation_policy": "required",
+    "deadline_seconds": 900.0,
+    "render_reserve_seconds": 180.0,
+    "llm_budget_exhausted": false
+  },
+  "configured_system_prompt_sha256": {
+    "sections": "f44bb5c898cf8938874b26808519e824cbdf970237895dc80035217f8795830e",
+    "charts": "ea55b5d9562d508bae62646f46b869b7ed73e12e98eefcf5d3223e8ea8d2b195",
+    "narratives": "3e8387372731dd453e3282f3c48239e3b6fa02fb55183fca070c2d5f84362bfe",
+    "review": null
+  },
+  "llm": {
+    "mode": "fake",
+    "provider": "fake",
+    "aws_region": null,
+    "configured_stage_models": {
+      "sections": "fake",
+      "charts": "fake",
+      "narratives": "fake",
+      "narratives_fallback": "fake",
+      "review": null
+    },
+    "semantic_review_enabled": false,
+    "calls_by_stage": {
+      "sections": 1,
+      "charts": 9,
+      "narratives": 9,
+      "review": 0
+    }
+  }
+}

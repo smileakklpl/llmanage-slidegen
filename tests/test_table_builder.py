@@ -15,6 +15,7 @@ from pptx import Presentation
 from pptx.util import Inches
 
 from ppt_generation.charts import table_builder
+from ppt_generation.core import theme
 from ppt_generation.charts.table_builder import (
     HEATMAP_HIGH,
     HEATMAP_LOW,
@@ -171,8 +172,10 @@ def test_heatmap_color_is_monotonic():
     colors = [
         heatmap_color(value, 0.0, 10.0) for value in (1.0, 5.0, 9.0)
     ]
-    # 高值往深色走，所以 R 通道遞減
-    assert colors[0][0] > colors[1][0] > colors[2][0]
+    # 高值往深色走。色階是白 → 台新紅，紅通道只從 FF 走到 C1，變化量小；
+    # 改看亮度才真正驗到「越大越深」，換色階時也不會默默失去驗證力。
+    luminance = [theme.relative_luminance(color) for color in colors]
+    assert luminance[0] > luminance[1] > luminance[2]
 
 
 def test_heatmap_skips_missing_values():

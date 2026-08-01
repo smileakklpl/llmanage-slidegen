@@ -17,13 +17,45 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Sequence
 
+from pptx.chart.axis import CategoryAxis, ValueAxis
 from pptx.chart.data import CategoryChartData, XyChartData
-from pptx.enum.chart import XL_CHART_TYPE
+from pptx.enum.chart import (
+    XL_CHART_TYPE,
+    XL_LABEL_POSITION,
+    XL_LEGEND_POSITION,
+    XL_MARKER_STYLE,
+    XL_TICK_MARK,
+)
 from pptx.oxml.ns import qn
 from pptx.slide import Slide
-from pptx.util import Emu
+from pptx.util import Emu, Pt
 
 from lxml import etree
+
+from ..core import theme
+
+
+#: 這些圖型沒有座標軸，套用軸樣式會拋 ValueError。
+_AXISLESS_CHART_TYPES = frozenset(
+    {
+        XL_CHART_TYPE.PIE,
+        XL_CHART_TYPE.PIE_EXPLODED,
+        XL_CHART_TYPE.DOUGHNUT,
+        XL_CHART_TYPE.DOUGHNUT_EXPLODED,
+    }
+)
+
+#: 折線類圖型的顏色要設在線上（``a:ln``），不是填滿。
+_LINE_CHART_TYPES = frozenset(
+    {
+        XL_CHART_TYPE.LINE,
+        XL_CHART_TYPE.LINE_MARKERS,
+        XL_CHART_TYPE.LINE_STACKED,
+        XL_CHART_TYPE.LINE_MARKERS_STACKED,
+        XL_CHART_TYPE.XY_SCATTER,
+        XL_CHART_TYPE.XY_SCATTER_LINES,
+    }
+)
 
 
 @dataclass
@@ -34,6 +66,219 @@ class ChartSpec:
     categories: Sequence[str]
     series: dict[str, Sequence[float]]  # {系列名稱: 數值}
     chart_type: XL_CHART_TYPE = XL_CHART_TYPE.COLUMN_CLUSTERED
+
+
+# ---------------------------------------------------------------------------
+# 視覺樣式
+# ---------------------------------------------------------------------------
+# 樣式只碰 spPr（形狀屬性）與 txPr（文字屬性），完全不觸碰 c:numCache /
+# c:strCache 等數值節點，因此「chart XML 快取 ↔ 內嵌 workbook ↔ 稽核 xlsx」
+# 三份副本的一致性不受影響——那是 add_chart() 一次寫好的，與上色無關。
+# ---------------------------------------------------------------------------
+def _style_chart_title(chart, text: str) -> None:
+    """圖表標題：左上、12pt、深灰。不用模板預設的 18pt 置中大標。"""
+    chart.has_title = True
+    text_frame = chart.chart_title.text_frame
+    text_frame.text = text
+
+    for paragraph in text_frame.paragraphs:
+        theme.apply_chart_font(
+            paragraph.font,
+            size=theme.CHART_TITLE_FONT_SIZE,
+            bold=True,
+            color=theme.TITLE_COLOR,
+        )
+
+
+def _style_axes(chart) -> None:
+    """
+    座標軸：淺格線、無刻度線、9pt 標籤。
+
+    刻意直接走 ``catAx_lst`` / ``valAx_lst`` 而不用 ``chart.category_axis``
+    與 ``chart.value_axis``：雙軸圖有兩個 ``c:valAx``，而 python-pptx 的
+    ``value_axis`` 在有兩軸時回傳的是**次軸**，主軸會被漏掉。
+    """
+    chart_space = chart._chartSpace
+
+    for element in chart_space.catAx_lst:
+        axis = CategoryAxis(element)
+        axis.has_major_gridlines = False
+        axis.major_tick_mark = XL_TICK_MARK.NONE
+        axis.format.line.color.rgb = theme.HAIRLINE_COLOR
+        theme.apply_chart_font(
+            axis.tick_labels.font,
+            size=theme.CHART_LABEL_FONT_SIZE,
+            color=theme.BODY_COLOR,
+        )
+
+    for element in chart_space.valAx_lst:
+        axis = ValueAxis(element)
+        # 橫向格線留著（讀者靠它比高度），但要淺到不與長條爭視線；
+        # 軸線本身反而可以省掉，格線已經界定了範圍。
+        axis.has_major_gridlines = True
+        axis.major_gridlines.format.line.color.rgb = theme.HAIRLINE_COLOR
+        axis.major_gridlines.format.line.width = Pt(0.75)
+        axis.major_tick_mark = XL_TICK_MARK.NONE
+        axis.format.line.fill.background()
+        theme.apply_chart_font(
+            axis.tick_labels.font,
+            size=theme.CHART_LABEL_FONT_SIZE,
+            color=theme.MUTED_COLOR,
+        )
+
+
+def _style_legend(chart, series_count: int) -> None:
+    """
+    單系列不放圖例，多系列放底部。
+
+    一個系列的圖例只是把系列名稱重複一次，而圖表標題已經寫了同一件事，
+    卻要吃掉右側或底部一整條空間。
+    """
+    if series_count <= 1:
+        chart.has_legend = False
+        return
+
+    chart.has_legend = True
+    chart.legend.position = XL_LEGEND_POSITION.BOTTOM
+    chart.legend.include_in_layout = False
+    theme.apply_chart_font(
+        chart.legend.font,
+        size=theme.CHART_LEGEND_FONT_SIZE,
+        color=theme.BODY_COLOR,
+    )
+
+
+def _set_series_color(series, color, *, as_line: bool) -> None:
+    """
+    為一個系列上色。
+
+    折線系列的顏色在 ``a:ln`` 上，長條／圓餅在填滿上。設錯位置的結果是
+    折線仍是模板預設色，而 PowerPoint 又不會報錯，只是圖看起來沒改。
+    """
+    if as_line:
+        series.format.line.color.rgb = color
+        series.format.line.width = Pt(2.25)
+        # 雙軸圖的折線系列是先以長條建立、之後才改造的，spPr 上還留著
+        # 當長條時設的 solidFill。留著它會讓 PowerPoint 用填滿色去畫標記，
+        # 與線色不一致。
+        series.format.fill.background()
+
+        marker = getattr(series, "marker", None)
+
+        if marker is not None:
+            marker.format.fill.solid()
+            marker.format.fill.fore_color.rgb = color
+            marker.format.line.color.rgb = theme.INVERSE_COLOR
+
+        return
+
+    series.format.fill.solid()
+    series.format.fill.fore_color.rgb = color
+    # 長條之間不描邊。描邊在資料點多時會讓整片圖看起來糊掉。
+    series.format.line.fill.background()
+
+
+def _color_points_by_rank(series, values: Sequence[float | None]) -> None:
+    """
+    依數值排名為單一系列的每個資料點上色（深＝大）。
+
+    單系列圖表（排名圖、市占率圓餅圖）的「系列」只有一個，顏色若只設在
+    系列上，整張圖就是一種紅——此時顏色沒有承載任何資訊。改為逐點上色，
+    顏色深淺即數值大小。
+    """
+    colors = theme.rank_ramp_colors(list(values))
+
+    for index, color in enumerate(colors):
+        if index >= len(series.points):
+            break
+
+        point = series.points[index]
+        point.format.fill.solid()
+        point.format.fill.fore_color.rgb = color
+        point.format.line.color.rgb = theme.INVERSE_COLOR
+        point.format.line.width = Pt(0.75)
+
+
+def apply_chart_style(
+    chart,
+    spec: ChartSpec,
+    *,
+    line_series_names: Sequence[str] = (),
+) -> None:
+    """
+    套用單色階（白 → 台新紅 + 近黑）配色與字體。
+
+    這是所有圖表的唯一樣式入口。不套用的結果是圖表繼承模板主題的
+    accent1..accent6 預設調色盤——一張圖出現藍、橘、灰、黃四種不相干的
+    顏色，讀者無法從顏色讀出任何資訊，也與台新紅的品牌語彙互相打架。
+
+    配色規則：
+
+    - **單系列**：逐資料點依排名取白→紅漸層，深紅即最大值
+    - **多系列**：系列間用紅／黑交錯（:func:`theme.series_colors`）
+
+    Args:
+        chart: ``add_chart()`` 回傳的圖表物件。
+        spec: 產生該圖表的規格，用來取系列名稱與數值。
+        line_series_names: 已被改造成折線的系列名稱（雙軸圖用）。
+            這些系列的顏色會設在線上而非填滿。
+    """
+    # 圖表層級的預設字體。python-pptx 建立的 chartSpace 帶著 sz="1800"，
+    # 任何沒被逐一設定的元素（軸標題、未來新增的資料標籤）都會以 18pt
+    # 渲染，在 60% 寬的圖表區裡直接糊成一團。先把預設值收到 9pt，
+    # 後續各元素再各自覆寫。
+    theme.apply_chart_font(
+        chart.font,
+        size=theme.CHART_LABEL_FONT_SIZE,
+        color=theme.BODY_COLOR,
+    )
+
+    _style_chart_title(chart, spec.title)
+
+    if spec.chart_type not in _AXISLESS_CHART_TYPES:
+        _style_axes(chart)
+
+    series_names = list(spec.series)
+    _style_legend(chart, len(series_names))
+
+    is_line_chart = spec.chart_type in _LINE_CHART_TYPES
+    palette = theme.series_colors(len(series_names))
+
+    # chart.series 的順序與 spec.series 一致（雙軸圖改造後，被搬到
+    # lineChart 的系列會排在後面，因此改用名稱查表而非位置對應）。
+    series_by_name = {series.name: series for series in chart.series}
+
+    for index, name in enumerate(series_names):
+        series = series_by_name.get(name)
+
+        if series is None:
+            continue
+
+        as_line = is_line_chart or name in line_series_names
+
+        if len(series_names) == 1 and not as_line:
+            # 單系列：顏色留給資料點承載數值大小。
+            _color_points_by_rank(series, spec.series[name])
+        else:
+            _set_series_color(series, palette[index], as_line=as_line)
+
+
+def _style_pie_labels(chart) -> None:
+    """圓餅圖標上百分比。看圓餅估比例本來就不準，數字要直接寫上去。"""
+    plot = chart.plots[0]
+    plot.has_data_labels = True
+    labels = plot.data_labels
+    labels.show_percentage = True
+    labels.show_value = False
+    labels.show_series_name = False
+    labels.number_format = "0.0%"
+    labels.number_format_is_linked = False
+    labels.position = XL_LABEL_POSITION.OUTSIDE_END
+    theme.apply_chart_font(
+        labels.font,
+        size=theme.CHART_DATA_LABEL_FONT_SIZE,
+        color=theme.BODY_COLOR,
+    )
 
 
 def add_category_chart(
@@ -52,6 +297,9 @@ def add_category_chart(
       1. 寫入 chart1.xml 的 <c:numCache>（畫面顯示用）
       2. 產生對應的 embedded .xlsx（右鍵「編輯資料」開啟用）
     兩者保證數值一致，因為都是從這裡的同一份 spec 產生。
+
+    資料寫入後套用 :func:`apply_chart_style`，只改 spPr／txPr，
+    不觸碰任何數值節點。
     """
     chart_data = CategoryChartData()
     chart_data.categories = list(spec.categories)
@@ -62,8 +310,7 @@ def add_category_chart(
         spec.chart_type, left, top, width, height, chart_data
     )
     chart = graphic_frame.chart
-    chart.has_title = True
-    chart.chart_title.text_frame.text = spec.title
+    apply_chart_style(chart, spec)
     return chart
 
 
@@ -100,8 +347,26 @@ def add_scatter_chart(
         XL_CHART_TYPE.XY_SCATTER, left, top, width, height, chart_data
     )
     chart = graphic_frame.chart
-    chart.has_title = True
-    chart.chart_title.text_frame.text = spec.title
+
+    theme.apply_chart_font(
+        chart.font,
+        size=theme.CHART_LABEL_FONT_SIZE,
+        color=theme.BODY_COLOR,
+    )
+    _style_chart_title(chart, spec.title)
+    _style_axes(chart)
+    # 散點圖只有一個系列，圖例只是把系列名重複一次。
+    chart.has_legend = False
+
+    # 散點圖的顏色設在標記上，不是線上——XY_SCATTER 沒有連線。
+    for chart_series in chart.series:
+        chart_series.format.line.fill.background()
+        chart_series.marker.style = XL_MARKER_STYLE.CIRCLE
+        chart_series.marker.size = 8
+        chart_series.marker.format.fill.solid()
+        chart_series.marker.format.fill.fore_color.rgb = theme.ACCENT
+        chart_series.marker.format.line.color.rgb = theme.INVERSE_COLOR
+
     # TODO: 若需散點標籤（如銀行名稱），需手動操作 chart.plots[0] 的
     # dLbls XML 節點，python-pptx 目前無高階 API。
     return chart
@@ -127,7 +392,22 @@ def add_pie_chart(
         series=spec.series,
         chart_type=XL_CHART_TYPE.PIE,
     )
-    return add_category_chart(slide, pie_spec, left, top, width, height)
+    chart = add_category_chart(slide, pie_spec, left, top, width, height)
+
+    # 圓餅圖的圖例是必要的：切片上只標百分比，類別名稱得靠圖例對照。
+    # 這是 _style_legend 的單系列規則唯一該被覆寫的場合。
+    chart.has_legend = True
+    chart.legend.position = XL_LEGEND_POSITION.RIGHT
+    chart.legend.include_in_layout = False
+    theme.apply_chart_font(
+        chart.legend.font,
+        size=theme.CHART_LEGEND_FONT_SIZE,
+        color=theme.BODY_COLOR,
+    )
+
+    _style_pie_labels(chart)
+
+    return chart
 
 
 # ---------------------------------------------------------------------------
@@ -337,6 +617,11 @@ def add_combo_chart(
             if name in spec.line_series_names
         ],
     )
+
+    # 樣式必須在改造**之後**再套一次。改造前這些系列還是長條，顏色設在
+    # 填滿上；搬到 lineChart 後填滿不再決定線色，得改設 a:ln。同時次軸
+    # 是改造時才新建的，改造前不存在，_style_axes 也就套不到它。
+    apply_chart_style(chart, spec, line_series_names=spec.line_series_names)
 
     return chart
 

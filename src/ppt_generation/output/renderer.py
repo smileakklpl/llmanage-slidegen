@@ -26,10 +26,10 @@ from typing import Any, Sequence
 
 from pptx import Presentation
 from pptx.enum.shapes import MSO_SHAPE
-from pptx.enum.text import MSO_AUTO_SIZE, PP_ALIGN
+from pptx.enum.text import MSO_ANCHOR, MSO_AUTO_SIZE, PP_ALIGN
 from pptx.util import Emu, Inches, Pt
 
-from ..core import config, placeholders
+from ..core import config, placeholders, theme
 from ..agents.narrative_writer import PageNarrative
 from ..agents.section_planner import CONCLUSION_CHAPTER, SectionPlan
 from ..charts.chart_builder import ScatterSpec
@@ -42,7 +42,6 @@ from ..charts.chart_planner import (
 )
 from ..contracts import DeckSpecContract
 from ..data.metric_store import MetricStore
-from . import theme
 
 
 logger = logging.getLogger(__name__)
@@ -272,6 +271,9 @@ def _fill_narrative(
     # 「溢出時縮小文字」的保險。字數上限由 narrative_writer 守著，這裡是
     # 第二道防線：真實模型偶爾會寫出貼著上限的長句，寧可字小一點，
     # 也不要讓文字流到投影片外面被裁掉。
+    #
+    # 但它只會縮小、不會放大——短敘事仍停在 11pt，在 40% 寬的文字欄裡
+    # 看起來像忘了排版。所以字級改為先算出來，autofit 只留作最後保險。
     text_frame.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
 
     lines: list[tuple[str, bool]] = []
@@ -280,6 +282,8 @@ def _fill_narrative(
         lines.append((narrative.headline, True))
 
     lines.extend((bullet, False) for bullet in narrative.bullets)
+
+    bullet_size, headline_size = _narrative_font_sizes(placeholder, lines)
 
     first = True
 
@@ -302,7 +306,7 @@ def _fill_narrative(
             marker.text = theme.ACTION_BULLET_PREFIX
             theme.apply_font(
                 marker,
-                size=theme.BULLET_FONT_SIZE,
+                size=bullet_size,
                 bold=True,
                 color=theme.ACCENT,
             )
@@ -310,27 +314,75 @@ def _fill_narrative(
         _write_segments(
             paragraph,
             segments,
-            size=(
-                theme.HEADLINE_FONT_SIZE
-                if is_headline
-                else theme.BULLET_FONT_SIZE
-            ),
+            size=headline_size if is_headline else bullet_size,
             color=theme.TITLE_COLOR if is_headline else theme.BODY_COLOR,
             bold=is_headline,
         )
 
-        paragraph.space_after = Pt(8)
+        # 段距隨字級縮放。字級縮到 9pt 卻還留 8pt 段距，等於把省下來的
+        # 高度又花在空白上。比例與 theme 估算高度時用的同一個常數，
+        # 兩邊不一致的話估算會愈偏愈多。
+        paragraph.space_after = theme.paragraph_gap_for(bullet_size)
 
     return errors
 
 
+def _narrative_font_sizes(
+    placeholder: Any,
+    lines: Sequence[tuple[str, bool]],
+) -> tuple[Any, Any]:
+    """
+    依敘事總長度與文字框大小推算要點與 headline 的字級。
+
+    兩者一起算而不是各算一次：它們共用同一個文字框的高度，分開算會各自
+    以為自己有整框可用，加起來就溢出了。做法是先算出要點字級，headline
+    再按原本的比例（13:11）往上抬，並夾在上限內。
+
+    Returns:
+        ``(要點字級, headline 字級)``。
+    """
+    # 項目符號也占寬度，估算時一併計入。
+    combined = "".join(
+        text if is_headline else f"{theme.ACTION_BULLET_PREFIX}{text}"
+        for text, is_headline in lines
+    )
+
+    bullet_size = theme.fit_font_size(
+        combined,
+        placeholder.width,
+        placeholder.height,
+        maximum=theme.MAX_BODY_FONT_SIZE,
+        minimum=theme.MIN_BODY_FONT_SIZE,
+        paragraph_count=len(lines),
+    )
+
+    ratio = int(theme.HEADLINE_FONT_SIZE) / int(theme.BULLET_FONT_SIZE)
+    headline_size = Pt(
+        min(
+            int(bullet_size) * ratio / 12700,
+            int(theme.HEADLINE_FONT_SIZE) / 12700,
+        )
+    )
+
+    return bullet_size, headline_size
+
+
 def _style_title(slide: Any, text: str) -> None:
-    """標題一律左上、22pt、深灰，與附件三一致。"""
-    if slide.shapes.title is None:
+    """
+    標題一律左上、深灰，與附件三一致；字級依標題長度推算。
+
+    22pt 只是上限。真實模型寫出的頁標題長度差距很大（「市場概況」四個字
+    到「有效卡率與循環信用餘額的交叉觀察」十六個字），固定 22pt 的結果是
+    短標題看起來空、長標題折成兩行把重點訊息帶往下推。
+    """
+    title_shape = slide.shapes.title
+
+    if title_shape is None:
         return
 
-    text_frame = slide.shapes.title.text_frame
+    text_frame = title_shape.text_frame
     text_frame.clear()
+    text_frame.word_wrap = True
     paragraph = text_frame.paragraphs[0]
     paragraph.alignment = PP_ALIGN.LEFT
 
@@ -339,7 +391,12 @@ def _style_title(slide: Any, text: str) -> None:
 
     theme.apply_font(
         run,
-        size=theme.TITLE_FONT_SIZE,
+        size=theme.fit_single_line_font_size(
+            text,
+            title_shape.width,
+            maximum=theme.TITLE_FONT_SIZE,
+            minimum=theme.MIN_TITLE_FONT_SIZE,
+        ),
         bold=False,
         color=theme.TITLE_COLOR,
     )
@@ -387,6 +444,7 @@ def add_key_message_bar(
 
     text_frame = bar.text_frame
     text_frame.word_wrap = True
+    text_frame.vertical_anchor = MSO_ANCHOR.MIDDLE
     text_frame.margin_left = theme.KEY_BAR_TEXT_INSET
     text_frame.margin_right = Emu(91440)
     text_frame.margin_top = Emu(45720)
@@ -395,20 +453,37 @@ def add_key_message_bar(
     paragraph = text_frame.paragraphs[0]
     paragraph.alignment = PP_ALIGN.LEFT
 
+    segments, errors = placeholders.render_segments(text, store, strict=False)
+
+    # 訊息帶是固定高度的單行元件，字級必須依句長算——這是全頁最容易溢出
+    # 的地方。估算長度用「代入後」的文字：佔位符 {{流通卡數.value|…|max}}
+    # 有二十多個字元，代入後可能只剩「4,512,345」九個，用原字串會把字級
+    # 壓到不必要的小。
+    resolved_length = theme.KEY_MESSAGE_PREFIX + "".join(
+        segment.text for segment in segments
+    )
+
+    size = theme.fit_single_line_font_size(
+        resolved_length,
+        int(area.width) - int(theme.KEY_BAR_MARKER_WIDTH),
+        maximum=theme.KEY_MESSAGE_FONT_SIZE,
+        minimum=theme.MIN_KEY_MESSAGE_FONT_SIZE,
+        inset_x=int(theme.KEY_BAR_TEXT_INSET) + 91440,
+    )
+
     prefix = paragraph.add_run()
     prefix.text = theme.KEY_MESSAGE_PREFIX
     theme.apply_font(
         prefix,
-        size=theme.KEY_MESSAGE_FONT_SIZE,
+        size=size,
         bold=True,
         color=theme.ACCENT,
     )
 
-    segments, errors = placeholders.render_segments(text, store, strict=False)
     _write_segments(
         paragraph,
         segments,
-        size=theme.KEY_MESSAGE_FONT_SIZE,
+        size=size,
         color=theme.TITLE_COLOR,
         bold=True,
     )
@@ -430,14 +505,21 @@ def add_footnote(slide: Any, text: str, area: ContentArea) -> Any:
         theme.FOOTNOTE_HEIGHT,
     )
     text_frame = box.text_frame
-    text_frame.word_wrap = False
+    # 之前是 word_wrap=False，長註記會直接跑出投影片右緣。註記寧可縮小
+    # 也不該跑出版面，所以改為允許折行並依長度收字級。
+    text_frame.word_wrap = True
 
     run = text_frame.paragraphs[0].add_run()
     run.text = text
 
     theme.apply_font(
         run,
-        size=theme.FOOTNOTE_FONT_SIZE,
+        size=theme.fit_single_line_font_size(
+            text,
+            int(area.width),
+            maximum=theme.FOOTNOTE_FONT_SIZE,
+            minimum=Pt(7),
+        ),
         bold=False,
         color=theme.MUTED_COLOR,
     )
@@ -540,19 +622,32 @@ def add_agenda_page(
     text_frame = body.text_frame
     text_frame.clear()
     text_frame.word_wrap = True
+    # 算出來的字級是主要手段，autofit 只是最後保險（章節名意外很長時）。
+    text_frame.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
+
+    # 章節數是變數（本專案 2～8 章都出現過），字級因此不能是常數：
+    # 八章節排在 16pt 會頂到頁尾，兩章節排在 16pt 又只占上面四分之一。
+    size = theme.fit_font_size(
+        "".join(f"00　{chapter}" for chapter in chapters),
+        body.width,
+        body.height,
+        maximum=theme.AGENDA_FONT_SIZE,
+        minimum=theme.MIN_BODY_FONT_SIZE,
+        paragraph_count=len(chapters),
+    )
 
     for index, chapter in enumerate(chapters):
         paragraph = (
             text_frame.paragraphs[0] if index == 0 else text_frame.add_paragraph()
         )
         paragraph.level = 0
-        paragraph.space_after = Pt(10)
+        paragraph.space_after = theme.paragraph_gap_for(size)
 
         number = paragraph.add_run()
         number.text = f"{index + 1:02d}　"
         theme.apply_font(
             number,
-            size=theme.AGENDA_FONT_SIZE,
+            size=size,
             bold=True,
             color=theme.ACCENT,
         )
@@ -561,7 +656,7 @@ def add_agenda_page(
         label.text = chapter
         theme.apply_font(
             label,
-            size=theme.AGENDA_FONT_SIZE,
+            size=size,
             bold=False,
             color=theme.TITLE_COLOR,
         )
@@ -615,43 +710,68 @@ def add_conclusion_page(
     text_frame = body.text_frame
     text_frame.clear()
     text_frame.word_wrap = True
+    text_frame.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
 
     if not picked:
         return slide, errors
 
-    for index, (chapter, narrative) in enumerate(picked):
-        paragraph = (
-            text_frame.paragraphs[0] if index == 0 else text_frame.add_paragraph()
-        )
-        paragraph.level = 0
-        paragraph.space_after = Pt(6)
+    # 這頁是全份簡報最擁擠的一頁：每個章節一句結論，八章節就是八句長句
+    # 全部塞進一個文字框。固定字級在章節多時必定溢出。
+    resolved: list[tuple[str, list[placeholders.TextSegment], str]] = []
 
-        label = paragraph.add_run()
-        label.text = f"{theme.ACTION_BULLET_PREFIX}{chapter}｜"
-        theme.apply_font(
-            label,
-            size=theme.BULLET_FONT_SIZE,
-            bold=True,
-            color=theme.ACCENT,
-        )
-
+    for chapter, narrative in picked:
         segments, segment_errors = placeholders.render_segments(
             narrative.headline, store, strict=False
         )
         errors.extend(segment_errors)
+        resolved.append(
+            (
+                f"{theme.ACTION_BULLET_PREFIX}{chapter}｜",
+                segments,
+                f"（P.{narrative.page_number}）",
+            )
+        )
+
+    size = theme.fit_font_size(
+        "".join(
+            label + "".join(s.text for s in segments) + source
+            for label, segments, source in resolved
+        ),
+        body.width,
+        body.height,
+        maximum=theme.BULLET_FONT_SIZE,
+        minimum=theme.MIN_BODY_FONT_SIZE,
+        paragraph_count=len(resolved),
+    )
+
+    for index, (label_text, segments, source_text) in enumerate(resolved):
+        paragraph = (
+            text_frame.paragraphs[0] if index == 0 else text_frame.add_paragraph()
+        )
+        paragraph.level = 0
+        paragraph.space_after = theme.paragraph_gap_for(size)
+
+        label = paragraph.add_run()
+        label.text = label_text
+        theme.apply_font(
+            label,
+            size=size,
+            bold=True,
+            color=theme.ACCENT,
+        )
 
         _write_segments(
             paragraph,
             segments,
-            size=theme.BULLET_FONT_SIZE,
+            size=size,
             color=theme.BODY_COLOR,
         )
 
         source = paragraph.add_run()
-        source.text = f"（P.{narrative.page_number}）"
+        source.text = source_text
         theme.apply_font(
             source,
-            size=theme.FOOTNOTE_FONT_SIZE,
+            size=size,
             bold=False,
             color=theme.MUTED_COLOR,
         )

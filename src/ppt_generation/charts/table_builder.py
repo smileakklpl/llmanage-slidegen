@@ -31,24 +31,29 @@ from pptx.dml.color import RGBColor
 from pptx.slide import Slide
 from pptx.util import Emu, Pt
 
+from ..core import theme
 from .chart_builder import ChartSpec
 
 
-#: 表頭底色與文字色（對齊模板主色）。
-HEADER_FILL = RGBColor(0x1F, 0x38, 0x64)
-HEADER_FONT_COLOR = RGBColor(0xFF, 0xFF, 0xFF)
+#: 表頭底色與文字色。改用近黑而非原本的深藍——深藍不在本專案的配色裡，
+#: 一份簡報同時出現深藍表頭與紅色圖表就是兩套視覺語彙。
+HEADER_FILL = theme.CHART_NEUTRAL
+HEADER_FONT_COLOR = theme.INVERSE_COLOR
 
-#: 熱力圖色階兩端。低值為淺、高值為深，保留足夠對比讓深底上的字仍可讀。
-HEATMAP_LOW = RGBColor(0xE8, 0xF1, 0xFA)
-HEATMAP_HIGH = RGBColor(0x1F, 0x38, 0x64)
+#: 斑馬紋的淺色列。純白／極淺灰交錯，讓讀者的視線不會跨列跑錯行。
+BAND_FILL = RGBColor(0xF7, 0xF7, 0xF7)
+
+#: 熱力圖色階兩端，取自 theme 的白 → 台新紅漸層。
+HEATMAP_LOW = theme.HEATMAP_LOW
+HEATMAP_HIGH = theme.HEATMAP_HIGH
 
 #: 底色亮度低於此門檻時，文字改為白色以維持可讀性（無障礙要求）。
-_DARK_BACKGROUND_THRESHOLD = 0.55
+_DARK_BACKGROUND_THRESHOLD = theme.DARK_BACKGROUND_THRESHOLD
 
-#: 表格字級。
+#: 表格字級上限。實際字級由 ``theme.fit_table_font_size()`` 依列數再往下收。
 TITLE_FONT_SIZE = Pt(14)
-HEADER_FONT_SIZE = Pt(11)
-BODY_FONT_SIZE = Pt(11)
+HEADER_FONT_SIZE = theme.TABLE_HEADER_FONT_SIZE
+BODY_FONT_SIZE = theme.TABLE_BODY_FONT_SIZE
 
 #: 一頁能放得下的資料列上限。超過就不是給人看的表了，應改用圖表或先取 Top N。
 MAX_TABLE_ROWS = 20
@@ -127,22 +132,9 @@ def parse_value(text: str, unit: str | None = None) -> float | None:
 # ---------------------------------------------------------------------------
 # 色階
 # ---------------------------------------------------------------------------
-def _blend(low: RGBColor, high: RGBColor, ratio: float) -> RGBColor:
-    ratio = max(0.0, min(1.0, ratio))
-
-    return RGBColor(
-        *(
-            int(round(low[index] + (high[index] - low[index]) * ratio))
-            for index in range(3)
-        )
-    )
-
-
-def _relative_luminance(color: RGBColor) -> float:
-    """粗略亮度，用來決定文字要黑要白。"""
-    return (
-        0.299 * color[0] + 0.587 * color[1] + 0.114 * color[2]
-    ) / 255.0
+#: 色階混色與亮度判斷統一由 theme 提供，圖表與表格共用同一套規則。
+_blend = theme.blend
+_relative_luminance = theme.relative_luminance
 
 
 def heatmap_color(
@@ -222,11 +214,25 @@ def add_native_table(
 
     minimum, maximum = _value_range(spec) if spec.heatmap else (0.0, 0.0)
 
-    _write_header(table, spec, column_names)
+    # 字級依列數推算。表格與文字框不同：PowerPoint 不會自動縮小表格文字，
+    # 列高只會被內容一路撐出投影片外，所以這裡必須主動算。
+    body_size = theme.fit_table_font_size(row_count, column_count, int(height))
+    header_size = body_size
+
+    _write_header(table, spec, column_names, size=header_size)
 
     for row_offset, category in enumerate(spec.categories, start=1):
         emphasize = category in spec.emphasize_rows
-        _write_label_cell(table.cell(row_offset, 0), category, emphasize)
+        # 熱力圖自己會為每格上色，再加斑馬紋會兩套底色打架。
+        band = BAND_FILL if not spec.heatmap and row_offset % 2 == 0 else None
+
+        _write_label_cell(
+            table.cell(row_offset, 0),
+            category,
+            emphasize,
+            size=body_size,
+            band=band,
+        )
 
         for column_offset, name in enumerate(column_names, start=1):
             values = spec.series[name]
@@ -242,34 +248,64 @@ def add_native_table(
                     if spec.heatmap
                     else None
                 ),
+                size=body_size,
+                band=band,
             )
 
     return table
 
 
-def _write_header(table, spec: TableSpec, column_names: Sequence[str]) -> None:
+def _fill_cell(cell, color: RGBColor | None) -> None:
+    if color is None:
+        return
+
+    cell.fill.solid()
+    cell.fill.fore_color.rgb = color
+
+
+def _write_header(
+    table,
+    spec: TableSpec,
+    column_names: Sequence[str],
+    *,
+    size,
+) -> None:
     headers = [spec.row_header, *column_names]
 
     for index, text in enumerate(headers):
         cell = table.cell(0, index)
         cell.text = str(text)
-        cell.fill.solid()
-        cell.fill.fore_color.rgb = HEADER_FILL
+        _fill_cell(cell, HEADER_FILL)
 
         for paragraph in cell.text_frame.paragraphs:
             for run in paragraph.runs:
-                run.font.bold = True
-                run.font.size = HEADER_FONT_SIZE
-                run.font.color.rgb = HEADER_FONT_COLOR
+                theme.apply_font(
+                    run,
+                    size=size,
+                    bold=True,
+                    color=HEADER_FONT_COLOR,
+                )
 
 
-def _write_label_cell(cell, text: str, emphasize: bool) -> None:
+def _write_label_cell(
+    cell,
+    text: str,
+    emphasize: bool,
+    *,
+    size,
+    band: RGBColor | None = None,
+) -> None:
     cell.text = str(text)
+    _fill_cell(cell, band)
 
     for paragraph in cell.text_frame.paragraphs:
         for run in paragraph.runs:
-            run.font.size = BODY_FONT_SIZE
-            run.font.bold = emphasize
+            theme.apply_font(
+                run,
+                size=size,
+                bold=emphasize,
+                color=theme.TITLE_COLOR,
+            )
 
 
 def _write_value_cell(
@@ -279,27 +315,26 @@ def _write_value_cell(
     *,
     emphasize: bool,
     heat: RGBColor | None,
+    size,
+    band: RGBColor | None = None,
 ) -> None:
     cell.text = format_value(value, spec.unit)
-
-    if heat is not None:
-        cell.fill.solid()
-        cell.fill.fore_color.rgb = heat
+    _fill_cell(cell, heat if heat is not None else band)
 
     font_color = (
-        HEADER_FONT_COLOR
+        theme.readable_text_color(heat)
         if heat is not None
-        and _relative_luminance(heat) < _DARK_BACKGROUND_THRESHOLD
-        else None
+        else theme.TITLE_COLOR
     )
 
     for paragraph in cell.text_frame.paragraphs:
         for run in paragraph.runs:
-            run.font.size = BODY_FONT_SIZE
-            run.font.bold = emphasize
-
-            if font_color is not None:
-                run.font.color.rgb = font_color
+            theme.apply_font(
+                run,
+                size=size,
+                bold=emphasize,
+                color=font_color,
+            )
 
 
 def add_heatmap_table(
