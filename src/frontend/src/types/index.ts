@@ -15,3 +15,12 @@ export type {
 } from "../schemas/jobSchema";
 
 export type { HealthResponse } from "../schemas/healthSchema";
+
+export type {
+  UnifiedDataValue,
+  UnifiedDatasetRecord,
+  UnifiedDatasetSpec,
+  UnifiedIngestionResult,
+  DatasetCorrection,
+  HumanReviewRequest,
+} from "../schemas/ingestionSchema";

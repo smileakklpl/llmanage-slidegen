@@ -8,11 +8,11 @@ export const translations = {
 
     // GeneratePage
     heroTitle: "智匯數據簡報神器",
-    heroSubtitle: "上傳 Excel 資料，AI 幫你生成精美簡報",
+    heroSubtitle: "上傳資料，AI 幫你整理、驗證並生成精美簡報",
 
     // GenerateForm
-    fileLabel: "Excel 檔案（可多次選擇）",
-    fileError: "僅接受 .xlsx 格式檔案",
+    fileLabel: "資料檔案（可多次選擇）",
+    fileError: "僅接受 XLSX、CSV、TXT、PDF、PNG、JPG 格式檔案",
     fileRequired: "請至少選擇一個檔案",
     fileSelected: "已選擇 {count} 個檔案",
     fileSelectButton: "選擇檔案",
@@ -84,11 +84,11 @@ export const translations = {
 
     // GeneratePage
     heroTitle: "Smart Deck",
-    heroSubtitle: "Upload Excel data, let AI generate beautiful presentations",
+    heroSubtitle: "Upload data, let AI validate it and generate beautiful presentations",
 
     // GenerateForm
-    fileLabel: "Excel Files (select multiple)",
-    fileError: "Only .xlsx files are accepted",
+    fileLabel: "Data Files (select multiple)",
+    fileError: "Only XLSX, CSV, TXT, PDF, PNG, and JPG files are accepted",
     fileRequired: "Please select at least one file",
     fileSelected: "{count} file(s) selected",
     fileSelectButton: "Choose Files",
