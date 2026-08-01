@@ -27,12 +27,8 @@ app.add_middleware(
 # 全域錯誤處理
 register_error_handlers(app)
 
-# 原有的 ingestion 路由
-app.include_router(
-    ingestion_router,
-    prefix="/ingestion",
-    tags=["ingestion"],
-)
+# Ingestion router already owns the /ingestion prefix.
+app.include_router(ingestion_router)
 
 # Web UI 的 job 路由 (/api/v1/jobs/...)
 app.include_router(api_router)

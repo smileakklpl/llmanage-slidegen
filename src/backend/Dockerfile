@@ -16,9 +16,10 @@ COPY src/backend/app/ ./src/backend/app/
 COPY prompts/ ./prompts/
 COPY config/ ./config/
 COPY source/template.pptx ./source/template.pptx
+COPY main.py ./main.py
 
 ENV PYTHONPATH=/app/src:/app/src/backend
 
 EXPOSE 8000
 
-CMD ["uvicorn", "app.main:app", "--app-dir", "src/backend", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["python", "main.py"]
