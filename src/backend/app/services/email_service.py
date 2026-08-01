@@ -127,6 +127,9 @@ async def _send_via_ses(
     msg["Subject"] = subject or "智匯數據簡報神器 — 簡報寄送"
     msg["From"] = ses_sender
     msg["To"] = ", ".join(recipients)
+    # Reply-To 設成使用者填的 email，收件者回信時會回給使用者
+    if sender != ses_sender:
+        msg["Reply-To"] = sender
 
     # Body
     body_text = body or "您好，請查收附件中的簡報分析結果。"
