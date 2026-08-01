@@ -12,6 +12,8 @@ Excel 比對。這條路徑斷了，表格就變成系統裡唯一沒人看守�
 
 import pytest
 from pptx import Presentation
+from pptx.enum.dml import MSO_FILL
+from pptx.oxml.ns import qn
 from pptx.util import Inches
 
 from ppt_generation.charts import table_builder
@@ -200,14 +202,46 @@ def test_heatmap_fills_cells():
     assert data_cell.fill.fore_color.rgb is not None
 
 
-def test_plain_table_does_not_fill_data_cells():
+def test_plain_table_fills_every_cell():
+    """
+    每一格都必須有明確填色，一格都不能留空。
+
+    ``add_table()`` 一律套用「Medium Style 2 - Accent 1」，那個樣式帶著
+    主題 accent1（本模板為藍 4472C4）的淺色底。留空的儲存格不是「白色」，
+    是「藍色」——這正是先前簡報上仍有藍色區塊的原因。
+    """
     _, slide = _slide()
 
     table = add_native_table(slide, _spec())
-    data_cell = list(table.rows)[1].cells[1]
 
-    # 未上色的儲存格 fill 型別不是 solid
-    assert data_cell.fill.type != 1
+    for row in table.rows:
+        for cell in row.cells:
+            assert cell.fill.type == MSO_FILL.SOLID
+            assert cell.fill.fore_color.rgb is not None
+
+
+def test_plain_table_uses_neutral_row_fills():
+    """一般表格只用白／極淺灰交錯，不套用熱力圖色階。"""
+    _, slide = _slide()
+
+    table = add_native_table(slide, _spec())
+    rows = list(table.rows)
+
+    assert rows[1].cells[1].fill.fore_color.rgb == table_builder.ROW_FILL
+    assert rows[2].cells[1].fill.fore_color.rgb == table_builder.BAND_FILL
+
+
+def test_table_style_is_not_the_blue_default():
+    """表格樣式必須被換成無樣式，否則漏填一格就露一格藍。"""
+    _, slide = _slide()
+
+    table = add_native_table(slide, _spec())
+    style_id = table._tbl.find(qn("a:tblPr")).find(qn("a:tableStyleId"))
+
+    assert style_id is not None
+    assert style_id.text == table_builder.NO_STYLE_NO_GRID
+    assert table.first_row is False
+    assert table.horz_banding is False
 
 
 def test_heatmap_does_not_change_any_value():

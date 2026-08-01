@@ -75,6 +75,53 @@ class ChartSpec:
 # c:strCache 等數值節點，因此「chart XML 快取 ↔ 內嵌 workbook ↔ 稽核 xlsx」
 # 三份副本的一致性不受影響——那是 add_chart() 一次寫好的，與上色無關。
 # ---------------------------------------------------------------------------
+def _style_chart_area(chart) -> None:
+    """
+    圖表底板與繪圖區改為透明、無外框。
+
+    不設的話兩者都沒有 ``c:spPr``，PowerPoint 會套用主題預設——底板可能
+    帶上一圈框線或淺色底，而那個顏色來自主題的 accent／bg，本專案控制不到。
+    投影片本身是白底，圖表底板透明才是對的。
+    """
+    chart_space = chart._chartSpace
+    chart_element = chart_space.find(qn("c:chart"))
+
+    # CT_ChartSpace 的順序：… c:chart → c:spPr → c:txPr → c:externalData。
+    # 所以底板的 spPr 要緊接在 c:chart 之後，不能 append 到最後
+    # （那會排到 externalData 後面，PowerPoint 判定檔案損毀）。
+    existing = chart_space.find(qn("c:spPr"))
+
+    if existing is not None:
+        chart_space.remove(existing)
+
+    chart_element.addnext(_transparent_sp_pr(chart_space))
+
+    plot_area = chart_element.find(qn("c:plotArea"))
+
+    if plot_area is None:
+        return
+
+    # CT_PlotArea 的 c:spPr 是最後一個子元素。雙軸圖會在套樣式之後再追加
+    # 次軸，所以這裡先移除舊的再重新 append，確保它永遠在最後。
+    existing_plot_sp_pr = plot_area.find(qn("c:spPr"))
+
+    if existing_plot_sp_pr is not None:
+        plot_area.remove(existing_plot_sp_pr)
+
+    plot_area.append(_transparent_sp_pr(plot_area))
+
+
+def _transparent_sp_pr(parent):
+    """建立一個「無填色、無框線」的 ``c:spPr``。"""
+    sp_pr = parent.makeelement(qn("c:spPr"), {})
+    sp_pr.append(sp_pr.makeelement(qn("a:noFill"), {}))
+    line = sp_pr.makeelement(qn("a:ln"), {})
+    line.append(sp_pr.makeelement(qn("a:noFill"), {}))
+    sp_pr.append(line)
+
+    return sp_pr
+
+
 def _style_chart_title(chart, text: str) -> None:
     """圖表標題：左上、12pt、深灰。不用模板預設的 18pt 置中大標。"""
     chart.has_title = True
@@ -186,6 +233,12 @@ def _color_points_by_rank(series, values: Sequence[float | None]) -> None:
     系列上，整張圖就是一種紅——此時顏色沒有承載任何資訊。改為逐點上色，
     顏色深淺即數值大小。
     """
+    # 系列層級也給一個保底色。逐點上色理論上覆蓋每個點，但只要有一個點
+    # 漏掉（例如未來改動讓 dPt 數量與資料點對不上），漏掉的那個就會落回
+    # PowerPoint 自動配色——在本模板下那是主題 accent1 的藍。保底色讓
+    # 最壞情況是「深紅」而不是「一根藍柱」。
+    _set_series_color(series, theme.CHART_RAMP_HIGH, as_line=False)
+
     colors = theme.rank_ramp_colors(list(values))
 
     for index, color in enumerate(colors):
@@ -232,6 +285,8 @@ def apply_chart_style(
         size=theme.CHART_LABEL_FONT_SIZE,
         color=theme.BODY_COLOR,
     )
+
+    _style_chart_area(chart)
 
     _style_chart_title(chart, spec.title)
 
@@ -482,14 +537,35 @@ def _append_secondary_axes(plot_area, cat_ax_id: int, val_ax_id: int) -> None:
     次軸的類別軸一定要 ``delete=1``：兩組類別軸都畫出來的話，圖底下會出現
     兩排一模一樣的月份標籤。數值軸則放右側（``axPos=r``）。
     """
-    cat_ax = etree.SubElement(plot_area, qn("c:catAx"))
+    # 座標軸在 CT_PlotArea 中排在 c:dTable / c:spPr 之前。套過樣式的圖表
+    # 已經有 c:spPr，直接 append 會讓軸排到它後面而違反 schema。
+    trailing = None
+
+    for tag in ("c:dTable", "c:spPr"):
+        found = plot_area.find(qn(tag))
+
+        if found is not None:
+            trailing = found
+            break
+
+    def _new_axis(tag: str):
+        element = plot_area.makeelement(qn(tag), {})
+
+        if trailing is None:
+            plot_area.append(element)
+        else:
+            trailing.addprevious(element)
+
+        return element
+
+    cat_ax = _new_axis("c:catAx")
     _sub(cat_ax, "c:axId", val=cat_ax_id)
     _sub(_sub(cat_ax, "c:scaling"), "c:orientation", val="minMax")
     _sub(cat_ax, "c:delete", val=1)
     _sub(cat_ax, "c:axPos", val="b")
     _sub(cat_ax, "c:crossAx", val=val_ax_id)
 
-    val_ax = etree.SubElement(plot_area, qn("c:valAx"))
+    val_ax = _new_axis("c:valAx")
     _sub(val_ax, "c:axId", val=val_ax_id)
     _sub(_sub(val_ax, "c:scaling"), "c:orientation", val="minMax")
     _sub(val_ax, "c:delete", val=0)

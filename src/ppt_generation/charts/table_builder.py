@@ -31,6 +31,8 @@ from pptx.dml.color import RGBColor
 from pptx.slide import Slide
 from pptx.util import Emu, Pt
 
+from pptx.oxml.ns import qn as _qn
+
 from ..core import theme
 from .chart_builder import ChartSpec
 
@@ -42,6 +44,26 @@ HEADER_FONT_COLOR = theme.INVERSE_COLOR
 
 #: 斑馬紋的淺色列。純白／極淺灰交錯，讓讀者的視線不會跨列跑錯行。
 BAND_FILL = RGBColor(0xF7, 0xF7, 0xF7)
+
+#: 非斑馬紋列的底色。**必須是明確的白色，不能留空**——留空的儲存格會顯示
+#: 表格樣式的預設底色，而 ``add_table()`` 預設套用的
+#: 「Medium Style 2 - Accent 1」是以主題 accent1（本模板為藍 4472C4）上色的。
+ROW_FILL = RGBColor(0xFF, 0xFF, 0xFF)
+
+#: PowerPoint 內建「無樣式、無格線」表格樣式的 GUID。
+#:
+#: 為什麼要改：``shapes.add_table()`` 不接受樣式參數，一律套用
+#: 「Medium Style 2 - Accent 1」。那個樣式的 ``wholeTbl`` 帶著 accent1 的
+#: 淺色調底色，任何沒有明確填色的儲存格都會渲染成淺藍，而且它的
+#: ``firstRow`` / ``bandRow`` 還會再疊一層藍。逐格填色能蓋掉底色，
+#: 但漏一格就露一格藍——把樣式本身換成無樣式才是根治。
+NO_STYLE_NO_GRID = "{2D5ABB26-0587-4C30-8999-92F81FD0307C}"
+
+#: 表格框線：資料列之間的細線，與表頭下緣的品牌色粗線。
+BORDER_COLOR = theme.HAIRLINE_COLOR
+BORDER_WIDTH_PT = 0.75
+HEADER_RULE_COLOR = theme.ACCENT
+HEADER_RULE_WIDTH_PT = 1.5
 
 #: 熱力圖色階兩端，取自 theme 的白 → 台新紅漸層。
 HEATMAP_LOW = theme.HEATMAP_LOW
@@ -219,12 +241,20 @@ def add_native_table(
     body_size = theme.fit_table_font_size(row_count, column_count, int(height))
     header_size = body_size
 
+    # 先把預設的藍色表格樣式換掉，再逐格填色。兩者缺一不可：只換樣式會
+    # 讓表格變成純白無層次，只填色則會在漏掉的格子露出藍底。
+    _reset_table_style(table)
+
     _write_header(table, spec, column_names, size=header_size)
 
     for row_offset, category in enumerate(spec.categories, start=1):
         emphasize = category in spec.emphasize_rows
-        # 熱力圖自己會為每格上色，再加斑馬紋會兩套底色打架。
-        band = BAND_FILL if not spec.heatmap and row_offset % 2 == 0 else None
+        # 熱力圖的數值格自己會上色，斑馬紋只會與色階打架；但列標籤欄
+        # 仍需要明確底色，否則露出樣式預設的藍。
+        if spec.heatmap:
+            band = ROW_FILL
+        else:
+            band = BAND_FILL if row_offset % 2 == 0 else ROW_FILL
 
         _write_label_cell(
             table.cell(row_offset, 0),
@@ -255,6 +285,93 @@ def add_native_table(
     return table
 
 
+#: ``a:tcPr`` 中框線元素的 schema 順序。框線必須排在填色之前，
+#: 否則 PowerPoint 判定檔案需要修復。
+_BORDER_TAGS = ("a:lnL", "a:lnR", "a:lnT", "a:lnB")
+
+
+def _reset_table_style(table) -> None:
+    """
+    把表格改成無樣式、無格線，並關掉表頭與斑馬紋的樣式強調。
+
+    這是「圖表還是藍色的」的根因修復：不做這件事，任何沒被逐格填色的
+    儲存格都會露出 accent1 的藍。
+    """
+    table.first_row = False
+    table.horz_banding = False
+
+    tbl = table._tbl
+    tbl_pr = tbl.find(_qn("a:tblPr"))
+
+    if tbl_pr is None:
+        tbl_pr = tbl.makeelement(_qn("a:tblPr"), {})
+        tbl.insert(0, tbl_pr)
+
+    existing = tbl_pr.find(_qn("a:tableStyleId"))
+
+    if existing is not None:
+        tbl_pr.remove(existing)
+
+    # a:tableStyleId 是 a:tblPr 的最後一個子元素，直接 append 即符合 schema。
+    style_id = tbl_pr.makeelement(_qn("a:tableStyleId"), {})
+    style_id.text = NO_STYLE_NO_GRID
+    tbl_pr.append(style_id)
+
+
+def _set_cell_border(
+    cell,
+    edge: str,
+    color: RGBColor,
+    width_pt: float,
+) -> None:
+    """
+    為儲存格的某一邊加框線。
+
+    ``edge`` 為 ``L`` / ``R`` / ``T`` / ``B``。python-pptx 沒有框線的高階
+    API，但這裡只寫 ``a:tcPr`` 的子元素，不影響表格內容或任何數值。
+
+    換成無樣式表格後格線也一起沒了，所以框線必須自己畫——沒有任何分隔線
+    的數字表，讀者的視線會在列之間跑錯行。
+    """
+    tag = _qn(f"a:ln{edge}")
+    tc_pr = cell._tc.get_or_add_tcPr()
+
+    existing = tc_pr.find(tag)
+
+    if existing is not None:
+        tc_pr.remove(existing)
+
+    line = tc_pr.makeelement(
+        tag,
+        {
+            "w": str(int(Pt(width_pt))),
+            "cap": "flat",
+            "cmpd": "sng",
+            "algn": "ctr",
+        },
+    )
+    solid_fill = line.makeelement(_qn("a:solidFill"), {})
+    srgb = line.makeelement(_qn("a:srgbClr"), {"val": f"{color}"})
+    solid_fill.append(srgb)
+    line.append(solid_fill)
+
+    # 插在後續框線標籤與填色之前，維持 a:tcPr 的 schema 順序。
+    index = _BORDER_TAGS.index(f"a:ln{edge}")
+    later = {_qn(name) for name in _BORDER_TAGS[index + 1 :]}
+    border_tags = {_qn(name) for name in _BORDER_TAGS}
+    anchor = None
+
+    for child in tc_pr:
+        if child.tag in later or child.tag not in border_tags:
+            anchor = child
+            break
+
+    if anchor is None:
+        tc_pr.append(line)
+    else:
+        anchor.addprevious(line)
+
+
 def _fill_cell(cell, color: RGBColor | None) -> None:
     if color is None:
         return
@@ -275,6 +392,8 @@ def _write_header(
     for index, text in enumerate(headers):
         cell = table.cell(0, index)
         cell.text = str(text)
+        # 框線先寫、填色後寫，才符合 a:tcPr 的 schema 順序。
+        _set_cell_border(cell, "B", HEADER_RULE_COLOR, HEADER_RULE_WIDTH_PT)
         _fill_cell(cell, HEADER_FILL)
 
         for paragraph in cell.text_frame.paragraphs:
@@ -296,6 +415,7 @@ def _write_label_cell(
     band: RGBColor | None = None,
 ) -> None:
     cell.text = str(text)
+    _set_cell_border(cell, "B", BORDER_COLOR, BORDER_WIDTH_PT)
     _fill_cell(cell, band)
 
     for paragraph in cell.text_frame.paragraphs:
@@ -319,6 +439,8 @@ def _write_value_cell(
     band: RGBColor | None = None,
 ) -> None:
     cell.text = format_value(value, spec.unit)
+    _set_cell_border(cell, "B", BORDER_COLOR, BORDER_WIDTH_PT)
+    # 熱力圖缺值格沒有色階色，仍要填白——留空會露出樣式預設的藍。
     _fill_cell(cell, heat if heat is not None else band)
 
     font_color = (

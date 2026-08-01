@@ -429,6 +429,7 @@ def add_key_message_bar(
     marker.fill.fore_color.rgb = theme.KEY_BAR_MARKER
     marker.line.fill.background()
     marker.shadow.inherit = False
+    _detach_theme_style(marker)
 
     bar = slide.shapes.add_shape(
         MSO_SHAPE.RECTANGLE,
@@ -441,6 +442,7 @@ def add_key_message_bar(
     bar.fill.fore_color.rgb = theme.KEY_BAR_FILL
     bar.line.fill.background()
     bar.shadow.inherit = False
+    _detach_theme_style(bar)
 
     text_frame = bar.text_frame
     text_frame.word_wrap = True
@@ -527,6 +529,27 @@ def add_footnote(slide: Any, text: str, area: ContentArea) -> Any:
     return box
 
 
+def _detach_theme_style(shape: Any) -> None:
+    """
+    移除 ``add_shape()`` 自動加上的 ``<p:style>``。
+
+    那個區塊用 ``lnRef`` / ``fillRef`` / ``effectRef`` 指向主題的 accent1
+    （本模板為藍 4472C4）。我們每個色塊都有明確的 ``solidFill`` 會覆蓋它，
+    所以它目前不會顯示出來——但它讓「這個形狀是什麼顏色」同時有兩個答案，
+    只要哪天漏設一次明確填色就會露出藍色。直接拆掉，讓答案只有一個。
+    """
+    sp_pr = shape._element.find(_qn("p:style"))
+
+    if sp_pr is not None:
+        shape._element.remove(sp_pr)
+
+
+def _qn(tag: str) -> str:
+    from pptx.oxml.ns import qn
+
+    return qn(tag)
+
+
 def _place_text_area(placeholder: Any, area: ContentArea) -> None:
     """把 BODY placeholder 移到指定欄位。"""
     placeholder.left = area.left
@@ -594,6 +617,7 @@ def add_section_divider(
     rule.fill.fore_color.rgb = theme.ACCENT
     rule.line.fill.background()
     rule.shadow.inherit = False
+    _detach_theme_style(rule)
 
     return slide
 
