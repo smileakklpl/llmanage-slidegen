@@ -88,6 +88,7 @@ class JobService:
         job_id: str,
         prompt: str,
         input_objects: list[StoredObjectRef],
+        template_object: StoredObjectRef | None = None,
         generation_policy: str | None = None,
         generation_deadline_seconds: float | None = None,
         generation_render_reserve_seconds: float | None = None,
@@ -116,6 +117,7 @@ class JobService:
             prompt=prompt,
             filenames=[item.filename for item in input_objects],
             input_objects=input_objects,
+            template_object=template_object,
             generation_options=options,
         )
         created = await self._repository.create(job)

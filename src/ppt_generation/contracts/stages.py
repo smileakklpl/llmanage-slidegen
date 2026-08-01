@@ -84,6 +84,7 @@ class PipelineRequestContract(BaseModel):
     generation_render_reserve_seconds: float = Field(ge=0)
     generation_llm_budget_exhausted: bool = False
     source_objects: list[dict[str, Any]] = Field(default_factory=list)
+    template_path: str | None = None
 
     @model_validator(mode="after")
     def validate_deadline_reserve(self) -> PipelineRequestContract:

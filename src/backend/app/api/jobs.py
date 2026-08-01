@@ -63,11 +63,12 @@ async def _load_job(job_id: str):
 async def generate_job(
     files: Annotated[list[UploadFile], File(...)],
     prompt: str = Form(...),
+    template: Annotated[UploadFile | None, File()] = None,
     generation_policy: str | None = Form(default=None),
     generation_deadline_seconds: float | None = Form(default=None),
     generation_render_reserve_seconds: float | None = Form(default=None),
 ) -> JobCreateResponse:
-    """Persist supported uploads in S3 and queue ingestion/generation."""
+    """Persist data uploads and an optional PowerPoint template in S3."""
 
     normalized_prompt = prompt.strip()
 
@@ -96,6 +97,25 @@ async def generate_job(
                 detail=f"上傳檔案超過 {MAX_UPLOAD_BYTES} bytes 限制：{filename}",
             )
 
+    template_filename: str | None = None
+    if template is not None:
+        template_filename = Path(template.filename or "template.pptx").name
+        if Path(template_filename).suffix.lower() != ".pptx":
+            raise HTTPException(
+                status_code=415,
+                detail="簡報模板僅接受 PPTX 格式",
+            )
+
+        template_size = await asyncio.to_thread(_stream_size, template.file)
+        if template_size > MAX_UPLOAD_BYTES:
+            raise HTTPException(
+                status_code=413,
+                detail=(
+                    f"簡報模板超過 {MAX_UPLOAD_BYTES} bytes 限制："
+                    f"{template_filename}"
+                ),
+            )
+
     try:
         service = get_job_service()
         storage = get_object_storage()
@@ -118,6 +138,7 @@ async def generate_job(
 
     job_id = service.generate_job_id()
     uploaded: list[StoredObjectRef] = []
+    uploaded_template: StoredObjectRef | None = None
 
     try:
         for index, (file, filename) in enumerate(zip(files, filenames), start=1):
@@ -132,10 +153,26 @@ async def generate_job(
             )
             uploaded.append(stored)
 
+        if template is not None and template_filename is not None:
+            await template.seek(0)
+            template_content_type = (
+                template.content_type
+                or mimetypes.guess_type(template_filename)[0]
+                or "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+            )
+            uploaded_template = await asyncio.to_thread(
+                storage.upload_fileobj,
+                template.file,
+                key=f"uploads/{job_id}/template/{template_filename}",
+                filename=template_filename,
+                content_type=template_content_type,
+            )
+
         job = await service.create_job(
             job_id=job_id,
             prompt=normalized_prompt,
             input_objects=uploaded,
+            template_object=uploaded_template,
             generation_policy=generation_policy,
             generation_deadline_seconds=generation_deadline_seconds,
             generation_render_reserve_seconds=(
@@ -145,7 +182,10 @@ async def generate_job(
     except HTTPException:
         raise
     except Exception as error:
-        for item in uploaded:
+        uploaded_objects = [*uploaded]
+        if uploaded_template is not None:
+            uploaded_objects.append(uploaded_template)
+        for item in uploaded_objects:
             try:
                 await asyncio.to_thread(storage.delete, item.key)
             except Exception:
@@ -158,6 +198,8 @@ async def generate_job(
     finally:
         for file in files:
             await file.close()
+        if template is not None:
+            await template.close()
 
     return JobCreateResponse(
         job_id=job.job_id,

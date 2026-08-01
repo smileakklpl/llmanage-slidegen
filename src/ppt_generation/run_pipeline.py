@@ -1453,6 +1453,7 @@ def run(
     stop_after: str = STAGE_SEQUENCE[-1],
     dump_dir: Path | None = None,
     deck_title: str | None = None,
+    template_path: str | Path | None = None,
     generation_policy: str | None = None,
     generation_deadline_seconds: float | None = None,
     generation_render_reserve_seconds: float | None = None,
@@ -2216,6 +2217,7 @@ def run(
     render_report = renderer.render_deck_from_spec(
         deck_spec,
         output_path=pptx_path,
+        template_path=template_path,
     )
 
     print(
@@ -2307,6 +2309,7 @@ def run_from_contract(payload: dict[str, Any]) -> int:
             Path(validated.dump_dir) if validated.dump_dir is not None else None
         ),
         deck_title=validated.deck_title,
+        template_path=validated.template_path,
         generation_policy=validated.generation_policy,
         generation_deadline_seconds=validated.generation_deadline_seconds,
         generation_render_reserve_seconds=(

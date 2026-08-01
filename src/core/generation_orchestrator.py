@@ -147,6 +147,7 @@ def generate_deck(request: dict[str, Any]) -> GenerationResult:
         source_objects=[
             item.model_dump(mode="json") for item in validated.source_objects
         ],
+        template_path=validated.template_path,
     )
     exit_code = run_pipeline.run_from_contract(
         pipeline_request.model_dump(mode="json")

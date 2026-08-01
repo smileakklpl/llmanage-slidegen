@@ -12,11 +12,15 @@ export function GeneratePage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  async function handleSubmit(files: File[], prompt: string) {
+  async function handleSubmit(
+    files: File[],
+    prompt: string,
+    template: File | null
+  ) {
     setIsSubmitting(true);
     setError(null);
     try {
-      const result = await generateJob(files, prompt);
+      const result = await generateJob(files, prompt, template);
       navigate(`/jobs/${result.job_id}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : t("unknownError"));
