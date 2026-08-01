@@ -126,6 +126,16 @@ def _period_axes(graph: GridRelationshipGraph) -> list[tuple[int, list[CellToken
         labels = [str(token.value) for token in periods]
         if len(periods) < 2 or len(set(labels)) != len(labels):
             continue
+
+        # A period axis is header-shaped: periods dominate the visible cells
+        # in that row.  Wide record rows can legitimately contain values in
+        # the ROC-year range (for example 106 and 110), but a few such values
+        # among dozens of dimensions/measures must not turn an interior data
+        # row into a worksheet-level period hypothesis.
+        period_density = len(periods) / len(tokens)
+        if period_density < 0.5:
+            continue
+
         numeric_labels = [
             int(label)
             for label in labels

@@ -1708,6 +1708,20 @@ def run(
     # （FR-3.1），頁碼錯了主管照著 Excel 就會翻錯頁。
     renderer.assign_page_numbers(plan.sections)
 
+    # Page numbers are part of the cross-module JSON contract.  The renderer
+    # mutates the validated SectionPlan objects in place, so serialize and
+    # validate them again before persisting the section stage or handing it to
+    # the chart agent.  Otherwise chart planning uses stale logical page
+    # numbers while required-mode fallbacks use final slide numbers; collisions
+    # can leave recoverable provider failures in the result and abort delivery.
+    sections_payload = stage_contracts.section_stage_payload(
+        {
+            **sections_payload,
+            "sections": [section.to_dict() for section in plan.sections],
+        }
+    )
+    plan = section_planner.SectionPlanResult.from_dict(sections_payload)
+
     current_chapter: str | None = None
 
     for section in plan.sections:

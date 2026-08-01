@@ -1,0 +1,34 @@
+{
+  "pptx": "C:\\git-repo\\llmanage-slidegen\\outputs\\segmented_passphrases_bedrock_20260801_122728\\deck.pptx",
+  "xlsx": "C:\\git-repo\\llmanage-slidegen\\outputs\\segmented_passphrases_bedrock_20260801_122728\\deck_data.xlsx",
+  "deckspec": "C:\\git-repo\\llmanage-slidegen\\outputs\\segmented_passphrases_bedrock_20260801_122728\\deckspec.json",
+  "page_count": 12,
+  "slide_count": 20,
+  "divider_count": 4,
+  "chapters": [
+    "資料概況與分群",
+    "群組差異與關鍵特徵",
+    "風險與機會",
+    "行動建議"
+  ],
+  "chart_count": 12,
+  "warnings": [
+    "已移除模板中 4 張示範頁（保留首頁）"
+  ],
+  "placeholder_errors": {},
+  "sheet_names": [
+    "索引",
+    "P.4_segmented-passphrases",
+    "P.5_segmented-passphrases 占比 To",
+    "P.6_segmented-passphrases Top 1",
+    "P.8_segmented-passphrases 排名",
+    "P.9_segmented-passphrases 占比",
+    "P.10_segmented-passphrases 占比 T",
+    "P.12_segmented-passphrases",
+    "P.13_segmented-passphrases 占比 T",
+    "P.14_segmented-passphrases 排名",
+    "P.16_segmented-passphrases 占比 T",
+    "P.17_segmented-passphrases",
+    "P.18_segmented-passphrases 占比 T"
+  ]
+}
