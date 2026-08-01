@@ -12,7 +12,10 @@ from openpyxl import Workbook
 from pptx import Presentation
 
 from core.contracts.generation import GenerationRequest
-from core.generation_orchestrator import generate_deck
+from core.generation_orchestrator import (
+    GenerationFailedError,
+    generate_deck,
+)
 from ppt_generation.data import dataset_loader, metric_engine
 
 
@@ -386,3 +389,62 @@ def test_pipeline_invocation_contract_rejects_invalid_deadline_reserve() -> None
                 "generation_render_reserve_seconds": 30,
             }
         )
+
+
+def test_generation_fails_closed_for_pending_ingestion_review(
+    tmp_path: Path,
+) -> None:
+    ingestion_path = tmp_path / "pending_ingestion.json"
+    ingestion_path.write_text(
+        json.dumps(
+            {
+                "contract_version": "1.0",
+                "filename": "ambiguous.xlsx",
+                "pipeline_status": "completed_with_warnings",
+                "source_files": ["ambiguous.xlsx"],
+                "datasets": [
+                    {
+                        "dataset_id": "ambiguous",
+                        "name": "Ambiguous",
+                        "filename": "ambiguous.xlsx",
+                        "source_kind": "excel",
+                        "table_kind": "structured_table",
+                        "metadata": {},
+                        "columns": [
+                            {
+                                "key": "value",
+                                "label": "Value",
+                                "index": 0,
+                                "data_type": "number",
+                            }
+                        ],
+                        "records": [],
+                        "confidence": 0.74,
+                        "requires_human_review": True,
+                        "review_status": "pending",
+                        "warnings": ["layout confidence below gate"],
+                    }
+                ],
+                "warnings": [],
+                "errors": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    request = GenerationRequest(
+        job_id="pending-review",
+        prompt="Generate a trend deck",
+        ingestion_path=str(ingestion_path),
+        output_dir=str(tmp_path / "output"),
+        options={
+            "deadline_seconds": 10,
+            "render_reserve_seconds": 1,
+            "use_fake_llm": True,
+        },
+    )
+
+    with pytest.raises(
+        GenerationFailedError,
+        match="尚未通過人工確認",
+    ):
+        generate_deck(request.model_dump(mode="json"))

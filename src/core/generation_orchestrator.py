@@ -93,9 +93,21 @@ def generate_deck(request: dict[str, Any]) -> GenerationResult:
     if not ingestion_path.is_file():
         raise GenerationFailedError(f"ingestion JSON 不存在：{ingestion_path}")
 
-    ingestion_payload = NormalizedIngestionContract.model_validate(
+    ingestion = NormalizedIngestionContract.model_validate(
         _read_json(ingestion_path)
-    ).model_dump(mode="json")
+    )
+    blocked_datasets = [
+        dataset.dataset_id
+        for dataset in ingestion.datasets
+        if dataset.requires_human_review
+        or dataset.review_status in {"pending", "rejected"}
+    ]
+    if blocked_datasets:
+        raise GenerationFailedError(
+            "資料集尚未通過人工確認，禁止進入生成流程："
+            + "、".join(blocked_datasets)
+        )
+    ingestion_payload = ingestion.model_dump(mode="json")
 
     options = validated.options
     remaining_deadline = options.deadline_seconds

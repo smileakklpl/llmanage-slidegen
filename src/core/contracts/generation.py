@@ -70,6 +70,17 @@ class NormalizedRecordContract(BaseModel):
     values: dict[str, NormalizedValueContract]
 
 
+class NormalizationPlanContract(BaseModel):
+    """Version-dispatched normalization evidence persisted for Refresh."""
+
+    model_config = ConfigDict(extra="allow")
+
+    contract_version: Literal["1.0"] = "1.0"
+    sheet_name: str = Field(min_length=1)
+    strategy: str = Field(min_length=1)
+    confidence: float = Field(ge=0.0, le=1.0)
+
+
 class NormalizedDatasetContract(BaseModel):
     """Validated dataset shape accepted by deterministic metric calculation."""
 
@@ -86,6 +97,13 @@ class NormalizedDatasetContract(BaseModel):
     confidence: float = Field(ge=0.0, le=1.0)
     requires_human_review: bool = False
     review_status: str = "not_required"
+    layout_strategy: str | None = None
+    layout_confidence: float | None = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+    )
+    normalization_spec: NormalizationPlanContract | None = None
     warnings: list[str] = Field(default_factory=list)
 
 
