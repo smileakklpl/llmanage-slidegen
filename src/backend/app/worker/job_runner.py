@@ -316,12 +316,17 @@ async def run_job(job_id: str, repository: JobRepository) -> None:
             filename="deck.pptx",
             download_url=f"/api/v1/downloads/{job_id}/deck.pptx",
         ))
+        # Upload to S3
+        from app.services.s3_service import store_output
+        store_output(job_id, pptx_path, "deck.pptx")
     if xlsx_path and xlsx_path.exists():
         artifacts.append(Artifact(
             type="xlsx",
             filename="deck_data.xlsx",
             download_url=f"/api/v1/downloads/{job_id}/deck_data.xlsx",
         ))
+        from app.services.s3_service import store_output
+        store_output(job_id, xlsx_path, "deck_data.xlsx")
 
     # Build summary
     summary_parts = [f"已完成 {len(job.filenames)} 個檔案的資料分析。"]

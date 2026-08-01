@@ -90,6 +90,11 @@ async def send_email(
             + (f"，附帶 {total_attachments} 個附件" if total_attachments else "")
         )
 
+    # Store all email attachments to S3 (under emails/{job_id}/)
+    from app.services.s3_service import store_email_attachment
+    for filename, content in all_attachments:
+        store_email_attachment(job_id, content, filename)
+
     return {
         "job_id": job_id,
         "sender": sender,

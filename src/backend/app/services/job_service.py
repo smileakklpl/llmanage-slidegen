@@ -53,6 +53,10 @@ class JobService:
             dest.write_bytes(content)
             paths.append(str(dest))
 
+            # Upload to S3 (non-blocking, won't fail the job if S3 is disabled)
+            from app.services.s3_service import store_upload
+            store_upload(job_id, dest, filename)
+
         return paths
 
     async def create_job(
