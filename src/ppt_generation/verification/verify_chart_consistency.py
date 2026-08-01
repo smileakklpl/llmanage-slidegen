@@ -387,22 +387,39 @@ def _match_external_sheet_for_table(
 def _match_external_sheet(
     sheets: Sequence[ExternalSheet],
     chart_title: str,
+    slide_number: int,
     chart_ordinal: int,
 ) -> ExternalSheet | None:
     """
     找出與圖表對應的稽核工作表。
 
-    以**圖表標題**為主鍵：稽核 Excel 的頁碼是簡報邏輯頁碼，而 pptx 的
-    slide 序號含封面等非內容頁，兩者會有偏移，用序號配對會錯頁
-    （曾實際造成誤判為數值不符）。圖表標題則是唯一且穩定的識別。
+    優先使用「實際投影片頁碼 + 圖表標題」這組複合鍵。單用標題並不安全：
+    排名頁與原始值頁可能產生相同標題，但引用不同 metric，曾造成實值被拿去
+    和排名比較。只有標題在整本稽核 Excel 中唯一時，才允許單獨使用標題。
 
-    標題比對不到時，才回退用「第幾張含圖表的投影片」對應頁碼。
+    舊版產物的頁碼可能是邏輯頁碼而非實際 slide 序號，因此最後仍保留頁碼與
+    「第幾張含圖表的投影片」兩層相容性 fallback。
     """
     normalized = chart_title.strip()
+    title_matches = [
+        sheet
+        for sheet in sheets
+        if sheet.chart_title and sheet.chart_title.strip() == normalized
+    ]
 
-    for sheet in sheets:
-        if sheet.chart_title and sheet.chart_title == normalized:
+    for sheet in title_matches:
+        if sheet.page_number == slide_number:
             return sheet
+
+    if len(title_matches) == 1:
+        return title_matches[0]
+
+    page_matches = [
+        sheet for sheet in sheets if sheet.page_number == slide_number
+    ]
+
+    if len(page_matches) == 1:
+        return page_matches[0]
 
     for sheet in sheets:
         if sheet.page_number == chart_ordinal:
@@ -468,7 +485,7 @@ def verify(
 
             if external:
                 external_sheet = _match_external_sheet(
-                    external, title, chart_slide_ordinal
+                    external, title, slide_number, chart_slide_ordinal
                 )
 
                 if external_sheet is None:
