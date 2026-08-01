@@ -73,6 +73,23 @@ export const translations = {
     notFoundMessage: "找不到此頁面",
     notFoundBack: "回到首頁",
 
+    // Auth
+    loginSubtitle: "請輸入 Email 登入",
+    loginEmailPlaceholder: "your@email.com",
+    loginEmailRequired: "請輸入 Email",
+    loginButton: "登入",
+    loginLoading: "登入中…",
+    loginNoAccount: "還沒有帳號？",
+    loginRegisterLink: "註冊",
+    registerSubtitle: "建立新帳號",
+    registerNameLabel: "姓名",
+    registerNamePlaceholder: "你的名字",
+    registerButton: "註冊",
+    registerLoading: "註冊中…",
+    registerHasAccount: "已有帳號？",
+    registerLoginLink: "登入",
+    userMenuLogout: "登出",
+
     // General
     unknownError: "發生未知錯誤",
     remove: "移除",
@@ -148,6 +165,23 @@ export const translations = {
     notFoundTitle: "404",
     notFoundMessage: "Page not found",
     notFoundBack: "Back to Home",
+
+    // Auth
+    loginSubtitle: "Enter your email to sign in",
+    loginEmailPlaceholder: "your@email.com",
+    loginEmailRequired: "Please enter your email",
+    loginButton: "Sign In",
+    loginLoading: "Signing in…",
+    loginNoAccount: "Don't have an account?",
+    loginRegisterLink: "Register",
+    registerSubtitle: "Create a new account",
+    registerNameLabel: "Name",
+    registerNamePlaceholder: "Your name",
+    registerButton: "Register",
+    registerLoading: "Registering…",
+    registerHasAccount: "Already have an account?",
+    registerLoginLink: "Sign In",
+    userMenuLogout: "Sign Out",
 
     // General
     unknownError: "An unknown error occurred",

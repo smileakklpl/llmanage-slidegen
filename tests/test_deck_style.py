@@ -26,9 +26,9 @@ from ppt_generation.agents.section_planner import CONCLUSION_CHAPTER, SectionPla
 from ppt_generation.charts.chart_builder import ChartSpec
 from ppt_generation.charts.chart_planner import ChartPlan, ResolvedChart
 from ppt_generation.charts.table_builder import TableSpec
-from ppt_generation.core import config, placeholders
+from ppt_generation.core import config, placeholders, theme
 from ppt_generation.data.metric_store import MetricSeries, MetricStore
-from ppt_generation.output import renderer, theme
+from ppt_generation.output import renderer
 
 
 TEMPLATE = config.TEMPLATE_PPTX

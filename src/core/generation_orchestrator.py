@@ -202,14 +202,18 @@ def generate_deck(request: dict[str, Any]) -> GenerationResult:
     verification_path = output_dir / "verification.json"
     shutil.copyfile(stage_dir / "07_verify.json", verification_path)
 
+    # Read actual artifact paths from the render stage output.
+    pptx_path = Path(render["pptx"])
+    xlsx_path = Path(render["xlsx"])
+
     artifacts = [
         _artifact(
-            output_dir / "deck.pptx",
+            pptx_path,
             "pptx",
             "application/vnd.openxmlformats-officedocument.presentationml.presentation",
         ),
         _artifact(
-            output_dir / "deck_data.xlsx",
+            xlsx_path,
             "xlsx",
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         ),

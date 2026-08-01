@@ -10,6 +10,9 @@ Environment variables:
 - SES_SENDER_EMAIL: Override sender email (optional, uses form input if not set)
 """
 
+from __future__ import annotations
+
+import asyncio
 import os
 import tempfile
 from email import encoders
@@ -17,24 +20,16 @@ from email.mime.application import MIMEApplication
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from pathlib import Path
-from uuid import UUID
+from typing import TYPE_CHECKING
 
 from app.core.logging import get_logger
 
+if TYPE_CHECKING:
+    from app.storage.s3_storage import S3ObjectStorage
+
 logger = get_logger(__name__)
 
-# Output directory for job artifacts (must match job_runner.py)
-_OUTPUT_BASE = Path(tempfile.gettempdir()) / "slidegen_outputs"
-_ALLOWED_ARTIFACT_FILENAMES = frozenset({"deck.pptx", "deck_data.xlsx"})
-
-
-def _safe_job_output_dir(job_id: str) -> Path | None:
-    try:
-        safe_job_id = str(UUID(job_id))
-    except ValueError:
-        logger.warning("Rejected artifact lookup for invalid job_id: %s", job_id)
-        return None
-    return (_OUTPUT_BASE / safe_job_id).resolve()
+_ALLOWED_ARTIFACT_SUFFIXES = frozenset({".pptx", ".xlsx"})
 
 
 def _get_provider() -> str:
@@ -53,17 +48,21 @@ async def send_email(
     subject: str,
     body: str,
     artifact_filenames: list[str],
+    artifact_object_keys: dict[str, str],
+    storage: S3ObjectStorage,
     extra_attachments: list[tuple[str, bytes]],
 ) -> dict:
     """Send an email with optional attachments.
 
     Args:
-        job_id: Job ID to locate artifact files.
+        job_id: Job ID for logging/storage.
         sender: Sender email address.
         recipients: List of recipient email addresses.
         subject: Email subject line.
         body: Email body text.
         artifact_filenames: List of artifact filenames to attach (e.g. ["deck.pptx"]).
+        artifact_object_keys: Mapping of filename -> S3 object key for job artifacts.
+        storage: S3ObjectStorage instance to download artifacts from.
         extra_attachments: List of (filename, content_bytes) for user-uploaded attachments.
 
     Returns:
@@ -74,20 +73,38 @@ async def send_email(
     # Collect all attachment data
     all_attachments: list[tuple[str, bytes]] = []
 
-    # Load job artifact files from disk
+    # Download requested artifacts from S3
     requested_artifacts = {
-        name for name in artifact_filenames if name in _ALLOWED_ARTIFACT_FILENAMES
+        name for name in artifact_filenames
+        if Path(name).suffix.lower() in _ALLOWED_ARTIFACT_SUFFIXES
     }
-    output_dir = _safe_job_output_dir(job_id)
-    if output_dir is not None and output_dir.exists():
-        for artifact_path in output_dir.iterdir():
-            if (
-                artifact_path.is_file()
-                and artifact_path.name in requested_artifacts
-            ):
-                all_attachments.append(
-                    (artifact_path.name, artifact_path.read_bytes())
-                )
+    for filename in requested_artifacts:
+        object_key = artifact_object_keys.get(filename)
+        if not object_key:
+            logger.warning(
+                "Artifact %s requested but no S3 key found for job %s",
+                filename,
+                job_id,
+            )
+            continue
+        try:
+            with tempfile.NamedTemporaryFile(delete=False, suffix=Path(filename).suffix) as tmp:
+                tmp_path = Path(tmp.name)
+            await asyncio.to_thread(storage.download_path, object_key, tmp_path)
+            content = tmp_path.read_bytes()
+            all_attachments.append((filename, content))
+        except Exception:
+            logger.exception(
+                "Failed to download artifact %s (key=%s) for job %s",
+                filename,
+                object_key,
+                job_id,
+            )
+        finally:
+            try:
+                tmp_path.unlink(missing_ok=True)
+            except Exception:
+                pass
 
     # Add user-uploaded extra attachments
     all_attachments.extend(extra_attachments)

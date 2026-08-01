@@ -6,6 +6,27 @@ import {
 import type { JobCreateResponse, JobStatusResponse } from "@/types";
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "";
+const TOKEN_KEY = "auth_token";
+
+function getAuthHeaders(): HeadersInit {
+  const token = localStorage.getItem(TOKEN_KEY);
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
+export interface JobReviewResponse {
+  job_id: string;
+  review_required_count: number;
+  can_resume: boolean;
+  datasets: Record<string, unknown>[];
+  sources: { filename: string; preview_url: string }[];
+}
+
+export interface ResumeJobResponse {
+  job_id: string;
+  status: string;
+  stage: string;
+  message: string;
+}
 
 export async function generateJob(
   files: File[],
@@ -19,12 +40,13 @@ export async function generateJob(
 
   const res = await fetch(`${BASE_URL}/api/v1/jobs/generate`, {
     method: "POST",
+    headers: getAuthHeaders(),
     body: formData,
   });
 
   if (!res.ok) {
     const error = await res.json().catch(() => ({ message: "未知錯誤" }));
-    throw new Error(error.message || `HTTP ${res.status}`);
+    throw new Error(error.detail || error.message || `HTTP ${res.status}`);
   }
 
   const data = await res.json();
@@ -36,8 +58,44 @@ export async function getJobStatus(jobId: string): Promise<JobStatusResponse> {
   return jobStatusResponseSchema.parse(data);
 }
 
+export async function getJobReview(jobId: string): Promise<JobReviewResponse> {
+  return apiFetch<JobReviewResponse>(`/api/v1/jobs/${jobId}/review`);
+}
+
+export async function reviewJobDataset(
+  jobId: string,
+  datasetId: string,
+  review: { decision: "approve" | "reject"; reviewer: string; notes?: string; corrections: unknown[] }
+): Promise<Record<string, unknown>> {
+  const res = await fetch(`${BASE_URL}/api/v1/jobs/${jobId}/datasets/${datasetId}/review`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+    body: JSON.stringify(review),
+  });
+
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({ message: "未知錯誤" }));
+    throw new Error(error.detail || error.message || `HTTP ${res.status}`);
+  }
+
+  return res.json();
+}
+
+export async function resumeJob(jobId: string): Promise<ResumeJobResponse> {
+  const res = await fetch(`${BASE_URL}/api/v1/jobs/${jobId}/resume`, {
+    method: "POST",
+    headers: getAuthHeaders(),
+  });
+
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({ message: "未知錯誤" }));
+    throw new Error(error.detail || error.message || `HTTP ${res.status}`);
+  }
+
+  return res.json();
+}
+
 export interface SendEmailRequest {
-  sender: string;
   recipients: string[];
   subject: string;
   body: string;
@@ -57,7 +115,6 @@ export async function sendJobEmail(
 ): Promise<SendEmailResponse> {
   const formData = new FormData();
 
-  formData.append("sender", payload.sender);
   for (const recipient of payload.recipients) {
     formData.append("recipients", recipient);
   }
@@ -72,6 +129,7 @@ export async function sendJobEmail(
 
   const res = await fetch(`${BASE_URL}/api/v1/jobs/${jobId}/send`, {
     method: "POST",
+    headers: getAuthHeaders(),
     body: formData,
   });
 

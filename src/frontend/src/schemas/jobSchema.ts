@@ -6,13 +6,14 @@
 import { z } from "zod";
 
 /** High-level status of a job. */
-export const jobStatusEnum = z.enum(["queued", "running", "succeeded", "failed"]);
+export const jobStatusEnum = z.enum(["queued", "running", "waiting_review", "succeeded", "failed"]);
 
 /** Processing stage of a job. */
 export const jobStageEnum = z.enum([
   "queued",
   "parsing_intent",
   "analyzing_data",
+  "reviewing_data",
   "writing_insights",
   "rendering",
   "validating",
@@ -45,6 +46,8 @@ export const jobStatusResponseSchema = z.object({
   artifacts: z.array(artifactSchema),
   error: jobErrorSchema.nullable(),
   summary: z.string().nullable().optional(),
+  review_required_count: z.number().int().nonnegative().default(0),
+  review_url: z.string().nullable().optional(),
 });
 
 /** Response for POST /api/v1/jobs/generate (HTTP 202). */

@@ -4,7 +4,6 @@ import { HealthStatus } from "@/components/HealthStatus";
 import { GenerateForm } from "@/components/GenerateForm";
 import { ErrorMessage } from "@/components/ErrorMessage";
 import { generateJob } from "@/api/jobsApi";
-import { processUploadedFile } from "@/api/ingestionApi";
 import { useI18n } from "@/i18n";
 
 export function GeneratePage() {
@@ -17,33 +16,6 @@ export function GeneratePage() {
     setIsSubmitting(true);
     setError(null);
     try {
-      const ingestionResults = await Promise.all(
-        files.map((file) => processUploadedFile(file))
-      );
-
-      const failed = ingestionResults.find((result) =>
-        ["failed", "rejected"].includes(result.pipeline_status)
-      );
-      if (failed) {
-        throw new Error(
-          failed.errors[0] || `${failed.filename} 無法通過資料輸入檢查`
-        );
-      }
-
-      const requiresReview = ingestionResults.some((result) =>
-        result.datasets.some(
-          (dataset) =>
-            dataset.requires_human_review || dataset.review_status === "pending"
-        )
-      );
-
-      if (requiresReview) {
-        navigate("/review", {
-          state: { files, prompt, ingestionResults },
-        });
-        return;
-      }
-
       const result = await generateJob(files, prompt);
       navigate(`/jobs/${result.job_id}`);
     } catch (err) {

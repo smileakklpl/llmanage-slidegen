@@ -924,9 +924,9 @@ def _make_store_aware_fakes(store: Any):
                     "後續行動應以持續更新的資料校準優先順序"
                 ),
                 "bullets": [
-                    f"觀察高點 {cite('max_category')} 為 {cite('max')}，"
-                    "建議回到來源資料檢視其形成條件，再評估是否擴大相關行動",
-                    f"觀察低點為 {cite('min')}，與高點之間的差異顯示各類別"
+                    f"觀察極值 {cite('max_category')} 為 {cite('max')}，"
+                    "建議回到來源資料檢視其形成條件，再評估後續行動方向",
+                    f"觀察另一端為 {cite('min')}，與極值之間的差異顯示各類別"
                     "表現並不一致，後續追蹤應維持相同定義與資料口徑",
                     f"整體平均為 {cite('avg')}，管理團隊可據此建立追蹤基準，"
                     "並在下一次資料更新後重新檢視資源與改善工作的排序",
@@ -2155,8 +2155,15 @@ def run(
     print("=" * 68)
 
     output_dir.mkdir(parents=True, exist_ok=True)
-    pptx_path = output_dir / "deck.pptx"
-    xlsx_path = output_dir / "deck_data.xlsx"
+
+    # Derive output filenames from the original source file stem.
+    source_files = payload.get("source_files") or []
+    if source_files:
+        source_stem = Path(source_files[0]).stem
+    else:
+        source_stem = Path(payload.get("filename", "deck")).stem
+    pptx_path = output_dir / f"{source_stem}-分析簡報.pptx"
+    xlsx_path = output_dir / f"{source_stem}-分析資料.xlsx"
 
     # 重新指派頁碼。前面那次是在圖表決策之前算的，之後若有頁面因圖表或
     # 敘事失敗而被剔除，頁碼就會留下空號（P.6、P.7、P.9…），稽核 Excel 的

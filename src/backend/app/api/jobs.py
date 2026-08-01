@@ -5,10 +5,11 @@ import mimetypes
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from pydantic import ValidationError
 
 from app.api.deps import get_job_service, get_object_storage
+from app.auth.dependencies import get_current_user
 from app.core.errors import NotFoundError
 from app.ingestion.schemas import HumanReviewRequest, UnifiedDatasetSpec
 from app.ingestion.settings import MAX_UPLOAD_BYTES
@@ -170,6 +171,11 @@ async def get_job_status(job_id: str) -> JobStatusResponse:
     """Get the current status of a job."""
     job = await _load_job(job_id)
 
+    # Only expose downloadable deliverables (pptx, xlsx) to users;
+    # internal artifacts (verification.json, generation_manifest.json) are
+    # kept in storage but not surfaced in the API response.
+    user_artifacts = [a for a in job.artifacts if a.type != "json"]
+
     return JobStatusResponse(
         job_id=job.job_id,
         status=job.status,
@@ -178,7 +184,7 @@ async def get_job_status(job_id: str) -> JobStatusResponse:
         message=job.message,
         created_at=job.created_at,
         updated_at=job.updated_at,
-        artifacts=job.artifacts,
+        artifacts=user_artifacts,
         error=job.error,
         summary=job.summary,
         review_required_count=job.review_required_count,
@@ -271,14 +277,16 @@ async def resume_job(job_id: str) -> ResumeJobResponse:
 @router.post("/{job_id}/send", response_model=SendEmailResponse)
 async def send_job_email(
     job_id: str,
-    sender: Annotated[str, Form(...)],
     recipients: Annotated[list[str], Form(...)],
+    current_user: dict = Depends(get_current_user),
     subject: str = Form(""),
     body: str = Form(""),
     artifact_filenames: list[str] = Form(default=[]),
     attachments: list[UploadFile] = File(default=[]),
 ) -> SendEmailResponse:
     """Send the completed job artifacts to the specified recipients via email.
+
+    The sender is automatically set to the logged-in user's email.
 
     Accepts a multipart form with recipients, subject, body text, and
     optional file attachments.
@@ -287,11 +295,10 @@ async def send_job_email(
     - "mock" (default): returns success without sending
     - "ses": sends real email via AWS SES with attachments
     """
+    sender = current_user["email"]
     job = await _load_job(job_id)
 
     if job.status != "succeeded":
-        from fastapi import HTTPException
-
         raise HTTPException(
             status_code=400,
             detail={"code": "JOB_NOT_COMPLETED", "message": "工作尚未完成，無法寄送"},
@@ -304,9 +311,17 @@ async def send_job_email(
             content = await file.read()
             extra_attachments.append((file.filename, content))
 
+    # Build filename -> S3 object_key mapping from job artifacts
+    artifact_object_keys: dict[str, str] = {
+        artifact.filename: artifact.object_key
+        for artifact in (job.artifacts or [])
+        if artifact.object_key
+    }
+
     # Send email (mock or real SES depending on EMAIL_PROVIDER env)
     from app.services.email_service import send_email
 
+    storage = get_object_storage()
     result = await send_email(
         job_id=job_id,
         sender=sender,
@@ -314,6 +329,8 @@ async def send_job_email(
         subject=subject,
         body=body,
         artifact_filenames=artifact_filenames,
+        artifact_object_keys=artifact_object_keys,
+        storage=storage,
         extra_attachments=extra_attachments,
     )
 

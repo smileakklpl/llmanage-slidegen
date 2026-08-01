@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { getJobStatus, sendJobEmail } from "@/api/jobsApi";
 import { JobProgress } from "@/components/JobProgress";
@@ -9,6 +9,7 @@ import { useI18n } from "@/i18n";
 
 export function JobPage() {
   const { jobId } = useParams<{ jobId: string }>();
+  const navigate = useNavigate();
   const { t } = useI18n();
 
   const { data: job, error, refetch } = useQuery({
@@ -17,12 +18,18 @@ export function JobPage() {
     enabled: !!jobId,
     refetchInterval: (query) => {
       const status = query.state.data?.status;
-      if (status === "succeeded" || status === "failed") {
+      if (status === "succeeded" || status === "failed" || status === "waiting_review") {
         return false;
       }
       return 2500;
     },
   });
+
+  // Redirect to review page when job needs human review
+  if (job?.status === "waiting_review" && jobId) {
+    navigate(`/jobs/${jobId}/review`, { replace: true });
+    return null;
+  }
 
   if (error) {
     return (
@@ -79,8 +86,8 @@ export function JobPage() {
             </div>
           )}
 
-          <ArtifactList artifacts={job.artifacts} />
-          <SendEmailSection jobId={job.job_id} artifacts={job.artifacts} />
+          <ArtifactList artifacts={job.artifacts.filter(a => a.type !== "json")} />
+          <SendEmailSection jobId={job.job_id} artifacts={job.artifacts.filter(a => a.type !== "json")} />
         </div>
       )}
 
@@ -100,7 +107,6 @@ export function JobPage() {
 
 function SendEmailSection({ jobId, artifacts }: { jobId: string; artifacts: { type: string; filename: string; download_url: string }[] }) {
   const { t } = useI18n();
-  const [sender, setSender] = useState("");
   const [recipients, setRecipients] = useState<string[]>([]);
   const [recipientInput, setRecipientInput] = useState("");
   const [subject, setSubject] = useState("");
@@ -173,17 +179,6 @@ function SendEmailSection({ jobId, artifacts }: { jobId: string; artifacts: { ty
   }
 
   async function handleSend() {
-    if (!sender.trim()) {
-      setSendError(t("senderRequired"));
-      return;
-    }
-
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(sender.trim())) {
-      setSendError(t("senderInvalid"));
-      return;
-    }
-
     if (recipients.length === 0) {
       setInputError(t("recipientRequired"));
       return;
@@ -195,7 +190,6 @@ function SendEmailSection({ jobId, artifacts }: { jobId: string; artifacts: { ty
 
     try {
       const result = await sendJobEmail(jobId, {
-        sender: sender.trim(),
         recipients,
         subject,
         body,
@@ -227,25 +221,6 @@ function SendEmailSection({ jobId, artifacts }: { jobId: string; artifacts: { ty
 
       {!sendResult && (
         <div className="bg-white border border-gray-200 rounded-xl shadow-sm p-6 space-y-5">
-          {/* Sender */}
-          <div className="space-y-2">
-            <label
-              htmlFor="email-sender"
-              className="block text-xs font-semibold text-gray-500 uppercase tracking-wide"
-            >
-              {t("senderLabel")}
-            </label>
-            <input
-              id="email-sender"
-              type="email"
-              placeholder={t("senderPlaceholder")}
-              value={sender}
-              onChange={(e) => setSender(e.target.value)}
-              disabled={isSending}
-              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm placeholder:text-gray-400 focus:border-red-500 focus:ring-2 focus:ring-red-500/20 focus:outline-none disabled:opacity-50 transition-all"
-            />
-          </div>
-
           {/* Recipients */}
           <div className="space-y-2">
             <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide">

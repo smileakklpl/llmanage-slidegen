@@ -368,14 +368,25 @@ python -m ppt_generation.verification.verify_chart_consistency \
 
 ### 視覺風格與「黃色重點」
 
-顏色、字體、幾何常數集中在 `output/theme.py`，對齊 `source/附件三` 的版面
+顏色、字體、幾何常數集中在 `core/theme.py`，對齊 `source/附件三` 的版面
 語彙（實測解析結果寫在該檔的 docstring 裡）。要用顏色或字級一律從那裡取，
 不要在各模組硬編——同一份簡報出現兩種灰、兩種字級是最沒必要的瑕疵。
+（它在 `core/` 而不是 `output/`，因為 `charts/` 也要用它上色，留在
+`output/` 會形成循環匯入。）
+
+**圖表配色一律走 `chart_builder.apply_chart_style()`**，白 → 台新紅單色階：
+單系列逐資料點依排名上色（深紅＝最大值），多系列紅／黑交錯。不套用的話
+圖表會繼承模板的 `accent1..accent6`，變成藍橘灰黃四色並存。樣式只寫
+`spPr`／`txPr`，不碰數值節點，所以三份副本一致性不受影響。
+
+**字級是算出來的。** `theme.fit_font_size()` / `fit_single_line_font_size()`
+依文字長度與框寬高推算，`*_FONT_SIZE` 常數當上限用。固定字級的結果是
+短敘事留半頁白、長敘事溢出，而 PowerPoint 的 autofit 只會縮不會放。
 
 內容頁的元件順序：
 
 ```
-標題（左上、22pt、深灰 1A1A1A）
+標題（左上、上限 22pt、深灰 1A1A1A）
 重點訊息帶（淡黃底 + 左緣純黃標示條，放該頁 headline，前綴 ◆）
 原生圖表（左 60%）              要點條列（右 40%，前綴 ▸，項目符號用台新紅）
 頁尾註記（圖表頁：右鍵編輯資料／表格頁：指向稽核 Excel）
