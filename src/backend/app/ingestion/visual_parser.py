@@ -2,8 +2,11 @@ import json
 import os
 import re
 import tempfile
+from collections import Counter
 from datetime import date, datetime
+from html import escape
 from pathlib import Path
+from statistics import median
 from typing import Any
 
 import pymupdf
@@ -113,8 +116,35 @@ def _result_to_dict(
             "PaddleOCR 回傳格式不是 JSON object"
         )
 
-    return data
+    print(
+        "[PaddleOCR DEBUG] top-level keys:",
+        list(data.keys()),
+    )
 
+    nested_result = data.get("res")
+
+    if isinstance(nested_result, dict):
+        print(
+            "[PaddleOCR DEBUG] res keys:",
+            list(nested_result.keys()),
+        )
+
+        if any(
+            key in nested_result
+            for key in (
+                "overall_ocr_res",
+                "parsing_res_list",
+                "table_res_list",
+            )
+        ):
+            data = nested_result
+
+    print(
+        "[PaddleOCR DEBUG] final keys:",
+        list(data.keys()),
+    )
+
+    return data
 
 def _bbox_from_polygon(
     polygon: Any,
@@ -332,6 +362,274 @@ def _html_table_rows(
         )
 
     return rows
+
+
+
+def _text_blocks_to_table_html(
+    text_blocks: list[VisualTextBlock],
+) -> tuple[str, float] | None:
+    """
+    當 PPStructureV3 沒有產生 table_res_list / pred_html 時，
+    嘗試依 OCR 文字框的 Y/X 座標推測表格欄列。
+
+    這是低信任度 fallback：只建立候選資料集，後續必須人工確認。
+    """
+    valid_blocks = [
+        block
+        for block in text_blocks
+        if (
+            block.text.strip()
+            and len(block.bbox) == 4
+        )
+    ]
+
+    if len(valid_blocks) < 4:
+        return None
+
+    heights = [
+        max(
+            1.0,
+            float(block.bbox[3])
+            - float(block.bbox[1]),
+        )
+        for block in valid_blocks
+    ]
+
+    # 同一列 OCR block 的中心 Y 容許誤差。
+    y_tolerance = max(
+        10.0,
+        median(heights) * 0.7,
+    )
+
+    sorted_blocks = sorted(
+        valid_blocks,
+        key=lambda block: (
+            (
+                float(block.bbox[1])
+                + float(block.bbox[3])
+            )
+            / 2,
+            float(block.bbox[0]),
+        ),
+    )
+
+    grouped_rows: list[
+        tuple[float, list[VisualTextBlock]]
+    ] = []
+
+    # 1. 依 Y 座標分列。
+    for block in sorted_blocks:
+        center_y = (
+            float(block.bbox[1])
+            + float(block.bbox[3])
+        ) / 2
+
+        if not grouped_rows:
+            grouped_rows.append(
+                (
+                    center_y,
+                    [block],
+                )
+            )
+            continue
+
+        previous_y, previous_blocks = (
+            grouped_rows[-1]
+        )
+
+        if (
+            abs(center_y - previous_y)
+            <= y_tolerance
+        ):
+            previous_blocks.append(block)
+
+            new_y = sum(
+                (
+                    float(item.bbox[1])
+                    + float(item.bbox[3])
+                )
+                / 2
+                for item in previous_blocks
+            ) / len(previous_blocks)
+
+            grouped_rows[-1] = (
+                new_y,
+                previous_blocks,
+            )
+        else:
+            grouped_rows.append(
+                (
+                    center_y,
+                    [block],
+                )
+            )
+
+    rows = [
+        sorted(
+            blocks,
+            key=lambda block: float(
+                block.bbox[0]
+            ),
+        )
+        for _, blocks in grouped_rows
+    ]
+
+    if len(rows) < 2:
+        return None
+
+    # 2. 用最常出現的欄位數推測主要表格寬度。
+    column_counts = [
+        len(row)
+        for row in rows
+        if len(row) >= 2
+    ]
+
+    if len(column_counts) < 2:
+        return None
+
+    most_common_columns, most_common_count = (
+        Counter(column_counts)
+        .most_common(1)[0]
+    )
+
+    if most_common_columns < 2:
+        return None
+
+    structure_consistency = (
+        most_common_count
+        / len(column_counts)
+    )
+
+    # 規律性太低時，不要把一般段落文字誤判為表格。
+    if structure_consistency < 0.5:
+        return None
+
+    reference_rows = [
+        row
+        for row in rows
+        if len(row) == most_common_columns
+    ]
+
+    if len(reference_rows) < 2:
+        return None
+
+    # 3. 依規律列推測各欄的 X 中心位置。
+    column_centers: list[float] = []
+
+    for column_index in range(
+        most_common_columns
+    ):
+        centers = [
+            (
+                float(row[column_index].bbox[0])
+                + float(row[column_index].bbox[2])
+            )
+            / 2
+            for row in reference_rows
+        ]
+
+        column_centers.append(
+            float(median(centers))
+        )
+
+    # 4. 每個 OCR block 分配到最近的欄。
+    normalized_rows: list[list[str]] = []
+
+    for row in rows:
+        cells: list[list[str]] = [
+            []
+            for _ in range(
+                most_common_columns
+            )
+        ]
+
+        for block in row:
+            center_x = (
+                float(block.bbox[0])
+                + float(block.bbox[2])
+            ) / 2
+
+            nearest_column = min(
+                range(
+                    most_common_columns
+                ),
+                key=lambda index: abs(
+                    center_x
+                    - column_centers[index]
+                ),
+            )
+
+            cells[nearest_column].append(
+                block.text.strip()
+            )
+
+        normalized_row = [
+            " ".join(cell).strip()
+            for cell in cells
+        ]
+
+        # 至少兩欄有值，才視為資料列。
+        if sum(
+            bool(cell)
+            for cell in normalized_row
+        ) >= 2:
+            normalized_rows.append(
+                normalized_row
+            )
+
+    if len(normalized_rows) < 2:
+        return None
+
+    # 5. 轉成 HTML，直接重用既有 _html_to_dataset()。
+    html_parts = ["<table>"]
+
+    for row_index, row in enumerate(
+        normalized_rows
+    ):
+        html_parts.append("<tr>")
+
+        tag = (
+            "th"
+            if row_index == 0
+            else "td"
+        )
+
+        for value in row:
+            html_parts.append(
+                f"<{tag}>"
+                f"{escape(value)}"
+                f"</{tag}>"
+            )
+
+        html_parts.append("</tr>")
+
+    html_parts.append("</table>")
+
+    confidences = [
+        block.confidence
+        for block in valid_blocks
+        if block.confidence > 0
+    ]
+
+    average_ocr_confidence = (
+        sum(confidences)
+        / len(confidences)
+        if confidences
+        else 0.0
+    )
+
+    # 結構越規律、OCR 越可信，候選信心越高；
+    # 但 fallback 永遠低於人工審核門檻。
+    confidence = min(
+        average_ocr_confidence
+        * structure_consistency,
+        HUMAN_REVIEW_CONFIDENCE - 0.01,
+    )
+
+    return (
+        "".join(html_parts),
+        max(0.0, confidence),
+    )
 
 
 def _html_to_dataset(
@@ -919,6 +1217,7 @@ def inspect_visual_input(
             ] = []
 
             extracted_on_page = 0
+            fallback_used = False
 
             for table_index, table_result in enumerate(
                 table_results,
@@ -1004,6 +1303,87 @@ def inspect_visual_input(
 
                         extracted_on_page += 1
 
+            # PPStructureV3 沒有產出可用 pred_html 時，
+            # 從 OCR 文字框座標建立低信任度候選表格。
+            if (
+                extracted_on_page == 0
+                and text_blocks
+            ):
+                fallback_result = (
+                    _text_blocks_to_table_html(
+                        text_blocks
+                    )
+                )
+
+                if fallback_result is not None:
+                    (
+                        fallback_html,
+                        fallback_confidence,
+                    ) = fallback_result
+
+                    fallback_table_index = (
+                        len(table_results) + 1
+                    )
+
+                    fallback_dataset = (
+                        _html_to_dataset(
+                            filename=filename,
+                            page_number=page_number,
+                            table_index=(
+                                fallback_table_index
+                            ),
+                            html=fallback_html,
+                            confidence=(
+                                fallback_confidence
+                            ),
+                        )
+                    )
+
+                    if fallback_dataset is not None:
+                        fallback_dataset.warnings.append(
+                            "此資料表由 OCR 文字座標"
+                            "推測欄列結構，必須經人工確認"
+                        )
+
+                        extracted_tables.append(
+                            fallback_dataset
+                        )
+
+                        visual_rows = (
+                            _html_table_rows(
+                                fallback_html
+                            )
+                        )
+
+                        visual_tables.append(
+                            VisualTableContent(
+                                page_number=page_number,
+                                table_index=(
+                                    fallback_table_index
+                                ),
+                                html=fallback_html,
+                                row_count=len(
+                                    visual_rows
+                                ),
+                                column_count=max(
+                                    (
+                                        len(row)
+                                        for row
+                                        in visual_rows
+                                    ),
+                                    default=0,
+                                ),
+                                confidence=round(
+                                    fallback_confidence,
+                                    4,
+                                ),
+                                bbox=[],
+                            )
+                        )
+
+                        extracted_on_page += 1
+                        fallback_used = True
+
             has_text = bool(
                 "\n".join(texts).strip()
             )
@@ -1011,6 +1391,7 @@ def inspect_visual_input(
             has_table = (
                 bool(table_results)
                 or "table" in labels
+                or fallback_used
             )
 
             has_chart = bool(chart_blocks)
@@ -1040,6 +1421,7 @@ def inspect_visual_input(
                 average_confidence
                 < HUMAN_REVIEW_CONFIDENCE
                 or has_chart
+                or fallback_used
                 or (
                     has_table
                     and extracted_on_page == 0
@@ -1059,6 +1441,13 @@ def inspect_visual_input(
                     "圖表截圖的數值需人工確認，"
                     "不得只依長條高度或折線位置"
                     "直接視為正確數值"
+                )
+
+            if fallback_used:
+                page_warnings.append(
+                    "PPStructureV3 未直接產生表格，"
+                    "目前資料由 OCR 文字座標推測欄列結構，"
+                    "需人工確認"
                 )
 
             if (
