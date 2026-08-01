@@ -309,9 +309,17 @@ async def send_job_email(
             content = await file.read()
             extra_attachments.append((file.filename, content))
 
+    # Build filename -> S3 object_key mapping from job artifacts
+    artifact_object_keys: dict[str, str] = {
+        artifact.filename: artifact.object_key
+        for artifact in (job.artifacts or [])
+        if artifact.object_key
+    }
+
     # Send email (mock or real SES depending on EMAIL_PROVIDER env)
     from app.services.email_service import send_email
 
+    storage = get_object_storage()
     result = await send_email(
         job_id=job_id,
         sender=sender,
@@ -319,6 +327,8 @@ async def send_job_email(
         subject=subject,
         body=body,
         artifact_filenames=artifact_filenames,
+        artifact_object_keys=artifact_object_keys,
+        storage=storage,
         extra_attachments=extra_attachments,
     )
 
