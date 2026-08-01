@@ -25,7 +25,7 @@ logger = get_logger(__name__)
 
 # Output directory for job artifacts (must match job_runner.py)
 _OUTPUT_BASE = Path(tempfile.gettempdir()) / "slidegen_outputs"
-_ALLOWED_ARTIFACT_FILENAMES = frozenset({"deck.pptx", "deck_data.xlsx"})
+_ALLOWED_ARTIFACT_SUFFIXES = frozenset({".pptx", ".xlsx"})
 
 
 def _safe_job_output_dir(job_id: str) -> Path | None:
@@ -76,7 +76,8 @@ async def send_email(
 
     # Load job artifact files from disk
     requested_artifacts = {
-        name for name in artifact_filenames if name in _ALLOWED_ARTIFACT_FILENAMES
+        name for name in artifact_filenames
+        if Path(name).suffix.lower() in _ALLOWED_ARTIFACT_SUFFIXES
     }
     output_dir = _safe_job_output_dir(job_id)
     if output_dir is not None and output_dir.exists():

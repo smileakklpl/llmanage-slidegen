@@ -140,16 +140,16 @@ def test_cross_domain_full_pipeline_is_native_and_t1_verified(
     )
     result = generate_deck(request.model_dump(mode="json"))
 
-    assert {item.filename for item in result.artifacts} == {
-        "deck.pptx",
-        "deck_data.xlsx",
-        "verification.json",
-        "generation_manifest.json",
-    }
+    actual_filenames = {item.filename for item in result.artifacts}
+    assert any(name.endswith(".pptx") for name in actual_filenames)
+    assert any(name.endswith(".xlsx") for name in actual_filenames)
+    assert "verification.json" in actual_filenames
+    assert "generation_manifest.json" in actual_filenames
     assert result.verification_passed is True
     assert result.external_checked == result.series_checked > 0
 
-    presentation = Presentation(output_dir / "deck.pptx")
+    pptx_artifact = next(item for item in result.artifacts if item.filename.endswith(".pptx"))
+    presentation = Presentation(Path(pptx_artifact.path))
     visuals = [
         shape
         for slide in presentation.slides

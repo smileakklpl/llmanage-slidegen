@@ -2155,8 +2155,15 @@ def run(
     print("=" * 68)
 
     output_dir.mkdir(parents=True, exist_ok=True)
-    pptx_path = output_dir / "deck.pptx"
-    xlsx_path = output_dir / "deck_data.xlsx"
+
+    # Derive output filenames from the original source file stem.
+    source_files = payload.get("source_files") or []
+    if source_files:
+        source_stem = Path(source_files[0]).stem
+    else:
+        source_stem = Path(payload.get("filename", "deck")).stem
+    pptx_path = output_dir / f"{source_stem}-分析簡報.pptx"
+    xlsx_path = output_dir / f"{source_stem}-分析資料.xlsx"
 
     # 重新指派頁碼。前面那次是在圖表決策之前算的，之後若有頁面因圖表或
     # 敘事失敗而被剔除，頁碼就會留下空號（P.6、P.7、P.9…），稽核 Excel 的

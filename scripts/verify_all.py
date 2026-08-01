@@ -142,14 +142,16 @@ def _production_pipeline() -> str:
         )
         result = generate_deck(request.model_dump(mode="json"))
 
-        expected = {
-            "deck.pptx",
-            "deck_data.xlsx",
-            "verification.json",
-            "generation_manifest.json",
-        }
+        expected_suffixes = {".pptx", ".xlsx", ".json"}
         actual = {artifact.filename for artifact in result.artifacts}
-        assert actual == expected, f"artifact 集合不完整：{sorted(actual)}"
+        actual_suffixes = {Path(name).suffix for name in actual}
+        assert expected_suffixes.issubset(actual_suffixes), (
+            f"artifact 類型不完整：{sorted(actual)}"
+        )
+        assert any(name.endswith(".pptx") for name in actual)
+        assert any(name.endswith(".xlsx") for name in actual)
+        assert "verification.json" in actual
+        assert "generation_manifest.json" in actual
         assert all(Path(item.path).is_file() for item in result.artifacts)
         assert all(item.size_bytes > 0 for item in result.artifacts)
         assert result.verification_passed is True
