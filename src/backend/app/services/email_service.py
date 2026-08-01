@@ -26,6 +26,14 @@ logger = get_logger(__name__)
 _OUTPUT_BASE = Path(tempfile.gettempdir()) / "slidegen_outputs"
 
 
+def _safe_artifact_path(job_id: str, filename: str) -> tuple[str, Path] | None:
+    safe_name = Path(filename).name
+    if safe_name != filename:
+        logger.warning("Rejected artifact filename with path segments: %s", filename)
+        return None
+    return safe_name, (_OUTPUT_BASE / job_id / safe_name)
+
+
 def _get_provider() -> str:
     return (os.getenv("EMAIL_PROVIDER") or "mock").strip().lower()
 
@@ -65,9 +73,12 @@ async def send_email(
 
     # Load job artifact files from disk
     for filename in artifact_filenames:
-        file_path = _OUTPUT_BASE / job_id / filename
+        safe_artifact = _safe_artifact_path(job_id, filename)
+        if safe_artifact is None:
+            continue
+        safe_name, file_path = safe_artifact
         if file_path.exists():
-            all_attachments.append((filename, file_path.read_bytes()))
+            all_attachments.append((safe_name, file_path.read_bytes()))
         else:
             logger.warning("Artifact file not found: %s", file_path)
 
