@@ -46,8 +46,8 @@ Windows PowerShell，從 repo root 執行：
 服務需要 S3 bucket 與 AWS credentials；所有 AWS client 明確使用 `AWS_REGION`。
 
 ```powershell
-$env:AWS_REGION = "ap-northeast-1"
-$env:S3_BUCKET = "your-bucket"
+$env:AWS_REGION = "us-west-2"
+$env:S3_BUCKET = "llmanage-slidegen-files"
 docker compose up --build
 ```
 
@@ -56,7 +56,7 @@ docker compose up --build
 
 ```powershell
 $env:EMAIL_PROVIDER = "ses"
-$env:SES_SENDER_EMAIL = "verified-sender@example.com"
+$env:SES_SENDER_EMAIL = "ethanlin7890@gmail.com"
 docker compose up --build -d
 ```
 
