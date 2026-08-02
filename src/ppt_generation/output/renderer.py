@@ -67,6 +67,17 @@ _LAYOUT_ALIASES = {
 AGENDA_TITLE = "目錄"
 CLOSING_MESSAGE = "感謝聆聽"
 
+#: 主題標語（紅字黃底一行小字）預設不產出。
+#:
+#: 先前預設在封面放一句「本簡報圖表皆為 PPT 原生物件…」，那是**系統能力的
+#: 說明**而不是這份簡報的主題，放在封面像免責聲明。而且該資訊每張圖表頁的
+#: 頁尾註記（:data:`theme.CHART_FOOTNOTE`）已經寫了，不需要在封面重複一次。
+#:
+#: 標語現在完全由呼叫端提供（``render_deck(theme_callouts=[...])``）。
+#: 不自動生成的理由：主題句是一句**論述**，系統沒有非 LLM 的來源可以寫出它，
+#: 而讓 LLM 寫又必須走佔位符與審查那一整套，不能在 renderer 這一層便宜行事。
+DEFAULT_THEME_CALLOUTS: tuple[str, ...] = ()
+
 #: 封面頁在模板中是第 1 張投影片，保留不刪；其後的示範頁移除。
 #: 「封面 + 目錄」共 2 張非內容頁，是頁碼推算的固定前綴。
 FRONT_MATTER_SLIDES = 2
@@ -110,6 +121,8 @@ class RenderReport:
     chapters: list[str] = field(default_factory=list)
     #: 是否產出了結論頁
     conclusion_page: bool = False
+    #: 實際加上的紅字黃底主題標語數量
+    callout_count: int = 0
 
 
 # ---------------------------------------------------------------------------
@@ -277,6 +290,10 @@ def _write_segments(
     一段文字為什麼要拆成多個 run：黃色標示是 run 級屬性。整段套用會把
     敘事文字也一起標黃，那就不是「重點」而是塗滿；只標值的話，讀者一眼
     看到的黃色字元恰好等於系統算出來的數字。
+
+    數值除了黃底還加**紅字粗體**（:data:`theme.METRIC_VALUE_COLOR`）。
+    黃色螢光在投影機色偏下常常偏淡到看不出來，只靠底色這條稽核線索會消失；
+    紅字讓它在遠距離投影時仍然成立。
     """
     for segment in segments:
         if not segment.text:
@@ -289,7 +306,9 @@ def _write_segments(
             run,
             size=size,
             bold=bold or segment.from_metric,
-            color=theme.TITLE_COLOR if segment.from_metric else color,
+            color=(
+                theme.METRIC_VALUE_COLOR if segment.from_metric else color
+            ),
             highlight=theme.HIGHLIGHT if segment.from_metric else None,
         )
 
@@ -538,6 +557,116 @@ def add_key_message_bar(
     )
 
     return bar, errors
+
+
+def add_theme_callout(
+    slide: Any,
+    text: str,
+    store: MetricStore,
+    *,
+    left: int,
+    top: int,
+    width: int,
+) -> tuple[Any, list[str]]:
+    """
+    加一條「紅字黃底」的一行小字，用來點出全案主題。
+
+    這是全份簡報視覺重量最高的元件——純黃底配紅字，遠看就是一條螢光。
+    正因如此它必須稀有：``render_deck()`` 以 :data:`theme.MAX_THEME_CALLOUTS`
+    限制整份最多兩條。附件三的黃色語彙是「請特別看這裡」，出現十次就等於
+    沒有重點。
+
+    文字走 :func:`placeholders.render_segments`，所以標語裡也能引用
+    MetricStore 的數值，且仍受同一套佔位符稽核。字級依長度收，因為這是
+    固定高度的單行元件，換行就是溢出。
+
+    Returns:
+        ``(shape, 佔位符錯誤清單)``。
+    """
+    box = slide.shapes.add_shape(
+        MSO_SHAPE.RECTANGLE,
+        Emu(left),
+        Emu(top),
+        Emu(width),
+        theme.CALLOUT_HEIGHT,
+    )
+    box.fill.solid()
+    box.fill.fore_color.rgb = theme.CALLOUT_FILL
+    box.line.fill.background()
+    box.shadow.inherit = False
+    _detach_theme_style(box)
+
+    text_frame = box.text_frame
+    text_frame.word_wrap = False
+    text_frame.vertical_anchor = MSO_ANCHOR.MIDDLE
+    text_frame.margin_left = theme.CALLOUT_TEXT_INSET
+    text_frame.margin_right = theme.CALLOUT_TEXT_INSET
+    text_frame.margin_top = 0
+    text_frame.margin_bottom = 0
+
+    paragraph = text_frame.paragraphs[0]
+    paragraph.alignment = PP_ALIGN.LEFT
+
+    segments, errors = placeholders.render_segments(text, store, strict=False)
+    resolved = "".join(segment.text for segment in segments)
+
+    size = theme.fit_single_line_font_size(
+        resolved,
+        width,
+        maximum=theme.CALLOUT_FONT_SIZE,
+        minimum=theme.MIN_CALLOUT_FONT_SIZE,
+        inset_x=int(theme.CALLOUT_TEXT_INSET) * 2,
+    )
+
+    # 標語整條都是紅字，數值不再另外標黃——底色已經是黃的，
+    # 再加黃色 highlight 等於沒有標示。
+    for segment in segments:
+        if not segment.text:
+            continue
+
+        run = paragraph.add_run()
+        run.text = segment.text
+        theme.apply_font(
+            run,
+            size=size,
+            bold=True,
+            color=theme.CALLOUT_TEXT_COLOR,
+        )
+
+    return box, errors
+
+
+def _add_callout_under_title(
+    slide: Any,
+    text: str,
+    store: MetricStore,
+    report: RenderReport,
+) -> int:
+    """
+    把主題標語擺在該頁標題正下方，並把佔位符錯誤收進 report。
+
+    Returns:
+        實際加上的標語數（0 或 1）。找不到標題就不放——沒有標題可對齊的話
+        標語會浮在版面上不知所指。
+    """
+    title_shape = slide.shapes.title
+
+    if title_shape is None:
+        return 0
+
+    _, errors = add_theme_callout(
+        slide,
+        text,
+        store,
+        left=int(title_shape.left),
+        top=int(title_shape.top + title_shape.height) + int(theme.KEY_BAR_GAP),
+        width=int(title_shape.width),
+    )
+
+    if errors:
+        report.placeholder_errors.setdefault(0, []).extend(errors)
+
+    return 1
 
 
 def add_footnote(slide: Any, text: str, area: ContentArea) -> Any:
@@ -1005,6 +1134,7 @@ def render_deck(
     include_conclusion: bool = True,
     include_closing: bool = True,
     closing_message: str = CLOSING_MESSAGE,
+    theme_callouts: Sequence[str] | None = None,
 ) -> RenderReport:
     """
     組裝整份簡報。
@@ -1021,6 +1151,10 @@ def render_deck(
         include_conclusion: 是否在內容頁之後插入結論頁。
         include_closing: 是否在最後插入結尾頁。
         closing_message: 結尾頁文字。
+        theme_callouts: 紅字黃底的主題標語，最多
+            :data:`theme.MAX_THEME_CALLOUTS` 條（第一條放封面、第二條放
+            結論頁）。``None`` 表示使用預設的單一封面標語；傳空序列
+            則完全不加。標語可含 MetricStore 佔位符。
 
     版面順序：封面（模板首頁）→ 目錄 →（章節分隔頁 → 內容頁…）× N
     → 結論頁 → 結尾頁。
@@ -1058,6 +1192,19 @@ def render_deck(
                 color=theme.BODY_COLOR,
             )
 
+    source_callouts = (
+        DEFAULT_THEME_CALLOUTS if theme_callouts is None else theme_callouts
+    )
+    callouts = [text for text in source_callouts if text and text.strip()]
+
+    if len(callouts) > theme.MAX_THEME_CALLOUTS:
+        report.warnings.append(
+            f"主題標語數 {len(callouts)} 超過上限 "
+            f"{theme.MAX_THEME_CALLOUTS}，只保留前 "
+            f"{theme.MAX_THEME_CALLOUTS} 條"
+        )
+        callouts = callouts[: theme.MAX_THEME_CALLOUTS]
+
     if not keep_template_slides:
         removed = _remove_template_placeholder_slides(presentation)
 
@@ -1084,7 +1231,15 @@ def render_deck(
         agenda_items.append(CONCLUSION_CHAPTER)
 
     if include_agenda and report.chapters:
-        add_agenda_page(presentation, agenda_items)
+        agenda_slide = add_agenda_page(presentation, agenda_items)
+
+        # 第二條標語放目錄頁。內容頁不放：每張內容頁頂端已有淡黃的重點訊息帶，
+        # 再加一條純黃標語就是兩塊黃色互搶。目錄頁與結論頁沒有訊息帶，
+        # 是這份版面裡唯一能讓純黃獨佔視線的地方。
+        if len(callouts) > 1:
+            report.callout_count += _add_callout_under_title(
+                agenda_slide, callouts[1], store, report
+            )
 
     current_chapter: str | None = None
     chapter_index = 0
@@ -1115,11 +1270,20 @@ def render_deck(
             report.placeholder_errors[bundle.section.page_number or 0] = errors
 
     if has_conclusion:
-        _, conclusion_errors = add_conclusion_page(presentation, bundles, store)
+        conclusion_slide, conclusion_errors = add_conclusion_page(
+            presentation, bundles, store
+        )
         report.conclusion_page = True
 
         if conclusion_errors:
             report.placeholder_errors.setdefault(0, []).extend(conclusion_errors)
+
+        # 第一條標語放結論頁：讀者闔上簡報前看到的最後一句話，
+        # 也是「這份簡報要你記住什麼」最自然的位置。
+        if callouts:
+            report.callout_count += _add_callout_under_title(
+                conclusion_slide, callouts[0], store, report
+            )
 
     if include_closing:
         add_closing_page(presentation, closing_message)

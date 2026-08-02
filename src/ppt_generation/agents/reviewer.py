@@ -30,6 +30,7 @@ from typing import Any, Callable
 from ..core import llm_client, placeholders
 from ..charts.chart_planner import ResolvedChart
 from ..data.metric_store import MetricStore
+from . import text_quality
 from .narrative_writer import PageNarrative, check_narrative
 
 
@@ -91,7 +92,11 @@ SYSTEM_PROMPT = """你是一位嚴格的簡報品質審查員，負責審查給�
 4. 敘事的比較方向是否合理（例如把較小的數字說成領先）
 5. 敘事風格是否符合顧問報告水準（結論先行、避免只是複述數字）
 6. 股票或價格資料是否出現無資料支撐的買賣建議、報酬保證或過度預測
-7. 已驗證的全案需求只用來判斷呈現是否合宜；不得因原始提示詞措辭不佳、
+7. 錯別字、贅字與用詞是否得體：是否有重複字詞（如「第一名名」「成長成長」）、
+   簡體字混入、量詞或單位重複、語句不通順、同一句話裡前後矛盾的用詞。
+   程式已檢查機械性的重複與簡體字，你要抓的是規則抓不到的部分——
+   語意上的贅述、搭配不當的動詞名詞、讀起來不像中文母語者寫的句子。
+8. 已驗證的全案需求只用來判斷呈現是否合宜；不得因原始提示詞措辭不佳、
    帶情緒、模糊或部分要求無法套用而退件。遇到這類情況應採專業中性預設。
 
 若發現問題，status 回傳 "REJECTED"，並在 target_agent 指出應由哪個 Agent 修正：
@@ -282,6 +287,37 @@ def check_chart_narrative_alignment(
     return issues
 
 
+def check_text_quality(
+    narrative: PageNarrative,
+    store: MetricStore,
+) -> list[str]:
+    """
+    檢查錯別字、疊字與用詞，**在佔位符代入之後**。
+
+    為什麼一定要代入後才檢查：``format_value()`` 產出的值自帶單位或前後綴
+    （``名`` → ``第 3 名``、``%`` → ``12.3%``），而模型只看得到佔位符，
+    看不到它會展開成什麼。因此「排名第 {{…|max}} 名」這種**模板完全合法**
+    的寫法，代入後會變成「排名第第 3 名名」。檢查原始模板永遠抓不到它。
+
+    細節在 :mod:`text_quality`，這裡只負責代入與逐行標籤。
+    """
+    issues: list[str] = []
+
+    lines: list[tuple[str, str]] = [("headline", narrative.headline)]
+    lines.extend(
+        (f"要點 {index}", bullet)
+        for index, bullet in enumerate(narrative.bullets, start=1)
+    )
+
+    for label, text in lines:
+        # strict=False：代入失敗已由 check_narrative 回報，這裡不重複報，
+        # 也不該因為查表失敗就跳過文字品質檢查。
+        segments, _ = placeholders.render_segments(text, store, strict=False)
+        issues.extend(text_quality.check_rendered_line(segments, label=label))
+
+    return issues
+
+
 def run_rule_layer(
     narrative: PageNarrative,
     chart: ResolvedChart,
@@ -300,6 +336,7 @@ def run_rule_layer(
     )
     issues.extend(check_chart_narrative_alignment(narrative, chart))
     issues.extend(check_direction_consistency(narrative, store))
+    issues.extend(check_text_quality(narrative, store))
 
     if chart.metric.value_semantic == "price":
         normalized_text = re.sub(r"\s+", "", narrative.all_text)

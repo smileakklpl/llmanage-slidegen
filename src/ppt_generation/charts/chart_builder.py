@@ -122,30 +122,79 @@ def _transparent_sp_pr(parent):
     return sp_pr
 
 
-def _style_chart_title(chart, text: str) -> None:
-    """圖表標題：左上、12pt、深灰。不用模板預設的 18pt 置中大標。"""
+def _style_chart_title(chart, text: str, *, width: int = 0) -> None:
+    """
+    圖表標題：左上、深灰、粗體。不用模板預設的 18pt 置中大標。
+
+    標題長度差異很大（「市占率」到「有效卡數 Top 10：類別間差異值得關注」），
+    ``width`` 有值時依長度收字級，避免長標題折成兩行把繪圖區往下壓。
+    """
     chart.has_title = True
     text_frame = chart.chart_title.text_frame
     text_frame.text = text
 
+    size = theme.CHART_TITLE_FONT_SIZE
+
+    if width > 0:
+        size = theme.fit_single_line_font_size(
+            text,
+            width,
+            maximum=theme.CHART_TITLE_FONT_SIZE,
+            minimum=theme.CHART_LABEL_FONT_SIZE,
+        )
+
     for paragraph in text_frame.paragraphs:
         theme.apply_chart_font(
             paragraph.font,
-            size=theme.CHART_TITLE_FONT_SIZE,
+            size=size,
             bold=True,
             color=theme.TITLE_COLOR,
         )
 
 
-def _style_axes(chart) -> None:
+def _set_tick_label_rotation(axis_element, degrees: int) -> None:
     """
-    座標軸：淺格線、無刻度線、9pt 標籤。
+    設定座標軸標籤的旋轉角度。
+
+    python-pptx 沒有高階 API。``a:bodyPr`` 的 ``rot`` 單位是 1/60000 度，
+    ``c:txPr`` 由前面的 ``tick_labels.font`` 存取時就已建立，這裡只補屬性。
+    """
+    tx_pr = axis_element.find(qn("c:txPr"))
+
+    if tx_pr is None:
+        return
+
+    body_pr = tx_pr.find(qn("a:bodyPr"))
+
+    if body_pr is None:
+        return
+
+    body_pr.set("rot", str(int(degrees * 60000)))
+    # spcFirstLastPara/vert 不動；只旋轉，讓 PowerPoint 自行決定錨點。
+    body_pr.set("vert", "horz")
+
+
+def _style_axes(chart, categories: Sequence[str] = (), width: int = 0) -> None:
+    """
+    座標軸：淺格線、無刻度線，標籤字級依類別數與標籤長度推算。
 
     刻意直接走 ``catAx_lst`` / ``valAx_lst`` 而不用 ``chart.category_axis``
     與 ``chart.value_axis``：雙軸圖有兩個 ``c:valAx``，而 python-pptx 的
     ``value_axis`` 在有兩軸時回傳的是**次軸**，主軸會被漏掉。
+
+    ``categories`` 與 ``width`` 有值時，類別軸標籤會依可用寬度收字級，
+    收到下限仍放不下就改為旋轉（見 :func:`theme.fit_chart_label_font_size`）。
+    兩者為預設值時退回固定 9pt，行為與先前相同。
     """
     chart_space = chart._chartSpace
+
+    label_size = theme.CHART_LABEL_FONT_SIZE
+    rotation = 0
+
+    if categories and width > 0:
+        label_size, rotation = theme.fit_chart_label_font_size(
+            list(categories), width
+        )
 
     for element in chart_space.catAx_lst:
         axis = CategoryAxis(element)
@@ -154,9 +203,12 @@ def _style_axes(chart) -> None:
         axis.format.line.color.rgb = theme.HAIRLINE_COLOR
         theme.apply_chart_font(
             axis.tick_labels.font,
-            size=theme.CHART_LABEL_FONT_SIZE,
+            size=label_size,
             color=theme.BODY_COLOR,
         )
+
+        if rotation:
+            _set_tick_label_rotation(element, rotation)
 
     for element in chart_space.valAx_lst:
         axis = ValueAxis(element)
@@ -256,6 +308,7 @@ def apply_chart_style(
     chart,
     spec: ChartSpec,
     *,
+    width: int = 0,
     line_series_names: Sequence[str] = (),
 ) -> None:
     """
@@ -273,6 +326,8 @@ def apply_chart_style(
     Args:
         chart: ``add_chart()`` 回傳的圖表物件。
         spec: 產生該圖表的規格，用來取系列名稱與數值。
+        width: 圖表寬度（EMU）。有值時類別軸標籤字級會依可用寬度推算，
+            必要時旋轉，避免標籤重疊或被 PowerPoint 靜默省略。
         line_series_names: 已被改造成折線的系列名稱（雙軸圖用）。
             這些系列的顏色會設在線上而非填滿。
     """
@@ -288,10 +343,10 @@ def apply_chart_style(
 
     _style_chart_area(chart)
 
-    _style_chart_title(chart, spec.title)
+    _style_chart_title(chart, spec.title, width=width)
 
     if spec.chart_type not in _AXISLESS_CHART_TYPES:
-        _style_axes(chart)
+        _style_axes(chart, categories=spec.categories, width=width)
 
     series_names = list(spec.series)
     _style_legend(chart, len(series_names))
@@ -365,7 +420,7 @@ def add_category_chart(
         spec.chart_type, left, top, width, height, chart_data
     )
     chart = graphic_frame.chart
-    apply_chart_style(chart, spec)
+    apply_chart_style(chart, spec, width=int(width))
     return chart
 
 
@@ -408,7 +463,8 @@ def add_scatter_chart(
         size=theme.CHART_LABEL_FONT_SIZE,
         color=theme.BODY_COLOR,
     )
-    _style_chart_title(chart, spec.title)
+    _style_chart_title(chart, spec.title, width=int(width))
+    # 散點圖的 X 軸是數值軸，沒有實體名稱標籤，不需要旋轉判斷。
     _style_axes(chart)
     # 散點圖只有一個系列，圖例只是把系列名重複一次。
     chart.has_legend = False
@@ -697,7 +753,12 @@ def add_combo_chart(
     # 樣式必須在改造**之後**再套一次。改造前這些系列還是長條，顏色設在
     # 填滿上；搬到 lineChart 後填滿不再決定線色，得改設 a:ln。同時次軸
     # 是改造時才新建的，改造前不存在，_style_axes 也就套不到它。
-    apply_chart_style(chart, spec, line_series_names=spec.line_series_names)
+    apply_chart_style(
+        chart,
+        spec,
+        width=int(width),
+        line_series_names=spec.line_series_names,
+    )
 
     return chart
 

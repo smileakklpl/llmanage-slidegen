@@ -92,6 +92,11 @@ TITLE_COLOR = RGBColor(0x1A, 0x1A, 0x1A)
 BODY_COLOR = RGBColor(0x4D, 0x4D, 0x4D)
 MUTED_COLOR = RGBColor(0x66, 0x66, 0x66)
 
+#: 由 MetricStore 代入的數值用色。黃底之外再加紅字，讓「這是系統算出來的
+#: 數字」在遠距離投影時也看得出來——黃色螢光在投影機色偏下常常偏淡，
+#: 只靠底色的話這條稽核線索會消失。紅字與台新品牌色同一支，不另開新色。
+METRIC_VALUE_COLOR = ACCENT
+
 #: 深底上的反白文字。
 INVERSE_COLOR = RGBColor(0xFF, 0xFF, 0xFF)
 
@@ -270,6 +275,17 @@ CHART_LABEL_FONT_SIZE = Pt(9)
 CHART_LEGEND_FONT_SIZE = Pt(9)
 CHART_DATA_LABEL_FONT_SIZE = Pt(9)
 
+#: 座標軸標籤的字級下限。低於此值在投影幕上已經讀不到，
+#: 此時改用旋轉而不是繼續縮小。
+MIN_CHART_LABEL_FONT_SIZE = Pt(6)
+
+#: 類別軸標籤放不下時的旋轉角度。人工排版遇到長標籤也是這樣處理。
+CHART_LABEL_ROTATION_DEGREES = -45
+
+#: 繪圖區約占圖表總寬的比例（其餘給數值軸標籤與左右留白）。
+#: 這是估算類別軸每格可用寬度的分母，取保守值。
+CHART_PLOT_WIDTH_RATIO = 0.82
+
 #: 表格文字。表格字級另由 :func:`fit_table_font_size` 依列數再往下收。
 TABLE_HEADER_FONT_SIZE = Pt(11)
 TABLE_BODY_FONT_SIZE = Pt(11)
@@ -290,6 +306,10 @@ _LINE_HEIGHT_RATIO = 1.32
 #: 段距（``space_after``）相對字級的倍率。renderer 寫入的段距用同一個比例，
 #: 兩邊必須一致，否則估算與實際排版會愈差愈多。
 _PARAGRAPH_GAP_RATIO = 0.7
+
+#: 標籤旋轉 :data:`CHART_LABEL_ROTATION_DEGREES` 度後，可用間距的折減倍率。
+#: 45° 時垂直於文字方向的間距是水平間距的 sin(45°) ≈ 0.707 倍。
+_ROTATED_SPACING_RATIO = 0.707
 
 #: 文字框左右內縮與上下內縮的預設值（EMU），估算可用寬高時要扣掉。
 _DEFAULT_INSET_X = Emu(91440 * 2)
@@ -440,6 +460,70 @@ def fit_single_line_font_size(
     return Pt(max(min(fitted, max_pt), min_pt))
 
 
+def fit_chart_label_font_size(
+    labels: list[str],
+    chart_width: int,
+    *,
+    maximum=CHART_LABEL_FONT_SIZE,
+    minimum=MIN_CHART_LABEL_FONT_SIZE,
+) -> tuple[object, int]:
+    """
+    推算類別軸標籤的字級，並決定是否需要旋轉。
+
+    這是圖表版面唯一真的會「超出界線」的地方。數值軸標籤的長度由數字位數
+    決定，變化有限；類別軸標籤卻是資料裡的實體名稱——「國泰世華商業銀行」
+    七個全角字，十個類別擺在一張 60% 寬的圖表裡，橫排必然互相重疊，
+    PowerPoint 的處理是自行旋轉或**直接省略部分標籤**（省略比重疊更糟，
+    因為讀者不會發現有標籤消失了）。
+
+    推算方式：
+
+    1. 每個類別可用的水平寬度 ≈ 繪圖區寬 / 類別數
+    2. 橫排要放得下，需要 最長標籤字寬 × 字級 ≤ 每格可用寬
+    3. 解出的字級若低於 ``minimum``，就不再縮小而改為旋轉——旋轉後標籤沿
+       對角線排列，每格只需容納約 1.4 倍字級的高度，與標籤長度幾乎無關
+
+    Returns:
+        ``(字級, 旋轉角度)``。旋轉角度為 0 表示橫排。
+    """
+    cleaned = [str(label) for label in labels if str(label).strip()]
+
+    if not cleaned or chart_width <= 0:
+        return maximum, 0
+
+    longest = max(_visual_width(label) for label in cleaned)
+
+    if longest <= 0:
+        return maximum, 0
+
+    usable_pt = chart_width * CHART_PLOT_WIDTH_RATIO / _EMU_PER_PT
+    per_label_pt = usable_pt / len(cleaned)
+
+    max_pt = int(maximum) / _EMU_PER_PT
+    min_pt = int(minimum) / _EMU_PER_PT
+
+    horizontal_pt = per_label_pt / longest
+
+    if horizontal_pt >= max_pt:
+        return maximum, 0
+
+    if horizontal_pt >= min_pt:
+        return Pt(int(horizontal_pt * 2) / 2), 0
+
+    # 橫排連最小字級都放不下 → 旋轉。
+    #
+    # 旋轉後標籤不再受長度限制，但也不是完全沒有限制：相鄰標籤是兩條平行的
+    # 斜線，不重疊的條件是**垂直於文字方向的間距**大於字高。45° 時該間距是
+    # 水平間距的 sin(45°) 倍，因此仍要乘上 _ROTATED_SPACING_RATIO——
+    # 少了這一項會高估可用空間，算出來的字級照樣重疊。
+    rotated_pt = (
+        per_label_pt * _ROTATED_SPACING_RATIO / _LINE_HEIGHT_RATIO
+    )
+    fitted = max(min(rotated_pt, max_pt), min_pt)
+
+    return Pt(int(fitted * 2) / 2), CHART_LABEL_ROTATION_DEGREES
+
+
 def fit_table_font_size(row_count: int, column_count: int, height: int):
     """
     依表格列數與可用高度推算儲存格字級。
@@ -503,6 +587,27 @@ CHART_FOOTNOTE = "可點選圖表右鍵「編輯資料」查看原始 EXCEL 資�
 #: 表格頁的頁尾註記。表格沒有內嵌工作簿，右鍵不會有「編輯資料」——
 #: 沿用圖表那句就是騙人，這裡明確指向稽核用的 .xlsx。
 TABLE_FOOTNOTE = "本表數值與隨附 Excel 稽核檔逐格一致"
+
+
+# ---------------------------------------------------------------------------
+# 主題標語（紅字黃底的一行小字）
+# ---------------------------------------------------------------------------
+#: 純黃底 + 紅字的一行小字，用來點出全案主題。
+#:
+#: 這是全份簡報視覺重量最高的元件，**刻意限制數量**（見
+#: :data:`MAX_THEME_CALLOUTS`）。附件三的黃色語彙是「請特別看這裡」，
+#: 一份簡報出現十處「請特別看這裡」就等於沒有重點。
+CALLOUT_FILL = HIGHLIGHT
+CALLOUT_TEXT_COLOR = ACCENT
+CALLOUT_FONT_SIZE = Pt(11)
+MIN_CALLOUT_FONT_SIZE = Pt(8)
+
+#: 標語高度與左右內距。單行，高度不隨字數變。
+CALLOUT_HEIGHT = Emu(274320)
+CALLOUT_TEXT_INSET = Emu(91440)
+
+#: 一份簡報最多幾條主題標語。超過就不是強調而是雜訊。
+MAX_THEME_CALLOUTS = 2
 
 
 def apply_font(
