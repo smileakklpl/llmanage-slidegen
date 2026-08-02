@@ -2,6 +2,8 @@ import json
 import os
 import re
 import tempfile
+import threading
+import time
 from collections import Counter
 from datetime import date, datetime
 from html import escape
@@ -38,6 +40,8 @@ PDF_RENDER_DPI = 200
 HUMAN_REVIEW_CONFIDENCE = 0.80
 
 _ENGINE_CACHE: dict[bool, Any] = {}
+_ENGINE_CACHE_LOCK = threading.Lock()
+_ENGINE_INFERENCE_LOCKS: dict[bool, threading.Lock] = {}
 
 
 def _env_flag(
@@ -61,43 +65,39 @@ def _get_engine(
     enable_chart_recognition: bool,
 ) -> Any:
     """
-    延遲載入 OCR 模型。
+    延遲載入 OCR 模型，並保護 process-wide cache 初始化。
 
-    避免只啟動 FastAPI 時就立刻下載與載入模型。
+    PPStructureV3 的 predict 不保證可由多個 Job 同時安全呼叫；每種模型設定
+    另有一把 inference lock，在允許多 Job 時仍維持單一 engine 序列推論。
     """
-    if enable_chart_recognition in _ENGINE_CACHE:
-        return _ENGINE_CACHE[
-            enable_chart_recognition
-        ]
+    with _ENGINE_CACHE_LOCK:
+        cached = _ENGINE_CACHE.get(enable_chart_recognition)
+        if cached is not None:
+            return cached
 
-    try:
-        from paddleocr import PPStructureV3
-    except ImportError as error:
-        raise RuntimeError(
-            "尚未安裝 PaddleOCR，請先執行 "
-            'python -m pip install "paddleocr[all]"'
-        ) from error
+        try:
+            from paddleocr import PPStructureV3
+        except ImportError as error:
+            raise RuntimeError(
+                "尚未安裝 PaddleOCR，請先執行 "
+                'python -m pip install "paddleocr[all]"'
+            ) from error
 
-    engine = PPStructureV3(
-        use_doc_orientation_classify=True,
-        use_doc_unwarping=False,
-        use_textline_orientation=True,
-        use_formula_recognition=False,
-        use_chart_recognition=(
-            enable_chart_recognition
-        ),
-        format_block_content=True,
-        device=os.getenv(
-            "OCR_DEVICE",
-            "cpu",
-        ),
-    )
-
-    _ENGINE_CACHE[
-        enable_chart_recognition
-    ] = engine
-
-    return engine
+        engine = PPStructureV3(
+            use_doc_orientation_classify=True,
+            use_doc_unwarping=False,
+            use_textline_orientation=True,
+            use_formula_recognition=False,
+            use_chart_recognition=enable_chart_recognition,
+            format_block_content=True,
+            device=os.getenv("OCR_DEVICE", "cpu"),
+        )
+        _ENGINE_CACHE[enable_chart_recognition] = engine
+        _ENGINE_INFERENCE_LOCKS.setdefault(
+            enable_chart_recognition,
+            threading.Lock(),
+        )
+        return engine
 
 
 def _result_to_dict(
@@ -852,69 +852,52 @@ def _html_to_dataset(
 def _prepare_page_images(
     file_path: Path,
     output_directory: Path,
+    *,
+    deadline_monotonic: float | None = None,
+    max_pages: int = MAX_VISUAL_PAGES,
 ) -> tuple[
     list[tuple[int, Path]],
     int,
     list[str],
 ]:
     warnings: list[str] = []
+    page_limit = max(1, min(MAX_VISUAL_PAGES, int(max_pages)))
+
+    def expired() -> bool:
+        return (
+            deadline_monotonic is not None
+            and time.monotonic() >= deadline_monotonic
+        )
 
     if file_path.suffix.lower() == ".pdf":
-        document = pymupdf.open(
-            str(file_path)
-        )
+        document = pymupdf.open(str(file_path))
 
         try:
             total_pages = len(document)
+            planned_pages = min(total_pages, page_limit)
 
-            processed_pages = min(
-                total_pages,
-                MAX_VISUAL_PAGES,
-            )
-
-            if total_pages > MAX_VISUAL_PAGES:
+            if total_pages > page_limit:
                 warnings.append(
-                    f"掃描 PDF 共 {total_pages} 頁，"
-                    f"只進行前 {MAX_VISUAL_PAGES} 頁"
+                    f"掃描 PDF 共 {total_pages} 頁，只進行前 {page_limit} 頁"
                     "的視覺辨識"
                 )
 
-            page_images = []
-
-            for page_index in range(
-                processed_pages
-            ):
-                page = document[
-                    page_index
-                ]
-
-                pixmap = page.get_pixmap(
-                    dpi=PDF_RENDER_DPI,
-                    alpha=False,
-                )
-
-                image_path = (
-                    output_directory
-                    / f"page_{page_index + 1}.png"
-                )
-
-                pixmap.save(
-                    str(image_path)
-                )
-
-                page_images.append(
-                    (
-                        page_index + 1,
-                        image_path,
+            page_images: list[tuple[int, Path]] = []
+            for page_index in range(planned_pages):
+                if expired():
+                    warnings.append(
+                        "OCR 整體時間上限已到；"
+                        f"已完成 {len(page_images)}/{total_pages} 頁影像轉換"
                     )
-                )
+                    break
 
-            return (
-                page_images,
-                total_pages,
-                warnings,
-            )
+                page = document[page_index]
+                pixmap = page.get_pixmap(dpi=PDF_RENDER_DPI, alpha=False)
+                image_path = output_directory / f"page_{page_index + 1}.png"
+                pixmap.save(str(image_path))
+                page_images.append((page_index + 1, image_path))
 
+            return page_images, total_pages, warnings
         finally:
             document.close()
 
@@ -922,15 +905,13 @@ def _prepare_page_images(
         with Image.open(file_path) as image:
             image.verify()
     except Exception as error:
-        raise ValueError(
-            f"圖片無法開啟：{error}"
-        ) from error
+        raise ValueError(f"圖片無法開啟：{error}") from error
 
-    return (
-        [(1, file_path)],
-        1,
-        warnings,
-    )
+    if expired():
+        warnings.append("OCR 整體時間上限已到；圖片尚未進行視覺辨識")
+        return [], 1, warnings
+
+    return [(1, file_path)], 1, warnings
 
 
 def _classify_page(
@@ -1005,6 +986,9 @@ def inspect_visual_input(
         bool | None
     ) = None,
     engine: Any | None = None,
+    *,
+    deadline_monotonic: float | None = None,
+    max_pages: int = MAX_VISUAL_PAGES,
 ) -> tuple[
     WorkbookContentInspection,
     VisualDocumentContent,
@@ -1027,10 +1011,7 @@ def inspect_visual_input(
             default=False,
         )
 
-    if engine is None:
-        engine = _get_engine(
-            enable_chart_recognition
-        )
+    shared_engine = engine is None
 
     visual_pages: list[
         VisualPageContent
@@ -1052,15 +1033,38 @@ def inspect_visual_input(
             _prepare_page_images(
                 path,
                 Path(temp),
+                deadline_monotonic=deadline_monotonic,
+                max_pages=max_pages,
             )
         )
 
         warnings.extend(render_warnings)
+        if page_images and engine is None:
+            engine = _get_engine(enable_chart_recognition)
+
+        inference_lock = (
+            _ENGINE_INFERENCE_LOCKS.get(enable_chart_recognition)
+            if shared_engine
+            else None
+        )
 
         for page_number, image_path in page_images:
-            prediction = engine.predict(
-                str(image_path)
-            )
+            if (
+                deadline_monotonic is not None
+                and time.monotonic() >= deadline_monotonic
+            ):
+                warnings.append(
+                    "OCR 整體時間上限已到；"
+                    f"已完成 {len(visual_pages)}/{total_pages} 頁視覺辨識"
+                )
+                break
+
+            assert engine is not None
+            if inference_lock is None:
+                prediction = engine.predict(str(image_path))
+            else:
+                with inference_lock:
+                    prediction = engine.predict(str(image_path))
 
             result_items = list(
                 prediction

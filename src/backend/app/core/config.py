@@ -24,8 +24,15 @@ class Settings(BaseSettings):
     generation_use_fake_llm: bool = False
     generation_skip_semantic_review: bool = False
     generation_policy: str = "required"
-    generation_deadline_seconds: float = Field(default=900.0, gt=0)
-    generation_render_reserve_seconds: float = Field(default=180.0, ge=0)
+    # End-to-end SLA starts when the job is persisted and 202 is returned.
+    generation_deadline_seconds: float = Field(default=1500.0, gt=0)
+    generation_render_reserve_seconds: float = Field(default=240.0, ge=0)
+    generation_output_reserve_seconds: float = Field(default=150.0, ge=0)
+    generation_max_concurrent_jobs: int = Field(default=1, ge=1)
+
+    # OCR is a soft budget. Completed trusted pages are retained on cutoff.
+    ocr_max_seconds: float = Field(default=360.0, gt=0)
+    ocr_max_pages: int = Field(default=20, ge=1)
 
 
 settings = Settings()

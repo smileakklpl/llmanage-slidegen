@@ -154,7 +154,11 @@ def merge_ingestion_results(
 
 
 def ingest_inputs(
-    inputs: Iterable[tuple[Path, str]], *, sheet_name: str | None = None
+    inputs: Iterable[tuple[Path, str]],
+    *,
+    sheet_name: str | None = None,
+    ocr_deadline_monotonic: float | None = None,
+    ocr_max_pages: int = 20,
 ) -> dict[str, Any]:
     """Ingest already-materialized backend files while preserving original names."""
     items = list(inputs)
@@ -175,6 +179,8 @@ def ingest_inputs(
             local_path,
             original_filename=original_filename,
             sheet_name=sheet_name,
+            ocr_deadline_monotonic=ocr_deadline_monotonic,
+            ocr_max_pages=ocr_max_pages,
         )
         # merge_ingestion_results uses the Path only for human-readable naming.
         results.append((Path(original_filename), result.model_dump(mode="json")))

@@ -39,10 +39,14 @@ import hashlib
 import json
 import logging
 import sys
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Sequence
+from uuid import uuid4
 
 from .agents import chart_agent, narrative_writer, reviewer, section_planner
 from .charts import chart_planner
@@ -260,6 +264,10 @@ def _write_generation_manifest(
                     "json_mode": settings.json_mode,
                     "system_mode": settings.system_mode,
                 },
+                "limits": {
+                    "max_parallel": settings.max_parallel,
+                    "rpm_per_model": settings.rpm_limit,
+                },
             }
 
     llm_payload["semantic_review_enabled"] = not skip_semantic_review
@@ -269,6 +277,9 @@ def _write_generation_manifest(
         "narratives": 0,
         "review": 0,
     }
+    llm_payload["active_calls"] = 0
+    llm_payload["max_active_calls"] = 0
+    llm_payload["call_events"] = []
 
     manifest = {
         "contract_version": "1.0",
@@ -333,32 +344,128 @@ _LLM_STAGE_TO_MANIFEST = {
 }
 
 
-def _record_llm_call(output_dir: Path, llm_stage: str) -> None:
-    """Increment the actual invocation count for one routed LLM stage."""
-    stage = _LLM_STAGE_TO_MANIFEST.get(llm_stage)
+_LLM_MODEL_STAGE = {
+    "intent": "sections",
+    "chart": "charts",
+    "writer": "narratives",
+    "writer_fallback": "narratives_fallback",
+    "reviewer": "review",
+}
+_MANIFEST_LOCKS_GUARD = threading.Lock()
+_MANIFEST_LOCKS: dict[Path, threading.Lock] = {}
 
-    if stage is None:
+
+def _manifest_lock(target: Path) -> threading.Lock:
+    resolved = target.resolve()
+    with _MANIFEST_LOCKS_GUARD:
+        return _MANIFEST_LOCKS.setdefault(resolved, threading.Lock())
+
+
+def _update_manifest(
+    output_dir: Path,
+    update: Callable[[dict[str, Any]], None],
+) -> None:
+    """Atomically update one run manifest under a per-output lock."""
+    target = output_dir / "generation_manifest.json"
+    with _manifest_lock(target):
+        payload = json.loads(target.read_text(encoding="utf-8"))
+        update(payload)
+        temporary = target.with_suffix(".json.tmp")
+        temporary.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        temporary.replace(target)
+
+
+def _record_llm_event(
+    output_dir: Path,
+    *,
+    call_id: str,
+    llm_stage: str,
+    event: str,
+    timestamp: str,
+    duration_ms: float | None = None,
+    status: str | None = None,
+    error_type: str | None = None,
+) -> None:
+    manifest_stage = _LLM_STAGE_TO_MANIFEST.get(llm_stage)
+    if manifest_stage is None:
         return
 
-    target = output_dir / "generation_manifest.json"
-    payload = json.loads(target.read_text(encoding="utf-8"))
-    calls = payload["llm"]["calls_by_stage"]
-    calls[stage] = int(calls.get(stage) or 0) + 1
-    target.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
+    def update(payload: dict[str, Any]) -> None:
+        llm = payload["llm"]
+        calls = llm["calls_by_stage"]
+        configured = llm.get("configured_stage_models") or {}
+        model = configured.get(_LLM_MODEL_STAGE.get(llm_stage, ""))
+        item: dict[str, Any] = {
+            "call_id": call_id,
+            "event": event,
+            "stage": llm_stage,
+            "model": model,
+            "timestamp": timestamp,
+        }
+        if event == "start":
+            calls[manifest_stage] = int(calls.get(manifest_stage) or 0) + 1
+            active = int(llm.get("active_calls") or 0) + 1
+            llm["active_calls"] = active
+            llm["max_active_calls"] = max(
+                int(llm.get("max_active_calls") or 0), active
+            )
+        else:
+            llm["active_calls"] = max(
+                0, int(llm.get("active_calls") or 0) - 1
+            )
+            item["duration_ms"] = round(float(duration_ms or 0.0), 2)
+            item["status"] = status
+            if error_type is not None:
+                item["error_type"] = error_type
+        llm.setdefault("call_events", []).append(item)
+
+    _update_manifest(output_dir, update)
 
 
 def _audited_llm_call(
     call: Callable[..., Any],
     output_dir: Path,
 ) -> Callable[..., Any]:
-    """Wrap a live or fake LLM callable and record every actual invocation."""
+    """Record logical LLM overlap safely; SDK-attempt timing lives in llm_client."""
 
     def wrapped(*args: Any, **kwargs: Any) -> Any:
-        _record_llm_call(output_dir, str(kwargs.get("stage") or "default"))
-        return call(*args, **kwargs)
+        llm_stage = str(kwargs.get("stage") or "default")
+        call_id = uuid4().hex
+        started = time.monotonic()
+        _record_llm_event(
+            output_dir,
+            call_id=call_id,
+            llm_stage=llm_stage,
+            event="start",
+            timestamp=datetime.now(timezone.utc).isoformat(),
+        )
+        try:
+            result = call(*args, **kwargs)
+        except Exception as error:
+            _record_llm_event(
+                output_dir,
+                call_id=call_id,
+                llm_stage=llm_stage,
+                event="end",
+                timestamp=datetime.now(timezone.utc).isoformat(),
+                duration_ms=(time.monotonic() - started) * 1000.0,
+                status="error",
+                error_type=type(error).__name__,
+            )
+            raise
+        _record_llm_event(
+            output_dir,
+            call_id=call_id,
+            llm_stage=llm_stage,
+            event="end",
+            timestamp=datetime.now(timezone.utc).isoformat(),
+            duration_ms=(time.monotonic() - started) * 1000.0,
+            status="success",
+        )
+        return result
 
     return wrapped
 
@@ -1493,6 +1600,13 @@ def run(
             f"generation_policy 只能是 {sorted(config.GENERATION_POLICIES)} 之一"
         )
 
+    try:
+        llm_max_parallel = config.load_llm_settings().max_parallel
+    except Exception:  # required mode still delivers via deterministic fallbacks
+        if effective_policy != "required":
+            raise
+        llm_max_parallel = 1
+
     if deadline_seconds <= 0 or not 0 <= render_reserve_seconds < deadline_seconds:
         raise ValueError("generation deadline 必須大於 render reserve，且兩者不可為負")
 
@@ -1658,6 +1772,11 @@ def run(
         sections_payload = (
             section_planner.build_deterministic_sections_from_contract(
                 metric_store_json,
+                {
+                    "target_content_pages": (
+                        section_planner.extract_target_content_pages(user_prompt)
+                    )
+                },
                 fallback_reason="LLM 時間配額已用盡，已使用確定性章節規劃",
             )
         )
@@ -1679,6 +1798,11 @@ def run(
             sections_payload = (
                 section_planner.build_deterministic_sections_from_contract(
                     metric_store_json,
+                    {
+                        "target_content_pages": (
+                            section_planner.extract_target_content_pages(user_prompt)
+                        )
+                    },
                     fallback_reason=(
                         "章節 LLM 無法完成，已使用確定性規劃："
                         f"{type(error).__name__}"
@@ -1791,6 +1915,9 @@ def run(
             sections_payload,
             metric_store_json,
             llm_call=tool_call,
+            max_parallel=(
+                llm_max_parallel if effective_policy == "required" else 1
+            ),
             deadline_monotonic=(
                 llm_cutoff if effective_policy == "required" else None
             ),
@@ -1953,23 +2080,50 @@ def run(
         if review_enabled:
             dump.write("review", {"reviews": review_payload})
 
-    for page_index, (section, chart) in enumerate(pairs):
-        if effective_policy == "required":
-            now = time.monotonic()
-            pages_left = max(1, len(pairs) - page_index)
-            remaining_llm_time = max(0.0, llm_cutoff - now)
-            page_deadline = now + remaining_llm_time / pages_left
-            outcome = _generate_required_page(
+    required_outcomes: dict[int, RequiredPageOutcome] = {}
+    if effective_policy == "required":
+        worker_count = min(
+            max(1, llm_max_parallel),
+            max(1, len(pairs)),
+        )
+
+        def generate_required_pair(pair: tuple[Any, Any]) -> RequiredPageOutcome:
+            section, chart = pair
+            return _generate_required_page(
                 section,
                 chart,
                 store,
                 json_call=json_call,
                 review_enabled=review_enabled,
                 enable_semantic_review=not skip_semantic_review,
-                page_deadline=page_deadline,
+                page_deadline=llm_cutoff,
                 repair_escalate_after=generation.repair_escalate_after,
                 intent_spec=intent_spec,
             )
+
+        if worker_count == 1:
+            for pair in pairs:
+                page_number = pair[0].page_number
+                assert page_number is not None
+                required_outcomes[page_number] = generate_required_pair(pair)
+        else:
+            with ThreadPoolExecutor(
+                max_workers=worker_count,
+                thread_name_prefix="page-generate",
+            ) as executor:
+                futures = {
+                    executor.submit(generate_required_pair, pair): pair[0].page_number
+                    for pair in pairs
+                }
+                for future in as_completed(futures):
+                    page_number = futures[future]
+                    assert page_number is not None
+                    required_outcomes[page_number] = future.result()
+
+    for page_index, (section, chart) in enumerate(pairs):
+        if effective_policy == "required":
+            assert section.page_number is not None
+            outcome = required_outcomes[section.page_number]
             validated_narrative = validate_narrative_contract(
                 outcome.narrative
             )

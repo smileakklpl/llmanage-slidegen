@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime, timezone
 from pathlib import PurePosixPath
+from typing import Awaitable, Callable
 from uuid import uuid4
 
 from app.ingestion.normalizer import apply_human_review
@@ -49,12 +50,38 @@ class JobService:
         storage: S3ObjectStorage,
         *,
         default_generation_options: GenerationOptions | None = None,
+        max_concurrent_jobs: int = 1,
     ) -> None:
         self._repository = repository
         self._storage = storage
         self._default_generation_options = (
             default_generation_options or GenerationOptions()
         )
+        self._max_concurrent_jobs = max(1, int(max_concurrent_jobs))
+        self._job_semaphore: asyncio.Semaphore | None = None
+        self._tasks: set[asyncio.Task[None]] = set()
+
+    async def _run_bounded(
+        self,
+        job_id: str,
+        runner: Callable[[str, JobRepository, S3ObjectStorage], Awaitable[None]],
+    ) -> None:
+        """Keep ingestion, generation and uploads inside one bounded job slot."""
+        if self._job_semaphore is None:
+            self._job_semaphore = asyncio.Semaphore(self._max_concurrent_jobs)
+
+        async with self._job_semaphore:
+            await runner(job_id, self._repository, self._storage)
+
+    def _dispatch(
+        self,
+        job_id: str,
+        runner: Callable[[str, JobRepository, S3ObjectStorage], Awaitable[None]],
+    ) -> None:
+        """Retain background tasks and apply the process-wide job bound."""
+        task = asyncio.create_task(self._run_bounded(job_id, runner))
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
 
     @staticmethod
     def generate_job_id() -> str:
@@ -122,13 +149,7 @@ class JobService:
         )
         created = await self._repository.create(job)
 
-        asyncio.create_task(
-            run_generation_job(
-                created.job_id,
-                self._repository,
-                self._storage,
-            )
-        )
+        self._dispatch(created.job_id, run_generation_job)
         return created
 
     async def get_job(
@@ -283,11 +304,5 @@ class JobService:
             }
         )
         queued = await self._repository.update(queued)
-        asyncio.create_task(
-            resume_generation_job(
-                queued.job_id,
-                self._repository,
-                self._storage,
-            )
-        )
+        self._dispatch(queued.job_id, resume_generation_job)
         return queued

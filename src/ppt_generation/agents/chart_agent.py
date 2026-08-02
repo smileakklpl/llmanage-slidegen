@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
@@ -314,21 +315,18 @@ def plan_charts(
     *,
     llm_call: Callable[..., Any] | None = None,
     max_attempts: int = MAX_PLAN_ATTEMPTS,
+    max_parallel: int = 1,
     deadline_monotonic: float | None = None,
     recover_provider_errors: bool = False,
     intent_spec: dict[str, Any] | None = None,
 ) -> ChartAgentResult:
-    """
-    為每個章節各產出一張圖表。
+    """Plan independent pages with bounded workers and stable input ordering."""
 
-    單一章節失敗不會中斷其他章節 —— 缺一頁圖表仍可產出簡報，
-    由 Orchestrator 決定是否要回報使用者或重試。
-    """
-    result = ChartAgentResult()
-
-    for section in sections:
+    def plan_one(
+        section: SectionPlan,
+    ) -> tuple[ResolvedChart | None, list[str], int]:
         try:
-            resolved, errors, attempts = plan_chart_for_section(
+            return plan_chart_for_section(
                 section,
                 store,
                 llm_call=llm_call,
@@ -339,17 +337,37 @@ def plan_charts(
         except Exception as error:  # noqa: BLE001 - policy decides recovery
             if not recover_provider_errors:
                 raise
-            resolved = None
-            errors = [f"{type(error).__name__}: {error}"]
-            attempts = 0
+            return None, [f"{type(error).__name__}: {error}"], 0
 
+    ordered: list[
+        tuple[ResolvedChart | None, list[str], int] | None
+    ] = [None] * len(sections)
+    worker_count = min(max(1, int(max_parallel)), max(1, len(sections)))
+
+    if worker_count == 1:
+        for index, section in enumerate(sections):
+            ordered[index] = plan_one(section)
+    else:
+        with ThreadPoolExecutor(
+            max_workers=worker_count,
+            thread_name_prefix="chart-plan",
+        ) as executor:
+            futures = {
+                executor.submit(plan_one, section): index
+                for index, section in enumerate(sections)
+            }
+            for future in as_completed(futures):
+                ordered[futures[future]] = future.result()
+
+    result = ChartAgentResult()
+    for section, outcome in zip(sections, ordered, strict=True):
+        assert outcome is not None
+        resolved, errors, attempts = outcome
         result.attempts[section.title] = attempts
-
         if resolved is None:
             result.failures[section.title] = errors or ["未知原因"]
-            continue
-
-        result.charts.append(resolved)
+        else:
+            result.charts.append(resolved)
 
     return result
 
@@ -360,6 +378,7 @@ def plan_charts_from_contract(
     *,
     llm_call: Callable[..., Any] | None = None,
     max_attempts: int = MAX_PLAN_ATTEMPTS,
+    max_parallel: int = 1,
     deadline_monotonic: float | None = None,
     recover_provider_errors: bool = False,
 ) -> dict[str, Any]:
@@ -380,6 +399,7 @@ def plan_charts_from_contract(
         store,
         llm_call=llm_call,
         max_attempts=max_attempts,
+        max_parallel=max_parallel,
         deadline_monotonic=deadline_monotonic,
         recover_provider_errors=recover_provider_errors,
         intent_spec=intent_spec,

@@ -181,6 +181,8 @@ class LLMSettings:
     max_parallel: int
     backoff_base: float
     models: dict[str, str] = field(default_factory=dict)
+    #: Per unique provider/region/model request-start budget.
+    rpm_limit: int = 24
     #: ``native`` 用 OpenAI tool_calls；``json`` 改以 JSON 輸出模擬工具選擇
     tool_mode: str = "native"
     #: ``native`` 用 response_format=json_object；``prompt`` 僅靠提示詞要求 JSON
@@ -206,6 +208,8 @@ class GenerationSettings:
     deadline_seconds: float
     render_reserve_seconds: float
     repair_escalate_after: int
+    default_content_pages: int
+    max_content_pages: int
 
 
 GENERATION_POLICIES = frozenset({"strict", "required"})
@@ -221,9 +225,9 @@ def load_generation_settings() -> GenerationSettings:
             f"{sorted(GENERATION_POLICIES)} 之一，實際為 {policy!r}"
         )
 
-    deadline_seconds = _read_float("GENERATION_DEADLINE_SECONDS", 900.0)
+    deadline_seconds = _read_float("GENERATION_DEADLINE_SECONDS", 1500.0)
     render_reserve_seconds = _read_float(
-        "GENERATION_RENDER_RESERVE_SECONDS", 180.0
+        "GENERATION_RENDER_RESERVE_SECONDS", 240.0
     )
 
     if deadline_seconds <= 0:
@@ -238,6 +242,17 @@ def load_generation_settings() -> GenerationSettings:
             "GENERATION_DEADLINE_SECONDS"
         )
 
+    # Product policy has an absolute 15-content-page ceiling. Deployments may
+    # lower it, never raise it. The default is also clamped to that limit.
+    max_content_pages = min(
+        15,
+        _read_int("GENERATION_MAX_CONTENT_PAGES", 15, minimum=1),
+    )
+    default_content_pages = min(
+        max_content_pages,
+        _read_int("GENERATION_DEFAULT_CONTENT_PAGES", 8, minimum=1),
+    )
+
     return GenerationSettings(
         policy=policy,
         deadline_seconds=deadline_seconds,
@@ -245,6 +260,8 @@ def load_generation_settings() -> GenerationSettings:
         repair_escalate_after=_read_int(
             "LLM_REPAIR_ESCALATE_AFTER", 2, minimum=1
         ),
+        default_content_pages=default_content_pages,
+        max_content_pages=max_content_pages,
     )
 
 
@@ -335,6 +352,7 @@ def load_llm_settings() -> LLMSettings:
         max_parallel=_read_int("LLM_MAX_PARALLEL", 16, minimum=4),
         backoff_base=_read_float("LLM_BACKOFF_BASE", 1.0),
         models=models,
+        rpm_limit=_read_int("LLM_RPM_LIMIT", 24, minimum=1),
         tool_mode=_read_mode(
             "LLM_TOOL_MODE", capability_defaults["tool_mode"], {"native", "json"}
         ),

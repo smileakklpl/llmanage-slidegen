@@ -34,7 +34,13 @@ def get_job_service() -> JobService:
             render_reserve_seconds=(
                 settings.generation_render_reserve_seconds
             ),
+            output_reserve_seconds=(
+                settings.generation_output_reserve_seconds
+            ),
+            ocr_max_seconds=settings.ocr_max_seconds,
+            ocr_max_pages=settings.ocr_max_pages,
             use_fake_llm=settings.generation_use_fake_llm,
             skip_semantic_review=settings.generation_skip_semantic_review,
         ),
+        max_concurrent_jobs=settings.generation_max_concurrent_jobs,
     )

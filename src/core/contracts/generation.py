@@ -26,15 +26,27 @@ class GenerationOptions(BaseModel):
     """Durable delivery policy captured when a job is created."""
 
     policy: Literal["strict", "required"] = "required"
-    deadline_seconds: float = Field(default=900.0, gt=0)
-    render_reserve_seconds: float = Field(default=180.0, ge=0)
+    # Total SLA starts when POST /generate persists the job and returns 202.
+    deadline_seconds: float = Field(default=1500.0, gt=0)
+    # Reserved inside the generation pipeline for render/XLSX/T1.
+    render_reserve_seconds: float = Field(default=240.0, ge=0)
+    # Reserved after the pipeline for S3 artifact upload and safety buffer.
+    output_reserve_seconds: float = Field(default=0.0, ge=0)
+    ocr_max_seconds: float = Field(default=360.0, gt=0)
+    ocr_max_pages: int = Field(default=20, ge=1)
     use_fake_llm: bool = False
     skip_semantic_review: bool = False
 
     @model_validator(mode="after")
     def validate_reserve(self) -> GenerationOptions:
-        if self.render_reserve_seconds >= self.deadline_seconds:
-            raise ValueError("render_reserve_seconds 必須小於 deadline_seconds")
+        if (
+            self.render_reserve_seconds + self.output_reserve_seconds
+            >= self.deadline_seconds
+        ):
+            raise ValueError(
+                "render_reserve_seconds + output_reserve_seconds "
+                "必須小於 deadline_seconds"
+            )
         return self
 
 

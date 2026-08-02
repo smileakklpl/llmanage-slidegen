@@ -120,7 +120,7 @@ class IntentSpecContract(BaseModel):
     audience: str = "管理層"
     language: str = "zh-TW"
     tone: str = "professional"
-    target_content_pages: int | None = Field(default=None, ge=1, le=16)
+    target_content_pages: int | None = Field(default=None, ge=1, le=15)
     requested_topics: list[str] = Field(default_factory=list)
     excluded_topics: list[str] = Field(default_factory=list)
     requested_metric_keys: list[str] = Field(default_factory=list)

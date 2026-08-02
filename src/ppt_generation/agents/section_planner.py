@@ -13,20 +13,85 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field
 from typing import Any, Callable, Sequence
 
 from ..contracts.stages import IntentSpecContract
-from ..core import llm_client
+from ..core import config, llm_client
 from ..data.metric_store import MetricStore
 
 
 STATUS_READY = "READY"
 STATUS_NEEDS_CONFIRMATION = "NEEDS_CONFIRMATION"
 
-#: 內容頁數上限。規格書 FR-2.6 的預設輸出是 16 頁，含封面／目錄／章節頁／
-#: 結尾頁等非內容頁，故內容頁上限訂在此。頁數可由使用者 prompt 覆寫。
-MAX_SECTIONS = 16
+#: Product-level absolute ceiling. Deployments may lower this through
+#: GENERATION_MAX_CONTENT_PAGES, but can never raise it above 15.
+DEFAULT_CONTENT_PAGES = 8
+MAX_SECTIONS = 15
+
+
+def _content_page_limits() -> tuple[int, int]:
+    """Return validated deployment defaults under the absolute product cap."""
+    settings = config.load_generation_settings()
+    return settings.default_content_pages, settings.max_content_pages
+
+
+_CHINESE_PAGE_NUMBERS = {
+    "一": 1,
+    "二": 2,
+    "三": 3,
+    "四": 4,
+    "五": 5,
+    "六": 6,
+    "七": 7,
+    "八": 8,
+    "九": 9,
+    "十": 10,
+    "十一": 11,
+    "十二": 12,
+    "十三": 13,
+    "十四": 14,
+    "十五": 15,
+    "十六": 16,
+    "十七": 17,
+    "十八": 18,
+    "十九": 19,
+    "二十": 20,
+}
+_ENGLISH_PAGE_NUMBERS = {
+    name: value
+    for value, name in enumerate(
+        (
+            "one", "two", "three", "four", "five", "six", "seven",
+            "eight", "nine", "ten", "eleven", "twelve", "thirteen",
+            "fourteen", "fifteen", "sixteen", "seventeen", "eighteen",
+            "nineteen", "twenty",
+        ),
+        start=1,
+    )
+}
+_PAGE_NUMBER_TOKEN = (
+    r"\d+|二十|十[一二三四五六七八九]?|[一二三四五六七八九]|"
+    + "|".join(_ENGLISH_PAGE_NUMBERS)
+)
+_PAGE_TARGET_PATTERN = re.compile(
+    rf"(?P<count>{_PAGE_NUMBER_TOKEN})\s*"
+    r"(?:個\s*)?(?:內容\s*)?(?:頁|張|pages?|slides?)",
+    re.IGNORECASE,
+)
+
+
+def extract_target_content_pages(user_prompt: str) -> int | None:
+    """Read an explicit page request; never trust an invented LLM count."""
+    match = _PAGE_TARGET_PATTERN.search(user_prompt or "")
+    if match is None:
+        return None
+    token = match.group("count").lower()
+    if token.isdigit():
+        return int(token)
+    return _CHINESE_PAGE_NUMBERS.get(token) or _ENGLISH_PAGE_NUMBERS.get(token)
+
 
 #: FR-2.6 的預設章節骨架（來自附件二的系統提示詞）。
 #: 使用者未指定章節時，這是「這份簡報長什麼樣」的預設答案；
@@ -425,15 +490,18 @@ def _sanitize_intent_spec(
             key for section in sections for key in section.suggested_metric_keys
         ))
 
-    target: int | None = None
+    default_pages, max_sections = _content_page_limits()
+    target = default_pages
     raw_target = payload.get("target_content_pages")
     if raw_target is not None and not isinstance(raw_target, bool):
         try:
             parsed_target = int(raw_target)
         except (TypeError, ValueError):
-            warnings.append("內容頁數無法辨識，已使用系統可用頁數")
+            warnings.append(
+                f"內容頁數無法辨識，已使用預設 {default_pages} 頁"
+            )
         else:
-            target = max(1, min(MAX_SECTIONS, parsed_target))
+            target = max(1, min(max_sections, parsed_target))
             if target != parsed_target:
                 warnings.append(
                     f"內容頁數 {parsed_target} 超出範圍，已調整為 {target}"
@@ -515,7 +583,8 @@ def _sanitize_sections(
     sections: list[SectionPlan] = []
     dropped: dict[str, str] = {}
 
-    for raw in raw_sections[:MAX_SECTIONS]:
+    _, max_sections = _content_page_limits()
+    for raw in raw_sections[:max_sections]:
         section = SectionPlan.from_dict(raw)
 
         kept: list[str] = []
@@ -685,7 +754,7 @@ def build_deterministic_sections(
                 "排除條件會移除所有可用指標，為確保仍可產出簡報，已忽略該條件"
             )
 
-    page_limit = draft_intent.get("target_content_pages") or MAX_SECTIONS
+    page_limit = int(draft_intent["target_content_pages"])
     sections: list[SectionPlan] = []
     for metric_key in metric_keys[:page_limit]:
         metric = store.get(metric_key)
@@ -735,10 +804,12 @@ def plan_sections(
 ) -> SectionPlanResult:
     """Parse requirements and plan pages without letting bad wording block output."""
     call = llm_call or llm_client.complete_json
+    explicit_page_target = extract_target_content_pages(user_prompt)
 
     prompt = build_prompt(user_prompt, store, existing_sections)
+    _, max_sections = _content_page_limits()
     system_prompt = SYSTEM_PROMPT.format(
-        max_sections=MAX_SECTIONS,
+        max_sections=max_sections,
         default_chapters="、".join(DEFAULT_CHAPTERS),
         forecast_chapter=FORECAST_CHAPTER,
         closing_chapter=DEFAULT_CHAPTERS[-1],
@@ -756,15 +827,21 @@ def plan_sections(
     except Exception as error:  # noqa: BLE001 - prompt must never block delivery
         return build_deterministic_sections(
             store,
+            {"target_content_pages": explicit_page_target},
             fallback_reason=(
                 "提示詞無法由模型解析，已使用可計算指標建立簡報："
                 f"{type(error).__name__}"
             ),
         )
 
+    raw_intent = dict(payload.get("intent_spec") or {})
+    # Page count is a delivery control, so only an explicit number in the
+    # original prompt may override the deployment default. The LLM cannot
+    # invent a larger deck when the user did not ask for one.
+    raw_intent["target_content_pages"] = explicit_page_target
     sections, dropped = _sanitize_sections(payload.get("sections", []), store)
     intent_spec = _sanitize_intent_spec(
-        payload.get("intent_spec"),
+        raw_intent,
         store,
         sections,
         source="parsed",
