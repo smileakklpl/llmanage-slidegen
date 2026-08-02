@@ -5,6 +5,10 @@
 # --- 核心：PPT 與 Excel 生成 ---
 python-pptx==1.0.2
 openpyxl==3.1.5
+# lxml：chart_builder.py 直接 `from lxml import etree` 操作雙軸圖的底層 XML。
+# 雖然 python-pptx 也依賴它，但「我們自己 import 的套件必須自己宣告」——
+# 靠上游的傳遞依賴等於把版本決定權交給別人。
+lxml==6.1.1
 
 # --- 核心：確定性指標計算 ---
 pandas==3.0.1
@@ -22,10 +26,10 @@ openai==2.49.0
 # boto3 / botocore：AWS Bedrock 與 S3，共用同一組精確釘版 SDK。
 boto3==1.43.57
 # botocore[crt]：`aws login` / SSO 憑證需要 CRT，否則連 STS 都打不通。
-botocore[crt]==1.43.61
+# 版本必須與 boto3 解析出的一致：boto3 1.43.57 要求 botocore>=1.43.57,<1.44.0，
+# 實際解析為 1.43.57。先前這裡釘 1.43.61，代表「宣告的」與「測過的」不是同一版，
+# 全新安裝會拿到沒被測試過的組合。
+botocore[crt]==1.43.57
 
 # --- 測試 ---
 pytest==9.1.1
-
-# 只有 tools/smoke_bedrock.py 需要（Mantle client）：
-# pip install "anthropic[bedrock]"

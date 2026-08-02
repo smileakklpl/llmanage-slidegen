@@ -8,7 +8,9 @@
 # 所以 CI 與一般開發都不需要裝它——要跑真的 OCR 才裝。
 beautifulsoup4==4.15.0
 boto3==1.43.57
-fastapi==0.140.4
+# fastapi：釘的版本必須是實際測過的版本。先前釘 0.140.4，但 .venv 裡是 0.141.1，
+# 全部 114 項 backend 測試都是在 0.141.1 上跑綠的。
+fastapi==0.141.1
 openpyxl==3.1.5
 pdfplumber==0.11.10
 Pillow==12.3.0

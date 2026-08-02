@@ -36,13 +36,17 @@ ppt_generation/
 ├── core/                  跨階段共用
 │   ├── config.py          路徑常數、LLM 憑證載入、環境變數設定
 │   ├── llm_client.py      LLM 呼叫統一介面（模型可抽換層）
-│   └── placeholders.py    敘事佔位符語法：解析、查表代入、裸數字偵測
+│   ├── placeholders.py    敘事佔位符語法：解析、查表代入、裸數字偵測
+│   └── theme.py           顏色／字體／幾何與自適應字級（唯一視覺來源）
 │
 ├── data/                  Stage 1-3：資料 → 指標
-│   ├── backend_bridge.py  呼叫 backend ingestion 讀 Excel → backend JSON
-│   ├── dataset_loader.py  讀 backend JSON → pandas DataFrame + 來源證據
+│   ├── data_profile.py    資料形狀剖析（軸型、期間、實體欄位判斷）
+│   ├── dataset_loader.py  讀 ingestion JSON → pandas DataFrame + 來源證據
 │   ├── metric_engine.py   確定性指標計算（唯一允許產生數字的地方）
 │   └── metric_store.py    MetricStore：系統唯一真相來源
+│
+│   註：Excel → ingestion JSON 的轉換不在此，在 backend 的
+│       app/ingestion/generation_bridge.py（ppt_generation 不得 import backend）
 │
 ├── charts/                圖表定義與防呆
 │   ├── chart_builder.py   ChartSpec + add_chart() 單一入口 + skill registry
@@ -53,7 +57,9 @@ ppt_generation/
 │   ├── section_planner.py 章節規劃
 │   ├── chart_agent.py     圖表決策
 │   ├── narrative_writer.py 敘事撰寫
-│   └── reviewer.py        審查（規則層 + 語意層）
+│   ├── reviewer.py        審查（規則層 + 語意層）
+│   └── (text_quality.py)  錯別字／疊字／簡體字／單位重複
+│                          ※ 在分支 ppt_current，尚未併入 main
 │
 ├── output/                Stage 5-6：檔案產出
 │   ├── renderer.py        套模板組頁、插入原生圖表、代入佔位符
@@ -158,24 +164,24 @@ cd src
 # 1. 只檢查 LLM 設定與連線（會實際呼叫一次）
 ../.venv/bin/python -m ppt_generation.run_pipeline --check-llm
 
-# 2. 用內建範例資料跑完整流程（不需要 backend 輸出）
-../.venv/bin/python -m ppt_generation.run_pipeline --sample \
-    --prompt "幫我做一份 2026 信用卡市場分析簡報" \
-    --sections 市場整體概況 成長動能檢視 業者競爭態勢
-
-# 3. 直接讀 Excel，由 backend ingestion 現場解析（見下方「兩種輸入版型」）
+# 2. 用既有的 backend ingestion JSON（正式做法）
 ../.venv/bin/python -m ppt_generation.run_pipeline \
-    --excel ../fixtures/data/fsc_114_workbook.xlsx --prompt "..."
-
-# 4. 用既有的 backend ingestion JSON
-../.venv/bin/python -m ppt_generation.run_pipeline \
-    --ingestion ../outputs/stages/00_ingestion.json \
+    --ingestion <path>/ingestion.json \
     --prompt "..."
 ```
 
-### 兩種輸入版型（`--excel`）
+> **`run_pipeline` 只吃 ingestion JSON，沒有 `--excel`。**
+> 資料來源旗標只有 `--ingestion` 與 `--sample` 兩個，且必須擇一。
+> Excel 要先過一次 backend ingestion bridge（見下方）。
+>
+> `--sample` **目前失效**：內建 payload 缺 `contract_version`，會在 Stage 1-3 拋
+> `IngestionPayloadError`（`data/dataset_loader.py:236`）。ingestion 契約加上版號後
+> 這條路徑沒有同步更新。
 
-`--excel` 同時吃兩種擺法，版型判斷在 `data/backend_bridge.py` 完成，
+### Excel → ingestion JSON
+
+版型判斷在 backend 的 `app/ingestion/generation_bridge.py` 完成
+（`discover_excel_files()` + `merge_ingestion_results()`），
 下游拿到的 payload 形狀一致：
 
 | 版型 | 形狀 | 範例 |
@@ -184,26 +190,44 @@ cd src
 | 多檔單表 | 一個目錄，每個 `.xlsx` 一個指標 | `fixtures/data/fsc_114/` |
 
 ```bash
-cd src
+# 從 repo root 執行；PYTHONPATH 需同時含 src 與 src/backend
+OUT=$(mktemp -d)
 
 # 單檔多表
-../.venv/bin/python -m ppt_generation.run_pipeline \
-    --excel ../fixtures/data/fsc_114_workbook.xlsx --fake-llm --skip-semantic-review
+PYTHONPATH=src:src/backend .venv/bin/python -c "
+from app.ingestion import generation_bridge
+generation_bridge.save_payload(
+    generation_bridge.ingest_excel('fixtures/data/fsc_114_workbook.xlsx'),
+    '$OUT/ingestion.json')
+"
 
-# 多檔單表（目錄）
-../.venv/bin/python -m ppt_generation.run_pipeline \
-    --excel ../fixtures/data/fsc_114 --fake-llm --skip-semantic-review
+# 多檔單表（傳目錄即可，同一個函式）
+PYTHONPATH=src:src/backend .venv/bin/python -c "
+from app.ingestion import generation_bridge
+generation_bridge.save_payload(
+    generation_bridge.ingest_excel('fixtures/data/fsc_114'),
+    '$OUT/ingestion.json')
+"
 
-# 只讀其中一張工作表
-../.venv/bin/python -m ppt_generation.run_pipeline \
-    --excel ../fixtures/data/fsc_114_workbook.xlsx --excel-sheet 流通卡數 --stage metrics
+# 只讀其中一張工作表：sheet_name 是 Python 參數，不是 CLI 旗標
+#（只能用在單一檔案輸入，多檔會拋 ValueError）
+PYTHONPATH=src:src/backend .venv/bin/python -c "
+from app.ingestion import generation_bridge
+generation_bridge.save_payload(
+    generation_bridge.ingest_excel(
+        'fixtures/data/fsc_114_workbook.xlsx', sheet_name='流通卡數'),
+    '$OUT/one_sheet.json')
+"
+
+# 再交給管線
+cd src && ../.venv/bin/python -m ppt_generation.run_pipeline \
+    --ingestion "$OUT/ingestion.json" --fake-llm --skip-semantic-review \
+    --output-dir "$OUT/deck"
 ```
 
-ingestion 結果會落檔成 `<output-dir>/stages/00_ingestion.json`，之後可用
-`--ingestion` 重跑同一份資料而不必再解析一次 Excel。這份 JSON 也是「數字可
+ingestion 結果也會落檔成 `<output-dir>/stages/00_ingestion.json`，之後可直接用
+`--ingestion` 指向它重跑同一份資料而不必再解析一次 Excel。這份 JSON 是「數字可
 追溯」的起點——每一格都帶來源檔名、工作表與儲存格位置。
-
-`--excel`、`--ingestion`、`--sample` 三者互斥，只能指定一個。
 
 兩件容易誤解的事：
 
@@ -211,9 +235,11 @@ ingestion 結果會落檔成 `<output-dir>/stages/00_ingestion.json`，之後可
   `dataset_id` 是內容雜湊，指標會變成 `f47ac10b_....value` 這種 LLM 無從
   判斷的字串。bridge 會換成可讀 slug（`流通卡數.value`），原 UUID 留在
   `backend_dataset_id` 供追溯。
-- **`--fake-llm` 在真實資料上也能用。** 內建範例那組假回應寫死了範例的
-  metric_key；餵真實資料時會改用一組「看得懂當前 MetricStore」的假回應，
-  依指標語意與軸型挑圖表。不呼叫模型，但走的是與真實模型相同的契約與防呆。
+- **`--fake-llm` 在真實資料上也能用。** 它用的是一組「看得懂當前 MetricStore」
+  的假回應（store-aware fakes），依指標語意與軸型挑圖表，並照
+  `_FAKE_DECK_BLUEPRINT` 決定每章用什麼圖型；挑不到合適指標的頁面直接不排。
+  不呼叫模型，但走的是與真實模型相同的契約與防呆，這也是 `verify_all.py`
+  第 4 關能 deterministic 的原因。
 
 常用選項：
 
@@ -497,7 +523,7 @@ plan = section_planner.plan_sections("...", store, llm_call=fake_llm)
 |---|---|
 | 真實 LLM API 串接 | **已實跑**（Gemini `gemini-3.5-flash-lite` / `gemini-3.1-flash-lite`，8 頁全數一次過規則檢查，T1 71/71 PASS）。首跑抓到三個只有真實模型才會浮現的問題，見下方「真實模型實跑抓到的三件事」 |
 | 敘事平行化 | `write_narratives()` 目前序列執行，未依 `LLM_MAX_PARALLEL` 平行化 |
-| `orchestrator.py` | 串接全流程、處理章節確認中斷與退件重試，待實作 |
+| 章節確認中斷 | `orchestrator.py` 已完成（`src/core/generation_orchestrator.py`）；`NEEDS_CONFIRMATION` 改由 backend 的 `waiting_review` job 狀態與人工複核端點處理 |
 | 散點圖資料點標籤 | 銀行名稱標籤需操作 `c:dLbls` XML，`renderer.scatter_labels_pending()` 可查詢此限制 |
 | 雙軸圖的 PowerPoint 實機驗收 | XML 結構、軸配對、內嵌工作簿一致性都有測試守著，但「右鍵編輯資料」尚未在 PowerPoint 實機開啟確認 |
 | DeckSpec / Refresh（FR-A2） | 尚未實作 |
