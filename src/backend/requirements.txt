@@ -6,6 +6,7 @@
 # 理由是程式碼本來就把它當選用：visual_parser.py 在函式內才 import，
 # 抓到 ImportError 會提示安裝指令。整套測試注入 FakeEngine，不碰真引擎，
 # 所以 CI 與一般開發都不需要裝它——要跑真的 OCR 才裝。
+bcrypt==4.3.0
 beautifulsoup4==4.15.0
 boto3==1.43.57
 fastapi==0.140.4

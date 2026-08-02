@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "@/auth";
 import { useI18n } from "@/i18n";
+import { HistoryModal } from "@/components/HistoryModal";
 
 export function Navbar() {
   const { locale, setLocale, t } = useI18n();
@@ -9,6 +10,7 @@ export function Navbar() {
   const navigate = useNavigate();
 
   const [menuOpen, setMenuOpen] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
   function toggleLocale() {
@@ -97,6 +99,15 @@ export function Navbar() {
                       </p>
                     </div>
                     <button
+                      onClick={() => {
+                        setHistoryOpen(true);
+                        setMenuOpen(false);
+                      }}
+                      className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+                    >
+                      {t("userMenuHistory")}
+                    </button>
+                    <button
                       onClick={handleLogout}
                       className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 transition-colors"
                     >
@@ -117,6 +128,11 @@ export function Navbar() {
           </div>
         </div>
       </div>
+
+      {/* History Modal */}
+      {historyOpen && (
+        <HistoryModal onClose={() => setHistoryOpen(false)} />
+      )}
     </nav>
   );
 }

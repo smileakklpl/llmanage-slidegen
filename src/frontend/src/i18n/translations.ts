@@ -78,9 +78,12 @@ export const translations = {
     notFoundBack: "回到首頁",
 
     // Auth
-    loginSubtitle: "請輸入 Email 登入",
+    loginSubtitle: "請輸入 Email 和密碼登入",
     loginEmailPlaceholder: "your@email.com",
     loginEmailRequired: "請輸入 Email",
+    loginPasswordLabel: "密碼",
+    loginPasswordPlaceholder: "請輸入密碼",
+    loginPasswordRequired: "請輸入密碼",
     loginButton: "登入",
     loginLoading: "登入中…",
     loginNoAccount: "還沒有帳號？",
@@ -88,11 +91,25 @@ export const translations = {
     registerSubtitle: "建立新帳號",
     registerNameLabel: "姓名",
     registerNamePlaceholder: "你的名字",
+    registerPasswordLabel: "密碼",
+    registerPasswordPlaceholder: "至少 6 個字元",
+    registerPasswordRequired: "請輸入密碼",
     registerButton: "註冊",
     registerLoading: "註冊中…",
     registerHasAccount: "已有帳號？",
     registerLoginLink: "登入",
     userMenuLogout: "登出",
+    userMenuHistory: "歷史紀錄",
+
+    // History Modal
+    historyTitle: "生成歷史紀錄",
+    historyEmpty: "尚無生成紀錄",
+    historyLoading: "載入中…",
+    historyError: "無法載入歷史紀錄",
+    historyDownload: "下載",
+    historyDelete: "刪除",
+    historyDeleteConfirm: "確定要刪除此紀錄嗎？",
+    historyClose: "關閉",
 
     // General
     unknownError: "發生未知錯誤",
@@ -175,9 +192,12 @@ export const translations = {
     notFoundBack: "Back to Home",
 
     // Auth
-    loginSubtitle: "Enter your email to sign in",
+    loginSubtitle: "Enter your email and password to sign in",
     loginEmailPlaceholder: "your@email.com",
     loginEmailRequired: "Please enter your email",
+    loginPasswordLabel: "Password",
+    loginPasswordPlaceholder: "Enter your password",
+    loginPasswordRequired: "Please enter your password",
     loginButton: "Sign In",
     loginLoading: "Signing in…",
     loginNoAccount: "Don't have an account?",
@@ -185,11 +205,25 @@ export const translations = {
     registerSubtitle: "Create a new account",
     registerNameLabel: "Name",
     registerNamePlaceholder: "Your name",
+    registerPasswordLabel: "Password",
+    registerPasswordPlaceholder: "At least 6 characters",
+    registerPasswordRequired: "Please enter a password",
     registerButton: "Register",
     registerLoading: "Registering…",
     registerHasAccount: "Already have an account?",
     registerLoginLink: "Sign In",
     userMenuLogout: "Sign Out",
+    userMenuHistory: "History",
+
+    // History Modal
+    historyTitle: "Generation History",
+    historyEmpty: "No generation history",
+    historyLoading: "Loading…",
+    historyError: "Failed to load history",
+    historyDownload: "Download",
+    historyDelete: "Delete",
+    historyDeleteConfirm: "Are you sure you want to delete this record?",
+    historyClose: "Close",
 
     // General
     unknownError: "An unknown error occurred",

@@ -1,85 +1,136 @@
-"""User registry backed by a JSON file.
+"""User registry backed by DynamoDB with bcrypt password hashing.
 
-Schema of config/users.json:
-[
-  {"email": "alice@example.com", "name": "Alice"},
-  {"email": "bob@example.com", "name": "Bob"}
-]
+Schema (slidegen_users table):
+  PK = email (HASH)
+
+Attributes:
+  - email: str
+  - name: str
+  - password_hash: str (bcrypt)
+  - created_at: str (ISO 8601)
+  - is_active: bool
 """
 
 from __future__ import annotations
 
-import json
-import os
-from pathlib import Path
+from datetime import datetime, timezone
 from typing import Any
 
-from app.auth.config import USERS_FILE
+import bcrypt
+from boto3.dynamodb.conditions import Attr
+
+from app.auth.dynamodb import get_users_table
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
 
 
-def _resolve_users_file() -> Path:
-    """Resolve the users file path (supports relative and absolute)."""
-    path = Path(USERS_FILE)
-    if not path.is_absolute():
-        path = Path(__file__).resolve().parent / path
-    return path.resolve()
+def _hash_password(password: str) -> str:
+    """Hash a plaintext password with bcrypt."""
+    return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
 
 
-def _load_users() -> list[dict[str, Any]]:
-    """Load user list from JSON file. Returns empty list if file not found."""
-    path = _resolve_users_file()
-    if not path.exists():
-        logger.warning("Users file not found: %s — no registered users", path)
-        return []
-    try:
-        with open(path, encoding="utf-8") as f:
-            data = json.load(f)
-        if not isinstance(data, list):
-            logger.error("Users file is not a JSON array: %s", path)
-            return []
-        return data
-    except Exception:
-        logger.exception("Failed to load users file: %s", path)
-        return []
-
-
-def _save_users(users: list[dict[str, Any]]) -> None:
-    """Persist user list to JSON file."""
-    path = _resolve_users_file()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(users, f, ensure_ascii=False, indent=2)
+def _verify_password(password: str, password_hash: str) -> bool:
+    """Verify a plaintext password against a bcrypt hash."""
+    return bcrypt.checkpw(password.encode("utf-8"), password_hash.encode("utf-8"))
 
 
 def get_user_by_email(email: str) -> dict[str, Any] | None:
-    """Lookup a user by email (case-insensitive)."""
-    email_lower = email.strip().lower()
-    for user in _load_users():
-        if user.get("email", "").strip().lower() == email_lower:
-            return user
+    """Lookup a user by email (case-insensitive). Returns None if not found."""
+    table = get_users_table()
+    response = table.get_item(Key={"email": email.strip().lower()})
+    return response.get("Item")
+
+
+def verify_user_password(email: str, password: str) -> dict[str, Any] | None:
+    """Verify email + password. Returns user dict if valid, None otherwise."""
+    user = get_user_by_email(email)
+    if not user:
+        return None
+
+    if not user.get("is_active", True):
+        return None
+
+    password_hash = user.get("password_hash", "")
+    if not password_hash:
+        return None
+
+    if _verify_password(password, password_hash):
+        return user
     return None
 
 
-def register_user(email: str, name: str = "") -> dict[str, Any]:
+def register_user(email: str, password: str, name: str = "") -> dict[str, Any]:
     """Register a new user. Raises ValueError if email already exists."""
     email = email.strip().lower()
     if not email:
         raise ValueError("Email is required")
+    if not password:
+        raise ValueError("Password is required")
 
     existing = get_user_by_email(email)
     if existing:
         raise ValueError(f"Email already registered: {email}")
 
-    users = _load_users()
-    new_user = {"email": email, "name": name or email.split("@")[0]}
-    users.append(new_user)
-    _save_users(users)
-    return new_user
+    item = {
+        "email": email,
+        "name": name or email.split("@")[0],
+        "password_hash": _hash_password(password),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "is_active": True,
+    }
+
+    table = get_users_table()
+    table.put_item(
+        Item=item,
+        ConditionExpression=Attr("email").not_exists(),
+    )
+    logger.info("Registered new user: %s", email)
+    return {"email": item["email"], "name": item["name"]}
 
 
 def list_users() -> list[dict[str, Any]]:
-    """Return all registered users."""
-    return _load_users()
+    """Return all registered users (without password hashes)."""
+    table = get_users_table()
+    response = table.scan(
+        ProjectionExpression="email, #n, created_at, is_active",
+        ExpressionAttributeNames={"#n": "name"},
+    )
+    return response.get("Items", [])
+
+
+def update_user(email: str, **fields) -> dict[str, Any] | None:
+    """Update user fields (name, is_active). Returns updated user or None."""
+    email = email.strip().lower()
+    user = get_user_by_email(email)
+    if not user:
+        return None
+
+    table = get_users_table()
+    update_parts = []
+    attr_names = {}
+    attr_values = {}
+
+    if "name" in fields:
+        update_parts.append("#n = :name")
+        attr_names["#n"] = "name"
+        attr_values[":name"] = fields["name"]
+
+    if "is_active" in fields:
+        update_parts.append("is_active = :active")
+        attr_values[":active"] = fields["is_active"]
+
+    if "password" in fields:
+        update_parts.append("password_hash = :ph")
+        attr_values[":ph"] = _hash_password(fields["password"])
+
+    if not update_parts:
+        return user
+
+    table.update_item(
+        Key={"email": email},
+        UpdateExpression="SET " + ", ".join(update_parts),
+        ExpressionAttributeNames=attr_names or None,
+        ExpressionAttributeValues=attr_values,
+    )
+    return get_user_by_email(email)

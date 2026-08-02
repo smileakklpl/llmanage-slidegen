@@ -1,19 +1,32 @@
 services:
+  dynamodb-local:
+    image: amazon/dynamodb-local:latest
+    container_name: slidegen-dynamodb
+    command: "-jar DynamoDBLocal.jar -sharedDb -inMemory"
+    ports:
+      - "8100:8000"
+    restart: unless-stopped
+
   backend:
     build:
       context: .
       dockerfile: src/backend/Dockerfile
     container_name: slidegen-backend
+    depends_on:
+      - dynamodb-local
     environment:
       - CORS_ORIGINS=["http://localhost","http://localhost:80"]
       - APP_NAME=slidegen-api
       - DEBUG=false
       - AWS_REGION=${AWS_REGION:-us-west-2}
-      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-}
-      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-local}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-local}
       - AWS_SESSION_TOKEN=${AWS_SESSION_TOKEN:-}
       - S3_BUCKET=${S3_BUCKET:-}
       - S3_ENDPOINT_URL=${S3_ENDPOINT_URL:-}
+      - DYNAMODB_ENDPOINT_URL=${DYNAMODB_ENDPOINT_URL:-http://dynamodb-local:8000}
+      - DYNAMODB_USERS_TABLE=${DYNAMODB_USERS_TABLE:-slidegen_users}
+      - DYNAMODB_HISTORY_TABLE=${DYNAMODB_HISTORY_TABLE:-slidegen_history}
       - EMAIL_PROVIDER=${EMAIL_PROVIDER:-ses}
       - SES_SENDER_EMAIL=${SES_SENDER_EMAIL:-ethanlin7890@gmail.com}
       - JWT_SECRET_KEY=${JWT_SECRET_KEY:-change-me-in-production-2024}

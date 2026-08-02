@@ -10,6 +10,7 @@ export function LoginPage() {
   const navigate = useNavigate();
 
   const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
 
@@ -22,10 +23,14 @@ export function LoginPage() {
       setError(t("loginEmailRequired"));
       return;
     }
+    if (!password) {
+      setError(t("loginPasswordRequired"));
+      return;
+    }
 
     setIsLoading(true);
     try {
-      const res = await loginApi(trimmed);
+      const res = await loginApi(trimmed, password);
       login(res.access_token, { email: res.email, name: res.name });
       navigate("/", { replace: true });
     } catch (err) {
@@ -70,6 +75,25 @@ export function LoginPage() {
                 placeholder={t("loginEmailPlaceholder")}
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
+                disabled={isLoading}
+                className="w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm placeholder:text-gray-400 focus:border-red-500 focus:ring-2 focus:ring-red-500/20 focus:outline-none disabled:opacity-50 transition-all"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <label
+                htmlFor="login-password"
+                className="block text-xs font-semibold text-gray-500 uppercase tracking-wide"
+              >
+                {t("loginPasswordLabel")}
+              </label>
+              <input
+                id="login-password"
+                type="password"
+                autoComplete="current-password"
+                placeholder={t("loginPasswordPlaceholder")}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
                 disabled={isLoading}
                 className="w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm placeholder:text-gray-400 focus:border-red-500 focus:ring-2 focus:ring-red-500/20 focus:outline-none disabled:opacity-50 transition-all"
               />

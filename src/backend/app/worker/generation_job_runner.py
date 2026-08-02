@@ -233,6 +233,31 @@ async def _generate_from_ingestion_path(
         review_required_count=0,
     )
 
+    # Save generation history for the user
+    if job.user_email:
+        try:
+            from app.auth.history import add_history_record
+
+            add_history_record(
+                email=job.user_email,
+                job_id=job.job_id,
+                prompt=job.prompt,
+                artifacts=[
+                    {
+                        "filename": a.filename,
+                        "object_key": a.object_key or "",
+                        "type": a.type,
+                        "size_bytes": a.size_bytes or 0,
+                    }
+                    for a in artifacts
+                    if a.type != "json"
+                ],
+                created_at=datetime.now(timezone.utc).isoformat(),
+            )
+        except Exception:
+            # History saving is best-effort; do not fail the job
+            pass
+
 
 async def run_generation_job(
     job_id: str,
