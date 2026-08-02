@@ -43,7 +43,7 @@ services:
       - OCR_MAX_PAGES=${OCR_MAX_PAGES:-20}
       # LLM 後端：Bedrock 走 EC2 Instance Profile 簽章，不需要 API key。
       - LLM_PROVIDER=${LLM_PROVIDER:-bedrock}
-      - LLM_MODEL_DEFAULT=${LLM_MODEL_DEFAULT:-global.anthropic.claude-opus-4.6}
+      - LLM_MODEL_DEFAULT=${LLM_MODEL_DEFAULT:-global.anthropic.claude-opus-4.6-v1}
       - LLM_MODEL_INTENT=${LLM_MODEL_INTENT:-}
       - LLM_MODEL_CHART=${LLM_MODEL_CHART:-}
       - LLM_MODEL_WRITER=${LLM_MODEL_WRITER:-}
