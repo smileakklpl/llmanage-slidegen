@@ -295,7 +295,14 @@ async def run_generation_job(
                 ocr_deadline_monotonic=ocr_deadline_monotonic,
                 ocr_max_pages=job.generation_options.ocr_max_pages,
             )
-            _ensure_before_deadline(job, phase="ingestion persistence", pipeline=True)
+            ingestion_payload = _prepare_ingestion_for_review(
+                ingestion_payload
+            )
+            _ensure_before_deadline(
+                job,
+                phase="ingestion persistence",
+                pipeline=True,
+            )
             ingestion_path = generation_bridge.save_payload(
                 ingestion_payload,
                 workspace / "ingestion.json",
@@ -334,19 +341,7 @@ async def run_generation_job(
                 progress=45,
                 message=message,
                 ingestion_object=ingestion_object,
-                review_required_count=0,
-            )
-
-            refreshed = await repository.get(job_id)
-            if refreshed is None:
-                return
-            await _generate_from_ingestion_path(
-                job=refreshed,
-                ingestion_path=ingestion_path,
-                template_path=template_path,
-                output_dir=output_dir,
-                repository=repository,
-                storage=storage,
+                review_required_count=pending_count,
             )
             return
 
