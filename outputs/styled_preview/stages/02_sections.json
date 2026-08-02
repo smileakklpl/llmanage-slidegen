@@ -1,6 +1,39 @@
 {
   "contract_version": "1.0",
   "status": "READY",
+  "intent_spec": {
+    "contract_version": "1.0",
+    "objective": "依可用資料產生可追蹤的管理決策簡報",
+    "audience": "管理層",
+    "language": "zh-TW",
+    "tone": "professional",
+    "target_content_pages": null,
+    "requested_topics": [],
+    "excluded_topics": [],
+    "requested_metric_keys": [
+      "循環信用餘額.value.top10",
+      "aggregate_by_period.value",
+      "有效卡數.value.top10",
+      "未到期分期付款餘額.value.top10",
+      "aggregate_by_period.period_growth",
+      "循環信用餘額.share.top10",
+      "當月轉銷呆帳金額.value.top10",
+      "aggregate_by_period.forecast",
+      "循環信用餘額.share"
+    ],
+    "chart_preferences": {
+      "preferred_types": [],
+      "avoided_types": []
+    },
+    "required_conclusions": [],
+    "delivery": {
+      "recipients": [],
+      "email_subject": null
+    },
+    "interpretation_warnings": [],
+    "prompt_applied": true,
+    "source": "parsed"
+  },
   "sections": [
     {
       "title": "關鍵指標總覽",
