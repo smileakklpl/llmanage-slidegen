@@ -141,6 +141,7 @@ class GenerationRequest(BaseModel):
     ingestion_path: str = Field(min_length=1)
     output_dir: str = Field(min_length=1)
     source_objects: list[StoredObjectRef] = Field(default_factory=list)
+    template_path: str | None = None
     sections: list[str] | None = None
     deck_title: str | None = None
     options: GenerationOptions = Field(default_factory=GenerationOptions)

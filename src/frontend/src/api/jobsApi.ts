@@ -30,13 +30,17 @@ export interface ResumeJobResponse {
 
 export async function generateJob(
   files: File[],
-  prompt: string
+  prompt: string,
+  template: File | null = null
 ): Promise<JobCreateResponse> {
   const formData = new FormData();
   for (const file of files) {
     formData.append("files", file);
   }
   formData.append("prompt", prompt);
+  if (template) {
+    formData.append("template", template);
+  }
 
   const res = await fetch(`${BASE_URL}/api/v1/jobs/generate`, {
     method: "POST",

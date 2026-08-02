@@ -64,10 +64,29 @@ async def _transition(
     await repository.update(job.model_copy(update=changes))
 
 
+async def _materialize_template(
+    job: JobModel,
+    workspace: Path,
+    storage: S3ObjectStorage,
+) -> Path | None:
+    """Download the optional template separately from ingestion inputs."""
+    if job.template_object is None:
+        return None
+
+    destination = workspace / "template.pptx"
+    await asyncio.to_thread(
+        storage.download_path,
+        job.template_object.key,
+        destination,
+    )
+    return destination
+
+
 async def _generate_from_ingestion_path(
     *,
     job: JobModel,
     ingestion_path: Path,
+    template_path: Path | None,
     output_dir: Path,
     repository: JobRepository,
     storage: S3ObjectStorage,
@@ -91,6 +110,7 @@ async def _generate_from_ingestion_path(
         job_id=job.job_id,
         prompt=job.prompt,
         ingestion_path=str(ingestion_path),
+        template_path=str(template_path) if template_path is not None else None,
         output_dir=str(output_dir),
         source_objects=job.input_objects,
         options=job.generation_options,
@@ -187,6 +207,7 @@ async def run_generation_job(
             workspace = Path(temp_name)
             upload_dir = workspace / "uploads"
             output_dir = workspace / "outputs"
+            template_path = await _materialize_template(job, workspace, storage)
             materialized: list[tuple[Path, str]] = []
 
             for index, object_ref in enumerate(job.input_objects, start=1):
@@ -249,6 +270,7 @@ async def run_generation_job(
             await _generate_from_ingestion_path(
                 job=refreshed,
                 ingestion_path=ingestion_path,
+                template_path=template_path,
                 output_dir=output_dir,
                 repository=repository,
                 storage=storage,
@@ -286,6 +308,7 @@ async def resume_generation_job(
             workspace = Path(temp_name)
             ingestion_path = workspace / "ingestion.json"
             output_dir = workspace / "outputs"
+            template_path = await _materialize_template(job, workspace, storage)
             await asyncio.to_thread(
                 storage.download_path,
                 job.ingestion_object.key,
@@ -302,6 +325,7 @@ async def resume_generation_job(
             await _generate_from_ingestion_path(
                 job=job,
                 ingestion_path=ingestion_path,
+                template_path=template_path,
                 output_dir=output_dir,
                 repository=repository,
                 storage=storage,

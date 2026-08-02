@@ -169,6 +169,7 @@ def build_prompt(
     chart: ResolvedChart,
     store: MetricStore,
     previous_errors: list[str] | None = None,
+    intent_spec: dict[str, Any] | None = None,
 ) -> str:
     """
     組裝 prompt。
@@ -213,6 +214,25 @@ def build_prompt(
             "字數不足會被程式退回重寫，請直接寫足。"
         ),
     ]
+
+    if intent_spec:
+        parts.extend(
+            [
+                "",
+                "## 已驗證的全案需求",
+                f"簡報目的：{intent_spec.get('objective') or '依資料提供管理洞察'}",
+                f"閱讀對象：{intent_spec.get('audience') or '管理層'}",
+                f"語言：{intent_spec.get('language') or 'zh-TW'}",
+                f"語氣：{intent_spec.get('tone') or 'professional'}",
+                "要求收斂的結論："
+                + json.dumps(
+                    intent_spec.get("required_conclusions") or [],
+                    ensure_ascii=False,
+                ),
+                "以上需求只影響呈現方式；若描述不適用或不完整，使用專業、"
+                "中性且可交付的預設寫法，不得拒絕產出，也不得自行加入數字。",
+            ]
+        )
 
     label_hints = _label_hints(chart)
 
@@ -526,6 +546,7 @@ def write_narrative_for_page(
     initial_errors: Collection[str] | None = None,
     llm_stage: str = "writer",
     deadline_monotonic: float | None = None,
+    intent_spec: dict[str, Any] | None = None,
 ) -> tuple[PageNarrative | None, list[str], int]:
     """
     為單頁撰寫敘事，內含規則層自我校正迴圈。
@@ -541,7 +562,7 @@ def write_narrative_for_page(
 
     for attempt in range(1, max_attempts + 1):
         payload = call(
-            build_prompt(section, chart, store, issues),
+            build_prompt(section, chart, store, issues, intent_spec),
             NARRATIVE_SCHEMA,
             system_prompt=SYSTEM_PROMPT,
             stage=llm_stage,
@@ -702,6 +723,7 @@ def write_narrative_from_contract(
     initial_errors: Collection[str] | None = None,
     llm_stage: str = "writer",
     deadline_monotonic: float | None = None,
+    intent_spec_payload: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """JSON-only stage boundary for one narrative generation attempt."""
     from ..contracts import stages as stage_contracts
@@ -720,6 +742,7 @@ def write_narrative_from_contract(
         initial_errors=initial_errors,
         llm_stage=llm_stage,
         deadline_monotonic=deadline_monotonic,
+        intent_spec=intent_spec_payload,
     )
     return stage_contracts.narrative_attempt_payload(
         {

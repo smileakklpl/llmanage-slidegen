@@ -25,7 +25,7 @@ from pathlib import Path
 from typing import Any, Sequence
 
 from pptx import Presentation
-from pptx.enum.shapes import MSO_SHAPE
+from pptx.enum.shapes import MSO_SHAPE, PP_PLACEHOLDER
 from pptx.enum.text import MSO_ANCHOR, MSO_AUTO_SIZE, PP_ALIGN
 from pptx.util import Emu, Inches, Pt
 
@@ -54,6 +54,14 @@ SECTION_LAYOUT_NAME = "2_章節標題"
 
 #: 模板中用於結尾頁的版面名稱（附件一模板第 5 頁用的就是這個）。
 CLOSING_LAYOUT_NAME = "3_標題投影片"
+
+#: 常見 PowerPoint 中英文版型名稱。上傳模板不必沿用內建模板的自訂名稱；
+#: 找不到精確名稱時，先依別名、再依 placeholder 結構選擇相容版型。
+_LAYOUT_ALIASES = {
+    CONTENT_LAYOUT_NAME: ("Title and Content", "標題及內容"),
+    SECTION_LAYOUT_NAME: ("Section Header", "章節標題", "節首"),
+    CLOSING_LAYOUT_NAME: ("Title Slide", "標題投影片"),
+}
 
 #: 目錄頁標題與結尾頁文字。都可由呼叫端覆寫。
 AGENDA_TITLE = "目錄"
@@ -205,12 +213,51 @@ def _content_area(layout: Any) -> ContentArea:
 
 
 def _find_layout(presentation: Presentation, name: str) -> Any:
-    for layout in presentation.slide_layouts:
+    layouts = list(presentation.slide_layouts)
+
+    for layout in layouts:
         if layout.name == name:
             return layout
 
-    available = [layout.name for layout in presentation.slide_layouts]
-    raise RenderError(f"模板中找不到版面 {name!r}。可用版面：{available}")
+    accepted_casefold = {
+        item.casefold() for item in _LAYOUT_ALIASES.get(name, ())
+    }
+    for layout in layouts:
+        if layout.name.casefold() in accepted_casefold:
+            return layout
+
+    if name == CONTENT_LAYOUT_NAME:
+        content_types = {PP_PLACEHOLDER.BODY, PP_PLACEHOLDER.OBJECT}
+        for layout in layouts:
+            placeholders = {
+                placeholder.placeholder_format.idx: placeholder
+                for placeholder in layout.placeholders
+            }
+            body = placeholders.get(PH_BODY)
+            if body is not None and body.placeholder_format.type in content_types:
+                logger.info(
+                    "模板未提供命名內容版型，改用結構相容版型 %s",
+                    layout.name,
+                )
+                return layout
+    else:
+        title_types = {PP_PLACEHOLDER.TITLE, PP_PLACEHOLDER.CENTER_TITLE}
+        for layout in layouts:
+            if any(
+                placeholder.placeholder_format.type in title_types
+                for placeholder in layout.placeholders
+            ):
+                logger.info(
+                    "模板未提供命名標題版型，改用結構相容版型 %s",
+                    layout.name,
+                )
+                return layout
+
+    available = [layout.name for layout in layouts]
+    raise RenderError(
+        f"模板中找不到版面 {name!r}，也沒有結構相容版面。"
+        f"可用版面：{available}"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -990,6 +1037,11 @@ def render_deck(
 
     presentation = Presentation(str(template))
     report = RenderReport()
+
+    if not presentation.slides:
+        cover_layout = _find_layout(presentation, CLOSING_LAYOUT_NAME)
+        presentation.slides.add_slide(cover_layout)
+        report.warnings.append("上傳模板沒有既有投影片，已依其標題版型建立封面")
 
     if deck_title and presentation.slides:
         first_slide = presentation.slides[0]

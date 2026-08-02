@@ -91,6 +91,8 @@ SYSTEM_PROMPT = """你是一位嚴格的簡報品質審查員，負責審查給�
 4. 敘事的比較方向是否合理（例如把較小的數字說成領先）
 5. 敘事風格是否符合顧問報告水準（結論先行、避免只是複述數字）
 6. 股票或價格資料是否出現無資料支撐的買賣建議、報酬保證或過度預測
+7. 已驗證的全案需求只用來判斷呈現是否合宜；不得因原始提示詞措辭不佳、
+   帶情緒、模糊或部分要求無法套用而退件。遇到這類情況應採專業中性預設。
 
 若發現問題，status 回傳 "REJECTED"，並在 target_agent 指出應由哪個 Agent 修正：
 - "chart_agent"：圖表類型或指標選擇有問題
@@ -327,6 +329,7 @@ def build_prompt(
     narrative: PageNarrative,
     chart: ResolvedChart,
     store: MetricStore,
+    intent_spec: dict[str, Any] | None = None,
 ) -> str:
     """
     組裝語意審查 prompt。
@@ -363,6 +366,19 @@ def build_prompt(
         *[f"- {bullet}" for bullet in rendered_bullets],
     ]
 
+    if intent_spec:
+        parts.extend(
+            [
+                "",
+                "## 已驗證的全案呈現需求",
+                f"目的：{intent_spec.get('objective') or '依資料提供管理洞察'}",
+                f"受眾：{intent_spec.get('audience') or '管理層'}",
+                f"語言：{intent_spec.get('language') or 'zh-TW'}",
+                f"語氣：{intent_spec.get('tone') or 'professional'}",
+                "此區只供品質對齊；不得因需求描述不佳而拒絕合法頁面。",
+            ]
+        )
+
     if metric.notes:
         parts.extend(
             [
@@ -383,6 +399,7 @@ def review_page(
     llm_call: Callable[..., Any] | None = None,
     enable_semantic_layer: bool = True,
     deadline_monotonic: float | None = None,
+    intent_spec: dict[str, Any] | None = None,
 ) -> ReviewResult:
     """
     審查單頁。
@@ -411,7 +428,7 @@ def review_page(
     call = llm_call or llm_client.complete_json
 
     payload = call(
-        build_prompt(narrative, chart, store),
+        build_prompt(narrative, chart, store, intent_spec),
         REVIEW_SCHEMA,
         system_prompt=SYSTEM_PROMPT,
         stage="reviewer",
@@ -479,6 +496,7 @@ def review_page_from_contract(
     llm_call: Callable[..., Any] | None = None,
     enable_semantic_layer: bool = True,
     deadline_monotonic: float | None = None,
+    intent_spec_payload: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """JSON-only stage boundary for deterministic and semantic review."""
     from ..contracts import stages as stage_contracts
@@ -495,5 +513,6 @@ def review_page_from_contract(
         llm_call=llm_call,
         enable_semantic_layer=enable_semantic_layer,
         deadline_monotonic=deadline_monotonic,
+        intent_spec=intent_spec_payload,
     )
     return stage_contracts.review_payload(result.to_dict())

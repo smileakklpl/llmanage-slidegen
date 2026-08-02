@@ -11,7 +11,7 @@ const generateFormSchema = z.object({
 type GenerateFormData = z.infer<typeof generateFormSchema>;
 
 interface GenerateFormProps {
-  onSubmit: (files: File[], prompt: string) => void;
+  onSubmit: (files: File[], prompt: string, template: File | null) => void;
   isSubmitting?: boolean;
 }
 
@@ -19,7 +19,10 @@ export function GenerateForm({ onSubmit, isSubmitting }: GenerateFormProps) {
   const { t } = useI18n();
   const [files, setFiles] = useState<File[]>([]);
   const [fileError, setFileError] = useState<string | null>(null);
+  const [template, setTemplate] = useState<File | null>(null);
+  const [templateError, setTemplateError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const templateInputRef = useRef<HTMLInputElement>(null);
 
   const {
     register,
@@ -67,12 +70,29 @@ export function GenerateForm({ onSubmit, isSubmitting }: GenerateFormProps) {
     setFiles((prev) => prev.filter((_, i) => i !== index));
   }
 
+  function handleTemplateChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const selected = e.target.files?.[0];
+    if (!selected) return;
+
+    if (selected.name.split(".").pop()?.toLowerCase() !== "pptx") {
+      setTemplate(null);
+      setTemplateError(t("templateError"));
+    } else {
+      setTemplate(selected);
+      setTemplateError(null);
+    }
+
+    if (templateInputRef.current) {
+      templateInputRef.current.value = "";
+    }
+  }
+
   function handleFormSubmit(data: GenerateFormData) {
     if (files.length === 0) {
       setFileError(t("fileRequired"));
       return;
     }
-    onSubmit(files, data.prompt);
+    onSubmit(files, data.prompt, template);
   }
 
   return (
@@ -129,6 +149,55 @@ export function GenerateForm({ onSubmit, isSubmitting }: GenerateFormProps) {
                 </button>
               </li>
             ))}
+          </ul>
+        )}
+      </div>
+
+      {/* Optional PowerPoint template */}
+      <div className="space-y-2">
+        <label className="block text-sm font-semibold text-gray-700">
+          {t("templateLabel")}
+        </label>
+        <p className="text-sm text-gray-500">{t("templateHint")}</p>
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => templateInputRef.current?.click()}
+            className="py-2 px-4 rounded-lg bg-red-50 text-red-700 text-sm font-medium hover:bg-red-100 transition-colors"
+          >
+            {t("templateSelectButton")}
+          </button>
+          <span className="text-sm text-gray-500">
+            {template
+              ? t("fileSelected").replace("{count}", "1")
+              : ""}
+          </span>
+        </div>
+        <input
+          type="file"
+          accept=".pptx"
+          ref={templateInputRef}
+          onChange={handleTemplateChange}
+          className="hidden"
+        />
+        {templateError && (
+          <p className="text-sm text-red-600">{templateError}</p>
+        )}
+        {template && (
+          <ul className="mt-2 space-y-1.5">
+            <li className="flex items-center justify-between py-2 px-3 bg-gray-50 border border-gray-200 rounded-lg text-sm">
+              <span className="text-gray-800 truncate mr-2">
+                {template.name}
+              </span>
+              <button
+                type="button"
+                onClick={() => setTemplate(null)}
+                className="shrink-0 w-6 h-6 flex items-center justify-center rounded-full text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors"
+                aria-label={`${t("remove")} ${template.name}`}
+              >
+                ✕
+              </button>
+            </li>
           </ul>
         )}
       </div>
