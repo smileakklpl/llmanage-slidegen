@@ -1,8 +1,10 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type {
   DatasetCorrection,
   UnifiedDatasetSpec,
 } from "@/schemas/ingestionSchema";
+
+const PAGE_SIZE = 30;
 
 interface DatasetReviewPanelProps {
   dataset: UnifiedDatasetSpec;
@@ -77,15 +79,39 @@ export function DatasetReviewPanel({
   const [editingCell, setEditingCell] = useState<string | null>(null);
   const [draftValue, setDraftValue] = useState("");
   const [editError, setEditError] = useState<string | null>(null);
+  const [currentPage, setCurrentPage] = useState(1);
 
   const columnKeys =
     dataset.columns.length > 0
       ? dataset.columns.map((column) => column.key)
       : Object.keys(dataset.records[0]?.values ?? {});
 
-  const visibleRecords = dataset.records.slice(0, 30);
-  const hiddenCount = Math.max(0, dataset.records.length - visibleRecords.length);
+  const totalRecords = dataset.records.length;
+  const totalPages = Math.max(1, Math.ceil(totalRecords / PAGE_SIZE));
+  const safeCurrentPage = Math.min(currentPage, totalPages);
+  const pageStartIndex = (safeCurrentPage - 1) * PAGE_SIZE;
+  const pageEndIndex = Math.min(pageStartIndex + PAGE_SIZE, totalRecords);
+  const visibleRecords = dataset.records.slice(pageStartIndex, pageEndIndex);
   const editable = Boolean(onCorrectionsChange) && !disabled;
+
+  useEffect(() => {
+    setCurrentPage(1);
+    setEditingCell(null);
+    setDraftValue("");
+    setEditError(null);
+  }, [dataset.dataset_id]);
+
+  useEffect(() => {
+    if (currentPage > totalPages) {
+      setCurrentPage(totalPages);
+    }
+  }, [currentPage, totalPages]);
+
+  function goToPage(page: number) {
+    const nextPage = Math.min(Math.max(page, 1), totalPages);
+    setCurrentPage(nextPage);
+    cancelEdit();
+  }
 
   function findCorrection(recordIndex: number, columnKey: string) {
     return corrections.find(
@@ -353,9 +379,53 @@ export function DatasetReviewPanel({
         </table>
       </div>
 
-      {hiddenCount > 0 && (
-        <div className="border-t border-gray-100 bg-gray-50 px-5 py-3 text-center text-xs text-gray-500">
-          為避免畫面過長，目前顯示前 30 列，另有 {hiddenCount} 列未顯示。
+      {totalRecords > 0 && (
+        <div className="flex flex-col gap-3 border-t border-gray-100 bg-gray-50 px-5 py-3 sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-xs text-gray-500">
+            顯示第 {pageStartIndex + 1}–{pageEndIndex} 筆，共 {totalRecords} 筆
+          </p>
+
+          {totalPages > 1 && (
+            <div className="flex flex-wrap items-center justify-center gap-2 sm:justify-end">
+              <button
+                type="button"
+                disabled={safeCurrentPage <= 1}
+                onClick={() => goToPage(safeCurrentPage - 1)}
+                className="rounded-md border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-600 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                上一頁
+              </button>
+
+              <span className="min-w-[72px] text-center text-xs font-semibold text-gray-600">
+                {safeCurrentPage} / {totalPages}
+              </span>
+
+              <button
+                type="button"
+                disabled={safeCurrentPage >= totalPages}
+                onClick={() => goToPage(safeCurrentPage + 1)}
+                className="rounded-md border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-600 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                下一頁
+              </button>
+
+              <label className="ml-1 flex items-center gap-1.5 text-xs text-gray-500">
+                跳至
+                <select
+                  value={safeCurrentPage}
+                  disabled={disabled}
+                  onChange={(event) => goToPage(Number(event.target.value))}
+                  className="rounded-md border border-gray-200 bg-white px-2 py-1.5 text-xs font-semibold text-gray-700 outline-none focus:border-red-400 focus:ring-2 focus:ring-red-500/10 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {Array.from({ length: totalPages }, (_, index) => index + 1).map((page) => (
+                    <option key={page} value={page}>
+                      第 {page} 頁
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+          )}
         </div>
       )}
     </div>
