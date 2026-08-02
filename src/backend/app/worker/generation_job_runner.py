@@ -16,6 +16,25 @@ from core.contracts.generation import GenerationRequest, NormalizedIngestionCont
 from core.generation_orchestrator import generate_deck
 
 
+def _prepare_ingestion_for_review(payload: dict) -> dict:
+    """Require a user confirmation pass for every extracted dataset.
+
+    ``requires_human_review`` keeps its original meaning: it is a risk signal
+    (for example, confidence below the auto-accept threshold) used by the UI to
+    highlight data that deserves extra attention. ``review_status`` is the
+    workflow gate. Every freshly ingested dataset becomes ``pending`` so even
+    high-confidence data can be inspected and corrected before generation.
+    """
+    ingestion = NormalizedIngestionContract.model_validate(payload)
+    datasets = [
+        dataset.model_copy(update={"review_status": "pending"})
+        for dataset in ingestion.datasets
+    ]
+    return ingestion.model_copy(update={"datasets": datasets}).model_dump(
+        mode="json"
+    )
+
+
 def _blocked_dataset_ids(payload: dict) -> list[str]:
     ingestion = NormalizedIngestionContract.model_validate(payload)
     return [
@@ -220,7 +239,7 @@ async def run_generation_job(
     repository: JobRepository,
     storage: S3ObjectStorage,
 ) -> None:
-    """Ingest raw S3 uploads, pause for review when needed, otherwise generate."""
+    """Ingest raw S3 uploads and always pause for pre-generation review."""
     try:
         job = await repository.get(job_id)
         if job is None:
@@ -288,29 +307,32 @@ async def run_generation_job(
                 content_type="application/json",
             )
 
-            blocked = _blocked_dataset_ids(ingestion_payload)
-            if blocked:
-                await _transition(
-                    job_id,
-                    repository,
-                    status=JobStatus.waiting_review,
-                    stage=JobStage.reviewing_data,
-                    progress=45,
-                    message=(
-                        f"辨識完成；{len(blocked)} 個資料集需要人工確認後才能生成"
-                    ),
-                    ingestion_object=ingestion_object,
-                    review_required_count=len(blocked),
+            ingestion = NormalizedIngestionContract.model_validate(
+                ingestion_payload
+            )
+            pending_count = len(ingestion.datasets)
+            low_confidence_count = sum(
+                1
+                for dataset in ingestion.datasets
+                if dataset.requires_human_review
+            )
+            if low_confidence_count:
+                message = (
+                    f"資料抽取完成；請確認 {pending_count} 個資料集後再生成，"
+                    f"其中 {low_confidence_count} 個資料集需要特別留意"
                 )
-                return
+            else:
+                message = (
+                    f"資料抽取完成；請確認 {pending_count} 個資料集後再生成"
+                )
 
             await _transition(
                 job_id,
                 repository,
-                status=JobStatus.running,
-                stage=JobStage.analyzing_data,
-                progress=50,
-                message="資料解析完成，無需人工確認",
+                status=JobStatus.waiting_review,
+                stage=JobStage.reviewing_data,
+                progress=45,
+                message=message,
                 ingestion_object=ingestion_object,
                 review_required_count=0,
             )
@@ -326,6 +348,7 @@ async def run_generation_job(
                 repository=repository,
                 storage=storage,
             )
+            return
 
     except Exception as error:  # noqa: BLE001 - worker must persist all failures
         await _transition(

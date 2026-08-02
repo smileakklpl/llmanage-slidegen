@@ -253,6 +253,11 @@ def test_apply_human_review(
         == 110000
     )
 
+    human_review_evidence = reviewed.records[0].values["營收"].evidence[-1]
+    assert human_review_evidence.extraction_method == "human_review"
+    assert "原值：100000" in (human_review_evidence.note or "")
+    assert "修正值：110000" in (human_review_evidence.note or "")
+
     assert (
         reviewed.records[0]
         .values["營收"]

@@ -255,9 +255,9 @@ class JobService:
             or dataset.review_status in {"pending", "rejected"}
         ]
         message = (
-            f"尚有 {len(blocked)} 個資料集需要人工確認"
+            f"尚有 {len(blocked)} 個資料集待確認"
             if blocked
-            else "所有資料集已通過人工確認，可繼續生成"
+            else "所有資料集已確認完成，可繼續生成"
         )
         updated_job = job.model_copy(
             update={
@@ -275,7 +275,7 @@ class JobService:
         return updated_job, reviewed
 
     async def resume_job(self, job_id: str) -> JobModel:
-        """Resume generation only when every dataset has cleared review."""
+        """Resume generation only after every dataset has been confirmed."""
         job, payload = await self.get_review_payload(job_id)
         if job.status != JobStatus.waiting_review:
             raise ValueError("只有 waiting_review 的工作可以續跑")
@@ -297,7 +297,7 @@ class JobService:
                 "status": JobStatus.queued,
                 "stage": JobStage.queued,
                 "progress": 50,
-                "message": "人工確認完成，工作已重新排入生成佇列",
+                "message": "資料確認完成，工作已重新排入生成佇列",
                 "review_required_count": 0,
                 "updated_at": datetime.now(timezone.utc),
                 "error": None,

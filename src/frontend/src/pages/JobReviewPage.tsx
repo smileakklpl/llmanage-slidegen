@@ -4,6 +4,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { getJobReview, reviewJobDataset, resumeJob } from "@/api/jobsApi";
 import { DatasetReviewPanel } from "@/components/review/DatasetReviewPanel";
 import { ErrorMessage } from "@/components/ErrorMessage";
+import type { DatasetCorrection } from "@/schemas/ingestionSchema";
 
 export function JobReviewPage() {
   const { jobId } = useParams<{ jobId: string }>();
@@ -22,6 +23,7 @@ export function JobReviewPage() {
 
   const [reviewer, setReviewer] = useState("user");
   const [notes, setNotes] = useState("");
+  const [corrections, setCorrections] = useState<DatasetCorrection[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isResuming, setIsResuming] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -49,13 +51,19 @@ export function JobReviewPage() {
   }
 
   const datasets = reviewData.datasets;
-  const pendingDatasets = datasets.filter(
-    (d) =>
-      (d as Record<string, unknown>).requires_human_review === true ||
-      (d as Record<string, unknown>).review_status === "pending"
-  );
+  const pendingDatasets = datasets.filter((d) => {
+    const status = (d as Record<string, unknown>).review_status;
+    return status !== "approved" && status !== "rejected";
+  });
   const approvedCount = datasets.filter(
     (d) => (d as Record<string, unknown>).review_status === "approved"
+  ).length;
+  const rejectedCount = datasets.filter(
+    (d) => (d as Record<string, unknown>).review_status === "rejected"
+  ).length;
+  const reviewedCount = approvedCount + rejectedCount;
+  const lowConfidenceCount = datasets.filter(
+    (d) => (d as Record<string, unknown>).requires_human_review === true
   ).length;
   const currentDataset = pendingDatasets[0] ?? null;
 
@@ -75,9 +83,10 @@ export function JobReviewPage() {
         decision,
         reviewer: reviewer.trim(),
         notes: notes.trim() || undefined,
-        corrections: [],
+        corrections: decision === "approve" ? corrections : [],
       });
       setNotes("");
+      setCorrections([]);
       // Refresh the review data
       await refetch();
     } catch (err) {
@@ -126,7 +135,7 @@ export function JobReviewPage() {
           <p className="mt-2 text-sm leading-6 text-gray-500">
             {hasRejected
               ? "被拒絕的資料不應進入分析。請回到上傳頁更換或修正來源檔案。"
-              : `已完成 ${approvedCount} 個低信心資料集的人工確認，可以繼續生成簡報。`}
+              : `已完成 ${approvedCount} 個資料集的確認，可以繼續生成簡報。`}
           </p>
 
           {error && (
@@ -159,7 +168,7 @@ export function JobReviewPage() {
     );
   }
 
-  const currentPosition = approvedCount + 1;
+  const currentPosition = reviewedCount + 1;
   const totalCount = datasets.length;
 
   // Cast for DatasetReviewPanel compatibility
@@ -178,7 +187,12 @@ export function JobReviewPage() {
           </button>
           <h1 className="text-2xl font-bold text-gray-900">人工資料確認</h1>
           <p className="mt-1 text-sm text-gray-500">
-            系統偵測到低信心資料。請比對原始文件與抽取結果後再決定是否使用。
+            生成前請確認所有抽取資料；任何資料格都可以手動修正。
+            {lowConfidenceCount > 0 && (
+              <span className="ml-1 font-medium text-amber-700">
+                其中 {lowConfidenceCount} 個資料集信心較低，請特別核對黃色標示。
+              </span>
+            )}
           </p>
         </div>
 
@@ -190,7 +204,7 @@ export function JobReviewPage() {
           <div className="mt-2 h-2 overflow-hidden rounded-full bg-gray-100">
             <div
               className="h-full rounded-full bg-red-600 transition-all"
-              style={{ width: `${Math.round((approvedCount / totalCount) * 100)}%` }}
+              style={{ width: `${Math.round((reviewedCount / totalCount) * 100)}%` }}
             />
           </div>
         </div>
@@ -228,7 +242,12 @@ export function JobReviewPage() {
         </div>
 
         <div className="space-y-5">
-          <DatasetReviewPanel dataset={panelDataset} />
+          <DatasetReviewPanel
+            dataset={panelDataset}
+            corrections={corrections}
+            onCorrectionsChange={setCorrections}
+            disabled={isSubmitting}
+          />
 
           <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
             <div className="grid gap-4 sm:grid-cols-2">
@@ -258,7 +277,9 @@ export function JobReviewPage() {
 
             <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-gray-100 pt-5">
               <p className="text-xs leading-5 text-gray-500">
-                確認表示你已核對原始文件；拒絕會阻止這批資料進入後續生成流程。
+                {corrections.length > 0
+                  ? `已修改 ${corrections.length} 格。確認後會先套用人工修正，再讓資料進入後續生成流程。`
+                  : "確認表示你已核對此資料集；信心較低的欄位會以黃色標示，但所有欄位都可以修改。"}
               </p>
               <div className="flex gap-3">
                 <button
@@ -275,7 +296,11 @@ export function JobReviewPage() {
                   onClick={() => handleReview("approve")}
                   className="rounded-lg bg-red-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-red-700 disabled:cursor-not-allowed disabled:bg-red-300"
                 >
-                  {isSubmitting ? "送出中…" : "確認資料正確"}
+                  {isSubmitting
+                    ? "送出中…"
+                    : corrections.length > 0
+                      ? `確認並套用 ${corrections.length} 項修正`
+                      : "確認資料正確"}
                 </button>
               </div>
             </div>

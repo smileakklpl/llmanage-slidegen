@@ -1,8 +1,15 @@
-import type { UnifiedDatasetSpec } from "@/schemas/ingestionSchema";
+import { useState } from "react";
+import type {
+  DatasetCorrection,
+  UnifiedDatasetSpec,
+} from "@/schemas/ingestionSchema";
 
 interface DatasetReviewPanelProps {
   dataset: UnifiedDatasetSpec;
   lowConfidenceThreshold?: number;
+  corrections?: DatasetCorrection[];
+  onCorrectionsChange?: (corrections: DatasetCorrection[]) => void;
+  disabled?: boolean;
 }
 
 function displayValue(value: unknown): string {
@@ -11,14 +18,66 @@ function displayValue(value: unknown): string {
   return String(value);
 }
 
+function editableValue(value: unknown): string {
+  if (value === null || value === undefined) return "";
+  if (typeof value === "object") return JSON.stringify(value);
+  return String(value);
+}
+
 function confidenceLabel(confidence: number): string {
   return `${Math.round(confidence * 100)}%`;
 }
 
+function correctionKey(recordIndex: number, columnKey: string): string {
+  return `${recordIndex}::${columnKey}`;
+}
+
+function sameValue(left: unknown, right: unknown): boolean {
+  if (left === right) return true;
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+function parseEditedValue(raw: string, dataType?: string): unknown {
+  const trimmed = raw.trim();
+  if (trimmed === "") return null;
+
+  if (dataType === "integer") {
+    const parsed = Number(trimmed.split(",").join(""));
+    if (!Number.isFinite(parsed) || !Number.isInteger(parsed)) {
+      throw new Error("請輸入整數");
+    }
+    return parsed;
+  }
+
+  if (dataType === "number") {
+    const parsed = Number(trimmed.split(",").join(""));
+    if (!Number.isFinite(parsed)) {
+      throw new Error("請輸入有效數字");
+    }
+    return parsed;
+  }
+
+  if (dataType === "boolean") {
+    const normalized = trimmed.toLowerCase();
+    if (["true", "1", "yes", "是"].includes(normalized)) return true;
+    if (["false", "0", "no", "否"].includes(normalized)) return false;
+    throw new Error("請輸入 true/false、是/否或 1/0");
+  }
+
+  return raw;
+}
+
 export function DatasetReviewPanel({
   dataset,
-  lowConfidenceThreshold = 0.85,
+  lowConfidenceThreshold = 0.90,
+  corrections = [],
+  onCorrectionsChange,
+  disabled = false,
 }: DatasetReviewPanelProps) {
+  const [editingCell, setEditingCell] = useState<string | null>(null);
+  const [draftValue, setDraftValue] = useState("");
+  const [editError, setEditError] = useState<string | null>(null);
+
   const columnKeys =
     dataset.columns.length > 0
       ? dataset.columns.map((column) => column.key)
@@ -26,6 +85,66 @@ export function DatasetReviewPanel({
 
   const visibleRecords = dataset.records.slice(0, 30);
   const hiddenCount = Math.max(0, dataset.records.length - visibleRecords.length);
+  const editable = Boolean(onCorrectionsChange) && !disabled;
+
+  function findCorrection(recordIndex: number, columnKey: string) {
+    return corrections.find(
+      (item) => item.record_index === recordIndex && item.column_key === columnKey
+    );
+  }
+
+  function beginEdit(recordIndex: number, columnKey: string, value: unknown) {
+    if (!editable) return;
+    setEditingCell(correctionKey(recordIndex, columnKey));
+    setDraftValue(editableValue(value));
+    setEditError(null);
+  }
+
+  function cancelEdit() {
+    setEditingCell(null);
+    setDraftValue("");
+    setEditError(null);
+  }
+
+  function saveEdit(recordIndex: number, columnKey: string, originalValue: unknown) {
+    if (!onCorrectionsChange) return;
+
+    const column = dataset.columns.find((item) => item.key === columnKey);
+    try {
+      const correctedValue = parseEditedValue(draftValue, column?.data_type);
+      const remaining = corrections.filter(
+        (item) => !(item.record_index === recordIndex && item.column_key === columnKey)
+      );
+
+      if (sameValue(correctedValue, originalValue)) {
+        onCorrectionsChange(remaining);
+      } else {
+        onCorrectionsChange([
+          ...remaining,
+          {
+            record_index: recordIndex,
+            column_key: columnKey,
+            corrected_value: correctedValue,
+            note: "使用者於人工資料確認頁修正",
+          },
+        ]);
+      }
+
+      cancelEdit();
+    } catch (error) {
+      setEditError(error instanceof Error ? error.message : "輸入格式不正確");
+    }
+  }
+
+  function resetCorrection(recordIndex: number, columnKey: string) {
+    if (!onCorrectionsChange) return;
+    onCorrectionsChange(
+      corrections.filter(
+        (item) => !(item.record_index === recordIndex && item.column_key === columnKey)
+      )
+    );
+    cancelEdit();
+  }
 
   return (
     <div className="rounded-2xl border border-gray-200 bg-white shadow-sm">
@@ -41,6 +160,11 @@ export function DatasetReviewPanel({
             <p className="mt-1 text-sm text-gray-500">
               {dataset.row_count} 列 × {dataset.column_count} 欄 · {dataset.source_kind}
             </p>
+            {editable && (
+              <p className="mt-2 text-xs font-medium text-gray-500">
+                可點擊任一資料格人工修正；系統只會送出實際修改過的格子。
+              </p>
+            )}
           </div>
 
           <div className="text-right">
@@ -54,6 +178,11 @@ export function DatasetReviewPanel({
             >
               {confidenceLabel(dataset.confidence)}
             </p>
+            {corrections.length > 0 && (
+              <p className="mt-1 text-xs font-semibold text-emerald-600">
+                已人工修改 {corrections.length} 格
+              </p>
+            )}
           </div>
         </div>
 
@@ -101,28 +230,119 @@ export function DatasetReviewPanel({
                 </td>
                 {columnKeys.map((key) => {
                   const dataValue = record.values[key];
+                  const originalValue = dataValue?.value ?? dataValue?.raw_value;
                   const confidence = dataValue?.confidence ?? record.confidence;
                   const needsReview =
                     dataValue?.requires_human_review === true ||
                     record.requires_human_review ||
                     confidence < lowConfidenceThreshold;
+                  const correction = findCorrection(record.record_index, key);
+                  const shownValue = correction ? correction.corrected_value : originalValue;
+                  const cellKey = correctionKey(record.record_index, key);
+                  const isEditing = editingCell === cellKey;
 
                   return (
                     <td
-                      key={`${record.record_index}-${key}`}
+                      key={cellKey}
                       className={`border-b border-gray-100 px-4 py-3 align-top ${
-                        needsReview ? "bg-amber-50/80" : ""
+                        correction
+                          ? "bg-emerald-50/80"
+                          : needsReview
+                            ? "bg-amber-50/80"
+                            : ""
                       }`}
                     >
-                      <div className="min-w-[110px]">
-                        <p className="font-medium text-gray-800">
-                          {displayValue(dataValue?.value ?? dataValue?.raw_value)}
-                        </p>
-                        {needsReview && (
+                      <div className="min-w-[140px]">
+                        {isEditing ? (
+                          <div>
+                            <input
+                              autoFocus
+                              value={draftValue}
+                              disabled={disabled}
+                              onChange={(event) => {
+                                setDraftValue(event.target.value);
+                                setEditError(null);
+                              }}
+                              onKeyDown={(event) => {
+                                if (event.key === "Enter") {
+                                  event.preventDefault();
+                                  saveEdit(record.record_index, key, originalValue);
+                                }
+                                if (event.key === "Escape") {
+                                  event.preventDefault();
+                                  cancelEdit();
+                                }
+                              }}
+                              className={`w-full rounded-md border bg-white px-2.5 py-2 text-sm font-medium text-gray-900 outline-none focus:ring-2 ${
+                                editError
+                                  ? "border-red-400 focus:border-red-500 focus:ring-red-500/15"
+                                  : "border-red-300 focus:border-red-500 focus:ring-red-500/15"
+                              }`}
+                            />
+                            {editError && (
+                              <p className="mt-1 text-[11px] font-semibold text-red-600">
+                                {editError}
+                              </p>
+                            )}
+                            <div className="mt-2 flex gap-2">
+                              <button
+                                type="button"
+                                onClick={() => saveEdit(record.record_index, key, originalValue)}
+                                className="rounded-md bg-red-600 px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-red-700"
+                              >
+                                套用
+                              </button>
+                              <button
+                                type="button"
+                                onClick={cancelEdit}
+                                className="rounded-md border border-gray-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-gray-600 hover:bg-gray-50"
+                              >
+                                取消
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <button
+                            type="button"
+                            disabled={!editable}
+                            onClick={() => beginEdit(record.record_index, key, shownValue)}
+                            className={`group w-full rounded-md text-left ${
+                              editable ? "cursor-pointer hover:ring-2 hover:ring-red-500/15" : "cursor-default"
+                            }`}
+                            title={editable ? "點擊修改此資料格" : undefined}
+                          >
+                            <span className="flex items-start justify-between gap-2 px-1 py-0.5">
+                              <span className={`font-medium ${correction ? "text-emerald-800" : "text-gray-800"}`}>
+                                {displayValue(shownValue)}
+                              </span>
+                              {editable && (
+                                <span className="text-xs text-gray-300 opacity-0 transition group-hover:opacity-100">
+                                  ✎
+                                </span>
+                              )}
+                            </span>
+                          </button>
+                        )}
+
+                        {correction ? (
+                          <div className="mt-1 flex items-center justify-between gap-2">
+                            <p className="text-[11px] font-semibold text-emerald-600">
+                              ✓ 已人工修改 · 原值 {displayValue(originalValue)}
+                            </p>
+                            <button
+                              type="button"
+                              disabled={disabled}
+                              onClick={() => resetCorrection(record.record_index, key)}
+                              className="text-[11px] font-semibold text-gray-400 hover:text-gray-700 disabled:cursor-not-allowed"
+                            >
+                              還原
+                            </button>
+                          </div>
+                        ) : needsReview ? (
                           <p className="mt-1 text-[11px] font-semibold text-amber-600">
                             ⚠ {confidenceLabel(confidence)} confidence
                           </p>
-                        )}
+                        ) : null}
                       </div>
                     </td>
                   );

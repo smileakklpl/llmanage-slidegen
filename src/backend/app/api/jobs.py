@@ -240,7 +240,7 @@ async def get_job_status(job_id: str) -> JobStatusResponse:
 
 @router.get("/{job_id}/review", response_model=JobReviewResponse)
 async def get_job_review(job_id: str) -> JobReviewResponse:
-    """Return persisted datasets plus source previews for human review."""
+    """Return all persisted datasets plus source previews for pre-generation review."""
     try:
         service = get_job_service()
         storage = get_object_storage()
@@ -300,7 +300,7 @@ async def review_job_dataset(
 
 @router.post("/{job_id}/resume", response_model=ResumeJobResponse, status_code=202)
 async def resume_job(job_id: str) -> ResumeJobResponse:
-    """Resume a paused job after all datasets are approved."""
+    """Resume a paused job after all datasets are confirmed."""
     try:
         job = await get_job_service().resume_job(job_id)
     except LookupError as error:
