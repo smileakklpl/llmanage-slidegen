@@ -14,7 +14,7 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from functools import lru_cache
 from pathlib import Path
 
@@ -161,6 +161,23 @@ OPENAI_COMPATIBLE_PROVIDERS = frozenset(
     {"openai", "google", "vllm", "ollama", "litellm"}
 )
 
+#: 明確需要 API key 的公開 provider；地端端點不因沒有 key 而失敗。
+API_KEY_REQUIRED_PROVIDERS = frozenset({"openai", "google"})
+
+#: ``local_only`` 僅允許可由部署者控制的本地推論後端。
+LLM_PRIVACY_MODES = frozenset({"standard", "local_only"})
+LOCAL_ONLY_PROVIDERS = frozenset({"ollama", "vllm"})
+_LOCAL_ENDPOINT_HOSTS = frozenset(
+    {"localhost", "host.docker.internal", "ollama", "vllm"}
+)
+
+
+def local_only_requested() -> bool:
+    """Return whether this process explicitly requires fail-closed local LLM use."""
+    return (os.getenv("LLM_PRIVACY_MODE") or "standard").strip().lower() == (
+        "local_only"
+    )
+
 
 @dataclass(frozen=True)
 class LLMSettings:
@@ -189,6 +206,8 @@ class LLMSettings:
     json_mode: str = "native"
     #: ``native`` 使用 system role；``merge`` 併入首個 user 訊息
     system_mode: str = "native"
+    #: ``local_only`` 會拒絕任何雲端 provider 或未允許的 endpoint。
+    privacy_mode: str = "standard"
 
     def model_for(self, stage: str) -> str:
         """
@@ -292,6 +311,128 @@ def _read_float(name: str, default: float) -> float:
         raise ValueError(f"環境變數 {name} 必須是數字") from error
 
 
+def endpoint_host(base_url: str | None) -> str | None:
+    """Return only the endpoint hostname; never expose URL credentials or paths."""
+    if not base_url:
+        return None
+
+    from urllib.parse import urlsplit
+
+    return urlsplit(base_url).hostname
+
+
+def _pin_local_only_endpoint(provider: str, base_url: str | None) -> str:
+    """Validate and pin a local endpoint so the SDK cannot re-resolve DNS."""
+    import ipaddress
+    import socket
+    from urllib.parse import urlsplit, urlunsplit
+
+    if provider not in LOCAL_ONLY_PROVIDERS:
+        raise ValueError(
+            "LLM_PRIVACY_MODE=local_only 僅允許 "
+            f"{sorted(LOCAL_ONLY_PROVIDERS)}，實際為 {provider!r}"
+        )
+    if not base_url:
+        raise ValueError("LLM_PRIVACY_MODE=local_only 必須設定 LLM_BASE_URL")
+
+    parsed = urlsplit(base_url)
+    host = (parsed.hostname or "").lower()
+    if parsed.scheme not in {"http", "https"} or not host:
+        raise ValueError("LLM_BASE_URL 必須是含 http/https scheme 的完整 URL")
+    if parsed.username or parsed.password:
+        raise ValueError("LLM_BASE_URL 不可內嵌帳號或密碼")
+    if parsed.query or parsed.fragment:
+        raise ValueError("local_only 的 LLM_BASE_URL 不可含 query 或 fragment")
+
+    allowlist = {
+        item.strip().lower()
+        for item in (os.getenv("LLM_LOCAL_ENDPOINT_ALLOWLIST") or "").split(",")
+        if item.strip()
+    }
+
+    def is_safe_address(value: str) -> bool:
+        address = ipaddress.ip_address(value)
+        if address.is_loopback:
+            return True
+        return bool(
+            not address.is_unspecified
+            and not address.is_multicast
+            and not address.is_reserved
+            and (address.is_private or address.is_link_local)
+        )
+
+    try:
+        if not is_safe_address(host):
+            raise ValueError(f"local_only 拒絕公開 LLM endpoint：{host!r}")
+        # Literal IPs cannot be DNS-rebound.
+        return urlunsplit(
+            (parsed.scheme, parsed.netloc, parsed.path, "", "")
+        )
+    except ValueError:
+        allowed_hostnames = _LOCAL_ENDPOINT_HOSTS | allowlist
+        if host not in allowed_hostnames:
+            raise ValueError(
+                "local_only 拒絕未列入 LLM_LOCAL_ENDPOINT_ALLOWLIST 的 hostname："
+                f"{host!r}"
+            ) from None
+
+    try:
+        addresses = {
+            item[4][0]
+            for item in socket.getaddrinfo(
+                host, parsed.port, type=socket.SOCK_STREAM
+            )
+        }
+    except OSError as error:
+        raise ValueError(
+            f"local_only 無法解析 allowlist hostname：{host!r}"
+        ) from error
+    if not addresses or not all(is_safe_address(item) for item in addresses):
+        raise ValueError(
+            f"local_only hostname 解析到非私有位址：{host!r}"
+        )
+    if parsed.scheme == "https":
+        raise ValueError(
+            "local_only 的 HTTPS hostname 無法在 DNS pinning 後安全驗證；"
+            "請使用受控 HTTP 內網端點或憑證涵蓋的私有 IP"
+        )
+
+    # Use a verified address in the actual SDK URL. The OpenAI client therefore
+    # cannot perform a second DNS lookup and escape to a public destination.
+    pinned_host = sorted(addresses, key=lambda value: (":" in value, value))[0]
+    authority_host = f"[{pinned_host}]" if ":" in pinned_host else pinned_host
+    authority = (
+        f"{authority_host}:{parsed.port}"
+        if parsed.port is not None
+        else authority_host
+    )
+    return urlunsplit((parsed.scheme, authority, parsed.path, "", ""))
+
+
+def validate_llm_settings(settings: LLMSettings) -> LLMSettings:
+    """Validate injected settings too, so callers cannot bypass privacy mode."""
+    environment_mode = (
+        os.getenv("LLM_PRIVACY_MODE") or "standard"
+    ).strip().lower()
+    if environment_mode == "local_only" and settings.privacy_mode != "local_only":
+        raise ValueError(
+            "程序環境已啟用 LLM_PRIVACY_MODE=local_only；"
+            "禁止注入 standard settings 降級隱私政策"
+        )
+    if settings.privacy_mode not in LLM_PRIVACY_MODES:
+        raise ValueError(
+            "privacy_mode 只能是 "
+            f"{sorted(LLM_PRIVACY_MODES)}，實際為 {settings.privacy_mode!r}"
+        )
+    if settings.privacy_mode == "local_only":
+        pinned_url = _pin_local_only_endpoint(
+            settings.provider, settings.base_url
+        )
+        if pinned_url != settings.base_url:
+            return replace(settings, base_url=pinned_url)
+    return settings
+
+
 def load_llm_settings() -> LLMSettings:
     """
     從環境變數組裝 LLM 設定。
@@ -300,6 +441,7 @@ def load_llm_settings() -> LLMSettings:
     |---|---|---|
     | ``LLM_PROVIDER`` | ``openai`` / ``google`` / ``bedrock`` / ``ollama`` / ``vllm`` / ``litellm`` | ``openai`` |
     | ``LLM_BASE_URL`` | OpenAI 相容端點；provider 有捷徑時可省略 | 依 provider |
+    | ``LLM_LOCAL_API_KEY`` | 僅供受控內網 vLLM 認證；Ollama 永不帶 credential | 空 |
     | ``LLM_MODEL_DEFAULT`` | 全案預設模型 | ``gpt-4o-mini`` |
     | ``LLM_MODEL_INTENT`` / ``LLM_MODEL_WRITER`` / ``LLM_MODEL_WRITER_FALLBACK`` / ``LLM_MODEL_WRITER_KEYPAGES`` / ``LLM_MODEL_MAILER`` / ``LLM_MODEL_CHART`` / ``LLM_MODEL_REVIEWER`` | per-stage 模型路由 | 回退 default |
     | ``LLM_MAX_PARALLEL`` | 敘事平行度 | 16（下限 4） |
@@ -307,20 +449,34 @@ def load_llm_settings() -> LLMSettings:
     | ``LLM_TOOL_MODE`` | ``native`` / ``json`` | 依模型自動判斷 |
     | ``LLM_JSON_MODE`` | ``native`` / ``prompt`` | 依模型自動判斷 |
     | ``LLM_SYSTEM_MODE`` | ``native`` / ``merge`` | 依模型自動判斷 |
+    | ``LLM_PRIVACY_MODE`` | ``standard`` / ``local_only`` | ``standard`` |
+    | ``LLM_LOCAL_ENDPOINT_ALLOWLIST`` | local_only 額外允許的內網 hostname（逗號分隔） | 空 |
     | ``AWS_REGION`` | Bedrock 用，必須顯式指定 | 無預設 |
     """
     provider = (os.getenv("LLM_PROVIDER") or "openai").strip().lower()
 
     base_url = os.getenv("LLM_BASE_URL") or PROVIDER_BASE_URLS.get(provider)
-
-    # Bedrock 走 AWS SDK 簽章，不需要 API key；其餘 provider 才需要。
-    api_key = load_credential(
-        "LLM_API_KEY",
-        "OPENAI_API_KEY",
-        "GOOGLE_API_KEY",
-        "GEMINI_API_KEY",
-        required=False,
+    privacy_mode = _read_mode(
+        "LLM_PRIVACY_MODE", "standard", set(LLM_PRIVACY_MODES)
     )
+    if privacy_mode == "local_only":
+        base_url = _pin_local_only_endpoint(provider, base_url)
+
+    # 地端 provider 不得誤用 LLM_API_KEY、OPENAI/Google key 或 key file。
+    # Ollama 固定無 credential；受控內網 vLLM 若需認證，使用獨立變數。
+    if provider == "ollama":
+        api_key = None
+    elif provider == "vllm":
+        local_key = os.getenv("LLM_LOCAL_API_KEY")
+        api_key = local_key.strip() if local_key and local_key.strip() else None
+    else:
+        api_key = load_credential(
+            "LLM_API_KEY",
+            "OPENAI_API_KEY",
+            "GOOGLE_API_KEY",
+            "GEMINI_API_KEY",
+            required=False,
+        )
 
     models = {
         "default": os.getenv("LLM_MODEL_DEFAULT") or "gpt-4o-mini",
@@ -364,6 +520,7 @@ def load_llm_settings() -> LLMSettings:
             capability_defaults["system_mode"],
             {"native", "merge"},
         ),
+        privacy_mode=privacy_mode,
     )
 
 

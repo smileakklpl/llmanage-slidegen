@@ -216,6 +216,9 @@ def _write_generation_manifest(
             "mode": "fake",
             "provider": "fake",
             "aws_region": None,
+            "privacy_mode": "not_applicable",
+            "endpoint_host": None,
+            "cloud_provider_allowed": False,
             "configured_stage_models": {
                 "sections": "fake",
                 "charts": "fake",
@@ -227,13 +230,19 @@ def _write_generation_manifest(
     else:
         try:
             settings = config.load_llm_settings()
-        except Exception as error:  # noqa: BLE001 - required mode must deliver
-            if generation_policy != "required":
+        except Exception as error:  # noqa: BLE001 - required mode may degrade
+            if generation_policy != "required" or config.local_only_requested():
+                # Privacy configuration errors must remain fatal. Otherwise a
+                # local-only deployment could look successful while never using
+                # its approved local model endpoint.
                 raise
             llm_payload = {
                 "mode": "configuration_unavailable",
                 "provider": None,
                 "aws_region": None,
+                "privacy_mode": None,
+                "endpoint_host": None,
+                "cloud_provider_allowed": None,
                 "configured_stage_models": {},
                 "configuration_error_type": type(error).__name__,
             }
@@ -246,6 +255,9 @@ def _write_generation_manifest(
                     if settings.provider == "bedrock"
                     else None
                 ),
+                "privacy_mode": settings.privacy_mode,
+                "endpoint_host": config.endpoint_host(settings.base_url),
+                "cloud_provider_allowed": settings.privacy_mode != "local_only",
                 "configured_stage_models": {
                     "sections": settings.model_for("intent"),
                     "charts": settings.model_for("chart"),
@@ -1185,16 +1197,23 @@ def check_llm() -> int:
     print("LLM 設定檢查")
     print("=" * 68)
     print(f"  provider     : {settings.provider}")
-    print(f"  base_url     : {settings.base_url or '(SDK 預設)'}")
+    print(f"  privacy_mode : {settings.privacy_mode}")
+    print(
+        f"  endpoint_host: "
+        f"{config.endpoint_host(settings.base_url) or '(SDK default)'}"
+    )
     print(f"  model        : {settings.model_for('default')}")
     print(f"  api_key      : {'已載入' if settings.api_key else '未設定'}")
     print(f"  tool_mode    : {settings.tool_mode}")
     print(f"  json_mode    : {settings.json_mode}")
     print(f"  system_mode  : {settings.system_mode}")
 
-    if settings.provider != "bedrock" and not settings.api_key:
+    if (
+        settings.provider in config.API_KEY_REQUIRED_PROVIDERS
+        and not settings.api_key
+    ):
         print(
-            f"\n找不到金鑰。請設定 LLM_API_KEY 環境變數，"
+            f"\n{settings.provider} 需要金鑰。請設定 LLM_API_KEY 環境變數，"
             f"或把金鑰寫入 {config.DEFAULT_API_KEY_FILE}"
         )
         return 1
@@ -1213,8 +1232,8 @@ def check_llm() -> int:
             schema,
             system_prompt="你是一個測試用的 JSON 產生器。",
         )
-    except Exception as error:  # noqa: BLE001 - CLI 要顯示所有失敗原因
-        print(f"呼叫失敗：{type(error).__name__}: {error}")
+    except Exception as error:  # noqa: BLE001 - never echo endpoint/request secrets
+        print(f"呼叫失敗：{type(error).__name__}（詳細內容已遮罩）")
         return 1
 
     print(f"回應：{result}")
@@ -1564,6 +1583,7 @@ def run(
     stop_after: str = STAGE_SEQUENCE[-1],
     dump_dir: Path | None = None,
     deck_title: str | None = None,
+    revision_intent: dict[str, Any] | None = None,
     template_path: str | Path | None = None,
     generation_policy: str | None = None,
     generation_deadline_seconds: float | None = None,
@@ -1602,8 +1622,10 @@ def run(
 
     try:
         llm_max_parallel = config.load_llm_settings().max_parallel
-    except Exception:  # required mode still delivers via deterministic fallbacks
-        if effective_policy != "required":
+    except Exception:  # required mode may use deterministic fallbacks
+        if effective_policy != "required" or config.local_only_requested():
+            # local_only is a privacy boundary, not an availability hint. An
+            # invalid provider or endpoint must fail before any generation.
             raise
         llm_max_parallel = 1
 
@@ -1870,6 +1892,42 @@ def run(
         }
     )
     plan = section_planner.SectionPlanResult.from_dict(sections_payload)
+
+    if revision_intent is not None:
+        validated_revision = stage_contracts.RevisionIntentContract.model_validate(
+            revision_intent
+        )
+        normalized_page_revisions: list[dict[str, Any]] = []
+        for requested in validated_revision.page_revisions:
+            matching_sections = [
+                section
+                for section in plan.sections
+                if section.title == requested.target_page_title
+            ]
+            if len(matching_sections) != 1:
+                raise ValueError(
+                    "revision 目標頁標題在新規劃中不存在或不唯一："
+                    f"{requested.target_page_title!r}"
+                )
+            current_section = matching_sections[0]
+            normalized = requested.model_dump(mode="json")
+            normalized["target_page_number"] = current_section.page_number
+            normalized_page_revisions.append(normalized)
+
+        intent_spec = {
+            **intent_spec,
+            "page_revisions": normalized_page_revisions,
+        }
+        sections_payload = stage_contracts.section_stage_payload(
+            {**sections_payload, "intent_spec": intent_spec}
+        )
+        plan = section_planner.SectionPlanResult.from_dict(sections_payload)
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest["request"]["resolved_intent"] = intent_spec
+        manifest_path.write_text(
+            json.dumps(manifest, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
 
     current_chapter: str | None = None
 
@@ -2497,6 +2555,11 @@ def run_from_contract(payload: dict[str, Any]) -> int:
             Path(validated.dump_dir) if validated.dump_dir is not None else None
         ),
         deck_title=validated.deck_title,
+        revision_intent=(
+            validated.revision_intent.model_dump(mode="json")
+            if validated.revision_intent is not None
+            else None
+        ),
         template_path=validated.template_path,
         generation_policy=validated.generation_policy,
         generation_deadline_seconds=validated.generation_deadline_seconds,

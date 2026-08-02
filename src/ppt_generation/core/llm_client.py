@@ -192,13 +192,14 @@ def _invoke_backend_attempt(
             tool_schemas,
             temperature,
         )
-    except Exception:
-        logger.exception(
+    except Exception as error:
+        logger.error(
             "llm_attempt_end call_id=%s stage=%s model=%s status=error "
-            "duration_ms=%.1f",
+            "error_type=%s duration_ms=%.1f",
             call_id,
             stage,
             model,
+            type(error).__name__,
             (time.monotonic() - started) * 1000.0,
         )
         raise
@@ -219,8 +220,9 @@ def _invoke_backend_attempt(
 def _resolve_settings(
     settings: config.LLMSettings | None,
 ) -> config.LLMSettings:
-    """Resolve settings while preserving strict-mode configuration errors."""
-    return settings or config.load_llm_settings()
+    """Resolve and validate settings while preserving strict configuration errors."""
+    resolved = settings or config.load_llm_settings()
+    return config.validate_llm_settings(resolved)
 
 
 def _cap_request_timeout(
@@ -443,7 +445,7 @@ def _call_openai_compatible(
     回傳原始 message dict，交由上層解析成 JSON 或 ToolCall。
     """
     try:
-        from openai import OpenAI
+        from openai import DefaultHttpxClient, OpenAI
     except ImportError as error:
         raise LLMError(
             "尚未安裝 openai 套件。請執行 "
@@ -456,6 +458,16 @@ def _call_openai_compatible(
             f"或將金鑰寫入 {config.DEFAULT_API_KEY_FILE}"
         )
 
+    client_options: dict[str, Any] = {}
+    if settings.privacy_mode == "local_only":
+        # A pinned private IP is insufficient if httpx can use ambient proxies
+        # or follow a redirect to a public host. Keep local-only transport on
+        # the validated direct endpoint for every request.
+        client_options["http_client"] = DefaultHttpxClient(
+            trust_env=False,
+            follow_redirects=False,
+        )
+
     client = OpenAI(
         # 地端 vLLM／Ollama 通常不驗證金鑰，但 SDK 要求非空值。
         api_key=settings.api_key or "not-required",
@@ -463,6 +475,7 @@ def _call_openai_compatible(
         timeout=settings.timeout_seconds,
         # 外層 _with_retry 才能在每次 attempt 前重新計算 monotonic deadline。
         max_retries=0,
+        **client_options,
     )
 
     request: dict[str, Any] = {
@@ -480,7 +493,10 @@ def _call_openai_compatible(
         # 部分模型（如 Gemma）不支援 response_format，此時改由提示詞要求 JSON。
         request["response_format"] = {"type": "json_object"}
 
-    response = client.chat.completions.create(**request)
+    try:
+        response = client.chat.completions.create(**request)
+    finally:
+        client.close()
     message = response.choices[0].message
 
     return {
@@ -709,11 +725,11 @@ def _with_retry(
                 else backoff_base * (2**attempt) + random.uniform(0, 0.3)
             )
             logger.warning(
-                "LLM 呼叫失敗（第 %d/%d 次），%.1f 秒後重試：%s",
+                "LLM 呼叫失敗（第 %d/%d 次），%.1f 秒後重試；error_type=%s",
                 attempt + 1,
                 max_retries + 1,
                 delay,
-                error,
+                type(error).__name__,
             )
 
         if (
@@ -726,7 +742,10 @@ def _with_retry(
 
         time.sleep(delay)
 
-    raise LLMError(f"LLM 呼叫重試 {max_retries + 1} 次仍失敗：{last_error}")
+    error_type = type(last_error).__name__ if last_error is not None else "unknown"
+    raise LLMError(
+        f"LLM 呼叫重試 {max_retries + 1} 次仍失敗；error_type={error_type}"
+    ) from None
 
 
 # ---------------------------------------------------------------------------

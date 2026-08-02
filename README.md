@@ -1,4 +1,4 @@
-# llmanage-slidegen
+# llmanage-slidegen — Local Private Edition
 
 「智匯數據簡報神器」把一段自然語言需求與一份 Excel 報表，轉成**圖表可右鍵編輯的 PowerPoint**、一份與圖表逐頁對應的稽核 Excel，以及一份數值驗證報告。主要應用場景是金融管理報表，但 ingestion 與確定性 metric engine 不以金融分類為輸入門檻（另有餐飲、旅遊、股價的跨領域測試）。
 
@@ -9,6 +9,8 @@
 - 架構與資料流程 → [`docs/系統架構與資料流程.md`](docs/系統架構與資料流程.md)
 
 ---
+
+> 本文件位於功能分支 `feature/local-private-agent-workspace`。此分支不取代 AWS `main` 版本；它在相同正式 pipeline 上加入 Ollama/vLLM local-only 推論與檔案契約式 agent workspace。完整說明見 [`docs/Local_Private_Edition.md`](docs/Local_Private_Edition.md)。
 
 ## 正式流程
 
@@ -28,6 +30,47 @@ FastAPI POST /api/v1/jobs/generate
 產品碼只有這一條 generation 路徑。**LLM 僅負責結構化意圖、敘事與摘要**；所有數值、排名、成長率、預測與圖表資料均由確定性程式計算。圖表一律透過 `python-pptx` 的 `add_chart()` 建立，因此保留 PowerPoint 內嵌 workbook（右鍵「編輯資料」可開啟）。
 
 ---
+
+## Local Private Edition 快速開始
+
+本分支把兩個模式放在同一套正式生成邊界上：
+
+- **Local Runtime**：既有 `llm_client` 直接呼叫 Ollama/vLLM，`local_only` 會拒絕雲端 provider 與未允許 endpoint。
+- **Agent Workspace**：模仿 open-slide，以 `AGENTS.md`、skill、`request.json`、JSON Schema 與 `status/current.json` 協作；agent 不能直接生成 PPT 或數值。
+
+Windows PowerShell：
+
+```powershell
+# Ollama 與模型須事先安裝
+.\scripts\local_private.ps1 check -Model "<installed-model>"
+
+# 直接走正式 pipeline
+.\scripts\local_private.ps1 generate `
+  -Model "<installed-model>" `
+  -Excel .\fixtures\data\fsc_114_workbook.xlsx
+
+# 建立 open-slide 式 agent workspace
+.\scripts\local_private.ps1 agent-init `
+  -Excel .\fixtures\data\fsc_114_workbook.xlsx `
+  -Workspace .\agent-workspaces\demo
+
+# 初次生成
+.\scripts\local_private.ps1 agent-validate -Workspace .\agent-workspaces\demo
+.\scripts\local_private.ps1 agent-run -Workspace .\agent-workspaces\demo
+
+# Chat 中的「這一頁」由 current-page cursor 決定
+.\scripts\local_private.ps1 agent-select -Workspace .\agent-workspaces\demo -Page 3
+
+# 依 schema 編輯 revision.json 後，完整重跑正式 pipeline + T1
+.\scripts\local_private.ps1 agent-revise -Workspace .\agent-workspaces\demo
+
+# 不改 intent，以 active run + 鎖定輸入全量重生
+.\scripts\local_private.ps1 agent-refresh -Workspace .\agent-workspaces\demo
+```
+
+VS Code/Kiro Chat 的整合不是直接操作 PowerPoint，而是讓 Copilot、Codex、Claude 或 Kiro 依各自 instructions 修改 `request.json` / `revision.json`，再由上述命令產生新的 immutable run。相關入口為 `.github/copilot-instructions.md`、`AGENTS.md`、`CLAUDE.md`、`.claude/skills/` 與 `.kiro/skills/`。
+
+Kiro、Copilot、Claude 或 Codex 安裝在本機不代表推論使用本地 Ollama。敏感 workspace 只能交給已證實且政策允許的本地 coding agent。完整隱私邊界、current-page/revision contract、Docker 操作與 chat prompts 見 [`docs/Local_Private_Edition.md`](docs/Local_Private_Edition.md)。
 
 ## 快速開始
 
@@ -438,8 +481,10 @@ fixtures/data/                  可重現的公開資料
 tests/                          core / ppt_generation 測試
 src/backend/tests/              backend 專屬測試
 scripts/verify_all.py           合併前唯一驗收入口
-tools/                          公開月報轉檔與 full-pipeline 模型比較
-docs/                           規格與設計決策
+scripts/local_private.ps1       Local Private Edition 統一操作入口
+tools/                          公開月報轉檔、模型比較與 agent workspace
+.agents/skills/                 Provider-neutral coding-agent 操作規則
+docs/                           規格、設計決策與 Local Private Edition 指南
 outputs/                        使用者保留成果
 ```
 

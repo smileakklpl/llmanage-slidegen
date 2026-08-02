@@ -135,16 +135,25 @@ def build_prompt(
 
     if intent_spec:
         preferences = intent_spec.get("chart_preferences") or {}
+        page_revision = next(
+            (
+                item
+                for item in intent_spec.get("page_revisions") or []
+                if item.get("target_page_number") == section.page_number
+                and item.get("target_page_title") == section.title
+            ),
+            None,
+        )
+        preferred_types = list(preferences.get("preferred_types") or [])
+        if page_revision and page_revision.get("preferred_chart_type"):
+            preferred_types = [page_revision["preferred_chart_type"]]
         parts.extend(
             [
                 "",
                 "## 已驗證的呈現需求",
                 f"簡報目的：{intent_spec.get('objective') or '依資料提供管理洞察'}",
                 "偏好圖表："
-                + json.dumps(
-                    preferences.get("preferred_types") or [],
-                    ensure_ascii=False,
-                ),
+                + json.dumps(preferred_types, ensure_ascii=False),
                 "避免圖表："
                 + json.dumps(
                     preferences.get("avoided_types") or [],
@@ -154,6 +163,14 @@ def build_prompt(
                 "不相容時請選擇合法圖表，不得拒絕產出。",
             ]
         )
+        if page_revision:
+            parts.extend(
+                [
+                    "",
+                    "## 本頁 revision（只影響呈現，不得產生或改寫數值）",
+                    page_revision["instruction"],
+                ]
+            )
 
     if previous_errors:
         parts.extend(
@@ -235,9 +252,22 @@ def plan_chart_for_section(
 def _deterministic_chart_type(
     axis_kind: str,
     intent_spec: dict[str, Any] | None,
+    section: SectionPlan | None = None,
 ) -> str:
     preferences = (intent_spec or {}).get("chart_preferences") or {}
     preferred = list(preferences.get("preferred_types") or [])
+    if section is not None:
+        page_revision = next(
+            (
+                item
+                for item in (intent_spec or {}).get("page_revisions") or []
+                if item.get("target_page_number") == section.page_number
+                and item.get("target_page_title") == section.title
+            ),
+            None,
+        )
+        if page_revision and page_revision.get("preferred_chart_type"):
+            preferred = [page_revision["preferred_chart_type"], *preferred]
     avoided = set(preferences.get("avoided_types") or [])
     compatible = (
         {"line", "column", "bar", "table"}
@@ -280,6 +310,7 @@ def build_deterministic_chart(
         chart_type = _deterministic_chart_type(
             metric.axis_kind,
             intent_spec,
+            section,
         )
         plan = ChartPlan(
             slide_title=section.title,

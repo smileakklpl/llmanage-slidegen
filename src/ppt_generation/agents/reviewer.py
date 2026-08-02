@@ -415,6 +415,24 @@ def build_prompt(
                 "此區只供品質對齊；不得因需求描述不佳而拒絕合法頁面。",
             ]
         )
+        page_revision = next(
+            (
+                item
+                for item in intent_spec.get("page_revisions") or []
+                if item.get("target_page_number") == narrative.page_number
+                and item.get("target_page_title") == narrative.slide_title
+            ),
+            None,
+        )
+        if page_revision:
+            parts.extend(
+                [
+                    "",
+                    "## 本頁 revision 驗收要求",
+                    page_revision["instruction"],
+                    "只檢查呈現是否對齊；不得要求新增任何資料中不存在的數值。",
+                ]
+            )
 
     if metric.notes:
         parts.extend(

@@ -1,0 +1,25 @@
+# Local Private Edition override.
+# Ollama runs on the host; backend reaches it through host.docker.internal.
+# Usage: docker compose -f docker-compose.yml -f docker-compose.local.yml up --build
+services:
+  backend:
+    environment:
+      EMAIL_PROVIDER: mock
+      LLM_PROVIDER: ollama
+      LLM_BASE_URL: ${LLM_BASE_URL:-http://host.docker.internal:11434/v1}
+      LLM_API_KEY: ""
+      LLM_LOCAL_API_KEY: ${LLM_LOCAL_API_KEY:-}
+      LLM_PRIVACY_MODE: local_only
+      LLM_LOCAL_ENDPOINT_ALLOWLIST: ${LLM_LOCAL_ENDPOINT_ALLOWLIST:-host.docker.internal}
+      LLM_MODEL_DEFAULT: ${LLM_MODEL_DEFAULT:-qwen2.5:7b}
+      LLM_MODEL_INTENT: ${LLM_MODEL_INTENT:-}
+      LLM_MODEL_CHART: ${LLM_MODEL_CHART:-}
+      LLM_MODEL_WRITER: ${LLM_MODEL_WRITER:-}
+      LLM_MODEL_WRITER_FALLBACK: ${LLM_MODEL_WRITER_FALLBACK:-}
+      LLM_MODEL_REVIEWER: ${LLM_MODEL_REVIEWER:-}
+      LLM_TOOL_MODE: ${LLM_TOOL_MODE:-json}
+      LLM_JSON_MODE: ${LLM_JSON_MODE:-prompt}
+      LLM_SYSTEM_MODE: ${LLM_SYSTEM_MODE:-merge}
+      LLM_MAX_PARALLEL: ${LLM_MAX_PARALLEL:-4}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"

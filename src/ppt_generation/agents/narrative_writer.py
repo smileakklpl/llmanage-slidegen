@@ -246,6 +246,24 @@ def build_prompt(
                 "中性且可交付的預設寫法，不得拒絕產出，也不得自行加入數字。",
             ]
         )
+        page_revision = next(
+            (
+                item
+                for item in intent_spec.get("page_revisions") or []
+                if item.get("target_page_number") == section.page_number
+                and item.get("target_page_title") == section.title
+            ),
+            None,
+        )
+        if page_revision:
+            parts.extend(
+                [
+                    "",
+                    "## 本頁 revision（不得加入數字字面值）",
+                    page_revision["instruction"],
+                    "所有數值敘述仍只能引用本頁允許的 MetricStore placeholder。",
+                ]
+            )
 
     label_hints = _label_hints(chart)
 

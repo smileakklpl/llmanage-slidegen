@@ -54,3 +54,10 @@ src/frontend/.env
 
 # Local deployment settings and credentials
 .env
+
+# Local Private Edition agent jobs contain local paths, prompts and generated
+# artifacts. Keep them outside version control; the schema/skills remain tracked.
+agent-workspaces/
+
+# Local semantic-review reports are generated diagnostics, not product docs.
+semantic-review/

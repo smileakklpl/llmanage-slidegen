@@ -67,6 +67,8 @@ class RunRecord:
 @contextmanager
 def _model_environment(provider: str, model: str) -> Iterator[None]:
     updates = {"LLM_PROVIDER": provider}
+    if provider in {"ollama", "vllm"}:
+        updates["LLM_PRIVACY_MODE"] = "local_only"
     updates.update({name: model for name in MODEL_ENV_NAMES})
     previous = {name: os.environ.get(name) for name in updates}
 

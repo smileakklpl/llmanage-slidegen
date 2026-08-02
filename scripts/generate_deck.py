@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import sys
 from datetime import datetime
@@ -47,7 +48,8 @@ def _sections(value: str) -> list[str]:
 
 def _default_output(source: Path) -> Path:
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    return REPO_ROOT / "outputs" / f"{_slug(source.stem)}_bedrock_{stamp}"
+    provider = _slug(os.getenv("LLM_PROVIDER") or "llm")
+    return REPO_ROOT / "outputs" / f"{_slug(source.stem)}_{provider}_{stamp}"
 
 
 def _blocked_datasets(payload: dict) -> list[dict]:
@@ -105,7 +107,7 @@ def _parser() -> argparse.ArgumentParser:
         "--output-dir",
         type=Path,
         default=None,
-        help="輸出目錄；省略時自動寫入 outputs/<檔名>_bedrock_<時間>",
+        help="輸出目錄；省略時自動寫入 outputs/<檔名>_<provider>_<時間>",
     )
     parser.add_argument(
         "--policy",

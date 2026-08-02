@@ -140,6 +140,11 @@ def generate_deck(request: dict[str, Any]) -> GenerationResult:
         stop_after="verify",
         dump_dir=str(stage_dir),
         deck_title=validated.deck_title,
+        revision_intent=(
+            validated.revision_intent.model_dump(mode="json")
+            if validated.revision_intent is not None
+            else None
+        ),
         generation_policy=options.policy,
         generation_deadline_seconds=remaining_deadline,
         generation_render_reserve_seconds=render_reserve,

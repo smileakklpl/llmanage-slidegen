@@ -139,6 +139,40 @@ class NormalizedIngestionContract(BaseModel):
     errors: list[str] = Field(default_factory=list)
 
 
+class PageRevisionIntent(BaseModel):
+    """One page-scoped presentation request; it never carries metric values."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    target_page_number: int = Field(ge=1)
+    target_page_title: str = Field(min_length=1)
+    instruction: str = Field(min_length=1, max_length=16000)
+    preferred_chart_type: Literal[
+        "bar", "column", "line", "pie", "scatter", "combo", "table", "heatmap"
+    ] | None = None
+
+
+class RevisionIntent(BaseModel):
+    """Versioned request to regenerate selected pages through the full pipeline."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    contract_version: Literal["1.0"] = "1.0"
+    base_run_name: str = Field(
+        min_length=1,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$",
+    )
+    page_revisions: list[PageRevisionIntent] = Field(min_length=1)
+    preserve_unmentioned_pages: Literal[True] = True
+
+    @model_validator(mode="after")
+    def validate_unique_pages(self) -> RevisionIntent:
+        pages = [item.target_page_number for item in self.page_revisions]
+        if len(pages) != len(set(pages)):
+            raise ValueError("page_revisions 不得重複指定頁碼")
+        return self
+
+
 class GenerationRequest(BaseModel):
     """JSON boundary from core to the normalized generation pipeline.
 
@@ -156,6 +190,7 @@ class GenerationRequest(BaseModel):
     template_path: str | None = None
     sections: list[str] | None = None
     deck_title: str | None = None
+    revision_intent: RevisionIntent | None = None
     options: GenerationOptions = Field(default_factory=GenerationOptions)
     deadline_at_utc: datetime | None = None
 

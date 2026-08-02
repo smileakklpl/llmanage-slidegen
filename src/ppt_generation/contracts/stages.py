@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class SourceRefContract(BaseModel):
@@ -79,6 +79,7 @@ class PipelineRequestContract(BaseModel):
     ] = "verify"
     dump_dir: str | None = None
     deck_title: str | None = None
+    revision_intent: RevisionIntentContract | None = None
     generation_policy: Literal["strict", "required"]
     generation_deadline_seconds: float = Field(gt=0)
     generation_render_reserve_seconds: float = Field(ge=0)
@@ -96,6 +97,28 @@ class PipelineRequestContract(BaseModel):
                 "generation_render_reserve_seconds 必須小於 deadline"
             )
         return self
+
+
+class PageRevisionIntentContract(BaseModel):
+    """Page-scoped presentation intent; business values are forbidden."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    target_page_number: int = Field(ge=1)
+    target_page_title: str = Field(min_length=1)
+    instruction: str = Field(min_length=1, max_length=16000)
+    preferred_chart_type: Literal[
+        "bar", "column", "line", "pie", "scatter", "combo", "table", "heatmap"
+    ] | None = None
+
+
+class RevisionIntentContract(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    contract_version: Literal["1.0"] = "1.0"
+    base_run_name: str = Field(min_length=1)
+    page_revisions: list[PageRevisionIntentContract] = Field(min_length=1)
+    preserve_unmentioned_pages: Literal[True] = True
 
 
 class ChartPreferencesContract(BaseModel):
@@ -128,6 +151,7 @@ class IntentSpecContract(BaseModel):
         default_factory=ChartPreferencesContract
     )
     required_conclusions: list[str] = Field(default_factory=list)
+    page_revisions: list[PageRevisionIntentContract] = Field(default_factory=list)
     delivery: DeliveryIntentContract = Field(
         default_factory=DeliveryIntentContract
     )
