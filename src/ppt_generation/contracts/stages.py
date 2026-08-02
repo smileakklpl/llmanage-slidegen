@@ -84,6 +84,7 @@ class PipelineRequestContract(BaseModel):
     generation_render_reserve_seconds: float = Field(ge=0)
     generation_llm_budget_exhausted: bool = False
     source_objects: list[dict[str, Any]] = Field(default_factory=list)
+    template_path: str | None = None
 
     @model_validator(mode="after")
     def validate_deadline_reserve(self) -> PipelineRequestContract:
@@ -95,6 +96,44 @@ class PipelineRequestContract(BaseModel):
                 "generation_render_reserve_seconds 必須小於 deadline"
             )
         return self
+
+
+class ChartPreferencesContract(BaseModel):
+    """Presentation choices parsed from the prompt; never contains data values."""
+
+    preferred_types: list[str] = Field(default_factory=list)
+    avoided_types: list[str] = Field(default_factory=list)
+
+
+class DeliveryIntentContract(BaseModel):
+    """Delivery metadata only; backend decides whether and how to send mail."""
+
+    recipients: list[str] = Field(default_factory=list)
+    email_subject: str | None = None
+
+
+class IntentSpecContract(BaseModel):
+    """Validated interpretation of the user's natural-language requirements."""
+
+    contract_version: Literal["1.0"] = "1.0"
+    objective: str = "依可用資料產生可追蹤的管理決策簡報"
+    audience: str = "管理層"
+    language: str = "zh-TW"
+    tone: str = "professional"
+    target_content_pages: int | None = Field(default=None, ge=1, le=15)
+    requested_topics: list[str] = Field(default_factory=list)
+    excluded_topics: list[str] = Field(default_factory=list)
+    requested_metric_keys: list[str] = Field(default_factory=list)
+    chart_preferences: ChartPreferencesContract = Field(
+        default_factory=ChartPreferencesContract
+    )
+    required_conclusions: list[str] = Field(default_factory=list)
+    delivery: DeliveryIntentContract = Field(
+        default_factory=DeliveryIntentContract
+    )
+    interpretation_warnings: list[str] = Field(default_factory=list)
+    prompt_applied: bool = False
+    source: Literal["parsed", "defaulted", "fallback"] = "defaulted"
 
 
 class MetricScopeContract(BaseModel):
@@ -114,6 +153,7 @@ class SectionContract(BaseModel):
 class SectionStageContract(BaseModel):
     contract_version: Literal["1.0"] = "1.0"
     status: Literal["READY", "NEEDS_CONFIRMATION"]
+    intent_spec: IntentSpecContract = Field(default_factory=IntentSpecContract)
     sections: list[SectionContract] = Field(default_factory=list)
     question_to_user: str | None = None
     dropped_metric_keys: dict[str, str] = Field(default_factory=dict)
@@ -178,6 +218,7 @@ class DeckPageContract(BaseModel):
 class DeckSpecContract(BaseModel):
     contract_version: Literal["1.0"] = "1.0"
     title: str
+    intent_spec: IntentSpecContract = Field(default_factory=IntentSpecContract)
     metric_store: MetricStoreContract
     pages: list[DeckPageContract] = Field(min_length=1)
     generation_policy: Literal["strict", "required"]

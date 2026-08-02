@@ -23,9 +23,12 @@ import json
 import logging
 import random
 import re
+import threading
 import time
+from collections import deque
 from dataclasses import dataclass, replace
 from typing import Any, Callable, Sequence
+from uuid import uuid4
 
 from . import config
 
@@ -46,6 +49,171 @@ class LLMDeadlineExceeded(LLMError):
 
 class SchemaValidationError(LLMError):
     """LLM 回傳的 JSON 不符合要求的 schema。"""
+
+
+class _ModelLimiter:
+    """Thread-safe sliding-window RPM and in-flight bound for one model."""
+
+    def __init__(self, *, rpm_limit: int, max_parallel: int) -> None:
+        self.rpm_limit = max(1, int(rpm_limit))
+        self._semaphore = threading.BoundedSemaphore(max(1, int(max_parallel)))
+        self._rate_lock = threading.Lock()
+        self._starts: deque[float] = deque()
+        self._active_lock = threading.Lock()
+        self._active = 0
+
+    @staticmethod
+    def _remaining(deadline_monotonic: float | None) -> float | None:
+        if deadline_monotonic is None:
+            return None
+        return max(0.0, deadline_monotonic - time.monotonic())
+
+    def acquire(self, deadline_monotonic: float | None) -> tuple[float, int]:
+        wait_started = time.monotonic()
+        remaining = self._remaining(deadline_monotonic)
+        if remaining is not None and remaining <= 0:
+            raise LLMDeadlineExceeded("等待模型平行配額時已達 LLM 時間上限")
+
+        if remaining is None:
+            acquired = self._semaphore.acquire()
+        else:
+            acquired = self._semaphore.acquire(timeout=remaining)
+        if not acquired:
+            raise LLMDeadlineExceeded("等待模型平行配額時已達 LLM 時間上限")
+
+        try:
+            while True:
+                now = time.monotonic()
+                with self._rate_lock:
+                    while self._starts and now - self._starts[0] >= 60.0:
+                        self._starts.popleft()
+
+                    if len(self._starts) < self.rpm_limit:
+                        remaining = self._remaining(deadline_monotonic)
+                        if remaining is not None and remaining < 0.1:
+                            raise LLMDeadlineExceeded(
+                                "模型配額取得時剩餘時間不足 0.1 秒"
+                            )
+                        # Record only an admitted SDK start. Threads waiting for
+                        # concurrency or expiring at the deadline consume no RPM.
+                        self._starts.append(now)
+                        break
+
+                    wait_seconds = max(0.01, self._starts[0] + 60.0 - now)
+
+                remaining = self._remaining(deadline_monotonic)
+                if remaining is not None and wait_seconds >= remaining:
+                    raise LLMDeadlineExceeded(
+                        "等待模型 RPM 配額會超過 LLM 時間上限"
+                    )
+                time.sleep(
+                    wait_seconds
+                    if remaining is None
+                    else min(wait_seconds, remaining)
+                )
+
+            with self._active_lock:
+                self._active += 1
+                active = self._active
+            return (time.monotonic() - wait_started) * 1000.0, active
+        except Exception:
+            self._semaphore.release()
+            raise
+
+    def release(self) -> None:
+        with self._active_lock:
+            self._active -= 1
+        self._semaphore.release()
+
+
+_LIMITER_REGISTRY_LOCK = threading.Lock()
+_LIMITER_REGISTRY: dict[tuple[str, str, str], _ModelLimiter] = {}
+
+
+def _limiter_for(settings: config.LLMSettings, model: str) -> _ModelLimiter:
+    endpoint = settings.aws_region if settings.provider == "bedrock" else (
+        settings.base_url or "sdk-default"
+    )
+    key = (settings.provider, endpoint or "", model)
+    with _LIMITER_REGISTRY_LOCK:
+        limiter = _LIMITER_REGISTRY.get(key)
+        if limiter is None:
+            limiter = _ModelLimiter(
+                rpm_limit=settings.rpm_limit,
+                max_parallel=settings.max_parallel,
+            )
+            _LIMITER_REGISTRY[key] = limiter
+        return limiter
+
+
+def reset_limiter_registry() -> None:
+    """Clear process-local limiter state after deployment/test reconfiguration."""
+    with _LIMITER_REGISTRY_LOCK:
+        _LIMITER_REGISTRY.clear()
+
+
+def _invoke_backend_attempt(
+    backend: Callable[..., dict[str, Any]],
+    settings: config.LLMSettings,
+    model: str,
+    messages: list[dict[str, str]],
+    tool_schemas: Sequence[dict[str, Any]] | None,
+    temperature: float,
+    *,
+    stage: str,
+    deadline_monotonic: float | None,
+) -> dict[str, Any]:
+    """Apply per-model limits and emit one timing record per SDK request."""
+    limiter = _limiter_for(settings, model)
+    wait_ms, active = limiter.acquire(deadline_monotonic)
+    try:
+        # RPM/semaphore waits consume deadline budget. Re-cap immediately
+        # before the SDK call so an admitted request cannot eat render reserve.
+        admitted_settings = _cap_request_timeout(settings, deadline_monotonic)
+    except Exception:
+        limiter.release()
+        raise
+
+    call_id = uuid4().hex
+    started = time.monotonic()
+    logger.info(
+        "llm_attempt_start call_id=%s stage=%s model=%s wait_ms=%.1f active=%d",
+        call_id,
+        stage,
+        model,
+        wait_ms,
+        active,
+    )
+    try:
+        response = backend(
+            admitted_settings,
+            model,
+            messages,
+            tool_schemas,
+            temperature,
+        )
+    except Exception:
+        logger.exception(
+            "llm_attempt_end call_id=%s stage=%s model=%s status=error "
+            "duration_ms=%.1f",
+            call_id,
+            stage,
+            model,
+            (time.monotonic() - started) * 1000.0,
+        )
+        raise
+    else:
+        logger.info(
+            "llm_attempt_end call_id=%s stage=%s model=%s status=success "
+            "duration_ms=%.1f",
+            call_id,
+            stage,
+            model,
+            (time.monotonic() - started) * 1000.0,
+        )
+        return response
+    finally:
+        limiter.release()
 
 
 def _resolve_settings(
@@ -626,7 +794,16 @@ def complete_json(
 
     def operation() -> Any:
         request_settings = _cap_request_timeout(resolved, deadline_monotonic)
-        raw = backend(request_settings, model, messages, None, temperature)
+        raw = _invoke_backend_attempt(
+            backend,
+            request_settings,
+            model,
+            messages,
+            None,
+            temperature,
+            stage=stage,
+            deadline_monotonic=deadline_monotonic,
+        )
         content = raw.get("content") or ""
 
         if not content.strip():
@@ -692,8 +869,15 @@ def complete_tool_call(
 
     def operation() -> ToolCall:
         request_settings = _cap_request_timeout(resolved, deadline_monotonic)
-        raw = backend(
-            request_settings, model, messages, tool_schemas, temperature
+        raw = _invoke_backend_attempt(
+            backend,
+            request_settings,
+            model,
+            messages,
+            tool_schemas,
+            temperature,
+            stage=stage,
+            deadline_monotonic=deadline_monotonic,
         )
         calls = raw.get("tool_calls") or []
 

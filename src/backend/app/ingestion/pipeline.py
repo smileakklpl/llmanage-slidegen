@@ -102,6 +102,9 @@ def run_ingestion_pipeline(
     file_path: str | Path,
     original_filename: str | None = None,
     sheet_name: str | None = None,
+    *,
+    ocr_deadline_monotonic: float | None = None,
+    ocr_max_pages: int = 20,
 ) -> UnifiedIngestionResult:
     """
     執行完整資料讀取流程。
@@ -432,6 +435,8 @@ def run_ingestion_pipeline(
                     original_filename=(
                         display_filename
                     ),
+                    deadline_monotonic=ocr_deadline_monotonic,
+                    max_pages=ocr_max_pages,
                 )
 
                 # 整份 PDF 都沒有文字層時，
@@ -455,6 +460,8 @@ def run_ingestion_pipeline(
                 original_filename=(
                     display_filename
                 ),
+                deadline_monotonic=ocr_deadline_monotonic,
+                max_pages=ocr_max_pages,
             )
 
         classification = (

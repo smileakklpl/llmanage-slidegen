@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import tempfile
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -42,6 +43,31 @@ def _blocked_dataset_ids(payload: dict) -> list[str]:
         if dataset.requires_human_review
         or dataset.review_status in {"pending", "rejected"}
     ]
+
+
+def _total_deadline_at(job: JobModel) -> datetime:
+    created_at = job.created_at
+    if created_at.tzinfo is None:
+        created_at = created_at.replace(tzinfo=timezone.utc)
+    return created_at + timedelta(seconds=job.generation_options.deadline_seconds)
+
+
+def _pipeline_deadline_at(job: JobModel) -> datetime:
+    return _total_deadline_at(job) - timedelta(
+        seconds=job.generation_options.output_reserve_seconds
+    )
+
+
+def _ensure_before_deadline(
+    job: JobModel,
+    *,
+    phase: str,
+    pipeline: bool = False,
+) -> None:
+    deadline = _pipeline_deadline_at(job) if pipeline else _total_deadline_at(job)
+    if datetime.now(timezone.utc) >= deadline:
+        scope = "pipeline" if pipeline else "job"
+        raise TimeoutError(f"{scope} deadline 已到，停止進入 {phase}")
 
 
 async def _transition(
@@ -83,15 +109,35 @@ async def _transition(
     await repository.update(job.model_copy(update=changes))
 
 
+async def _materialize_template(
+    job: JobModel,
+    workspace: Path,
+    storage: S3ObjectStorage,
+) -> Path | None:
+    """Download the optional template separately from ingestion inputs."""
+    if job.template_object is None:
+        return None
+
+    destination = workspace / "template.pptx"
+    await asyncio.to_thread(
+        storage.download_path,
+        job.template_object.key,
+        destination,
+    )
+    return destination
+
+
 async def _generate_from_ingestion_path(
     *,
     job: JobModel,
     ingestion_path: Path,
+    template_path: Path | None,
     output_dir: Path,
     repository: JobRepository,
     storage: S3ObjectStorage,
 ) -> None:
     """Run deterministic/LLM generation after ingestion is approved."""
+    _ensure_before_deadline(job, phase="generation", pipeline=True)
     await _transition(
         job.job_id,
         repository,
@@ -102,14 +148,14 @@ async def _generate_from_ingestion_path(
         review_required_count=0,
     )
 
-    # Human review time must not consume the generation budget.
-    deadline_at = datetime.now(timezone.utc) + timedelta(
-        seconds=job.generation_options.deadline_seconds
-    )
+    # Keep S3 upload and the final safety buffer outside the callable pipeline.
+    # The SLA origin is the persisted Job timestamp returned with 202.
+    deadline_at = _pipeline_deadline_at(job)
     request = GenerationRequest(
         job_id=job.job_id,
         prompt=job.prompt,
         ingestion_path=str(ingestion_path),
+        template_path=str(template_path) if template_path is not None else None,
         output_dir=str(output_dir),
         source_objects=job.input_objects,
         options=job.generation_options,
@@ -119,6 +165,7 @@ async def _generate_from_ingestion_path(
         generate_deck,
         request.model_dump(mode="json"),
     )
+    _ensure_before_deadline(job, phase="artifact upload")
 
     await _transition(
         job.job_id,
@@ -133,22 +180,26 @@ async def _generate_from_ingestion_path(
     for path in output_dir.rglob("*"):
         if not path.is_file():
             continue
+        _ensure_before_deadline(job, phase=f"upload {path.name}")
         relative = path.relative_to(output_dir).as_posix()
         stored = await asyncio.to_thread(
             storage.upload_path,
             path,
             key=f"outputs/{job.job_id}/{relative}",
         )
+        _ensure_before_deadline(job, phase=f"upload {path.name} completion")
         uploaded_by_path[path.resolve()] = stored.key
 
     deck_spec_path = output_dir / "deckspec.json"
     if deck_spec_path.is_file():
+        _ensure_before_deadline(job, phase="deckspec upload")
         await asyncio.to_thread(
             storage.upload_path,
             deck_spec_path,
             key=f"deckspecs/{job.job_id}/deckspec.json",
             content_type="application/json",
         )
+        _ensure_before_deadline(job, phase="deckspec upload completion")
 
     artifacts: list[Artifact] = []
     for generated in result.artifacts:
@@ -169,6 +220,7 @@ async def _generate_from_ingestion_path(
         f"共 {result.slide_count} 張投影片；"
         f"T1 已核對 {result.series_checked} 個數值系列。"
     )
+    _ensure_before_deadline(job, phase="success transition")
     await _transition(
         job.job_id,
         repository,
@@ -192,6 +244,7 @@ async def run_generation_job(
         job = await repository.get(job_id)
         if job is None:
             return
+        _ensure_before_deadline(job, phase="ingestion")
 
         await _transition(
             job_id,
@@ -206,9 +259,15 @@ async def run_generation_job(
             workspace = Path(temp_name)
             upload_dir = workspace / "uploads"
             output_dir = workspace / "outputs"
+            template_path = await _materialize_template(job, workspace, storage)
             materialized: list[tuple[Path, str]] = []
 
             for index, object_ref in enumerate(job.input_objects, start=1):
+                _ensure_before_deadline(
+                    job,
+                    phase=f"download {object_ref.filename}",
+                    pipeline=True,
+                )
                 destination = upload_dir / f"{index:02d}_{object_ref.filename}"
                 await asyncio.to_thread(
                     storage.download_path,
@@ -220,13 +279,23 @@ async def run_generation_job(
             if not materialized:
                 raise RuntimeError("job 沒有任何可處理的 S3 輸入")
 
+            pipeline_deadline_at = _pipeline_deadline_at(job)
+            remaining_pipeline_seconds = max(
+                0.0,
+                (pipeline_deadline_at - datetime.now(timezone.utc)).total_seconds(),
+            )
+            ocr_budget_seconds = min(
+                job.generation_options.ocr_max_seconds,
+                remaining_pipeline_seconds,
+            )
+            ocr_deadline_monotonic = time.monotonic() + ocr_budget_seconds
             ingestion_payload = await asyncio.to_thread(
                 generation_bridge.ingest_inputs,
                 materialized,
+                ocr_deadline_monotonic=ocr_deadline_monotonic,
+                ocr_max_pages=job.generation_options.ocr_max_pages,
             )
-            ingestion_payload = _prepare_ingestion_for_review(
-                ingestion_payload
-            )
+            _ensure_before_deadline(job, phase="ingestion persistence", pipeline=True)
             ingestion_path = generation_bridge.save_payload(
                 ingestion_payload,
                 workspace / "ingestion.json",
@@ -265,7 +334,19 @@ async def run_generation_job(
                 progress=45,
                 message=message,
                 ingestion_object=ingestion_object,
-                review_required_count=pending_count,
+                review_required_count=0,
+            )
+
+            refreshed = await repository.get(job_id)
+            if refreshed is None:
+                return
+            await _generate_from_ingestion_path(
+                job=refreshed,
+                ingestion_path=ingestion_path,
+                template_path=template_path,
+                output_dir=output_dir,
+                repository=repository,
+                storage=storage,
             )
             return
 
@@ -294,6 +375,7 @@ async def resume_generation_job(
         job = await repository.get(job_id)
         if job is None:
             return
+        _ensure_before_deadline(job, phase="review resume", pipeline=True)
         if job.ingestion_object is None:
             raise RuntimeError("job 尚未保存 ingestion.json")
 
@@ -301,6 +383,7 @@ async def resume_generation_job(
             workspace = Path(temp_name)
             ingestion_path = workspace / "ingestion.json"
             output_dir = workspace / "outputs"
+            template_path = await _materialize_template(job, workspace, storage)
             await asyncio.to_thread(
                 storage.download_path,
                 job.ingestion_object.key,
@@ -317,6 +400,7 @@ async def resume_generation_job(
             await _generate_from_ingestion_path(
                 job=job,
                 ingestion_path=ingestion_path,
+                template_path=template_path,
                 output_dir=output_dir,
                 repository=repository,
                 storage=storage,
