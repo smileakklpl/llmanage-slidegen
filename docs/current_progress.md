@@ -1,104 +1,80 @@
 # Current Progress
 
-> 更新時間：2026-07-30 20:52
-> 對應分支：`main`（HEAD `5a96086`「ppt生成流程完善, 未測串接API」，已推上 origin）
-> 本次 commit 規模：41 檔，`+108017 / -190` 行（其中約 10 萬行是 `outputs/full_deck/stages/` 的階段 JSON）
+> 更新時間：2026-08-02 11:45
+> 目前分支：`main`（HEAD `99565e8`「Merge pull request #14 from smileakklpl/feature/human-correction」）
+> 本次工作成果所在分支：**`ppt_current`（HEAD `0231abd`「簡報更新, 版面與措詞偵測」，已推上 origin）**
 
 ---
 
 ## 目前任務
 
-上一階段的工作**已全部 commit 並推送**，工作區只剩這份進度檔待更新。
+本輪工作是**簡報視覺品質與文字品質的三件修復**：圖表配色改為單色階（白→台新紅 + 黑）、
+字級改為依內容長度推算、以及在審查流程加入錯別字／疊字／用詞檢查。
 
-已完成兩件事：
+### ⚠️ 分支狀態要先確認
 
-1. 補上前一輪缺的三處 pytest（合計列規則、期間欄名辨識、`backend_bridge` 兩版型）
-2. 把 PPT 生成補到能依附件三／附件四範例完整產出：雙軸圖、原生表格、熱力圖、
-   Top N 切片、市場期間序列，以及封面／目錄／章節頁／結尾頁的完整簡報結構
+工作區目前在 `main`，而**本輪的改動不在 `main` 上**。它們已 commit 為 `0231abd` 並推到
+`origin/ppt_current`。剛才的 `git pull` 把 `main` 快進到 `99565e8`，因此工作區看不到這些檔案
+（`src/ppt_generation/agents/text_quality.py` 在 `main` 上不存在）。**沒有遺失，只是不在這個分支。**
 
-實測 `fixtures/data/fsc_114_workbook.xlsx` 端到端可產出 **20 張投影片、8 章節、
-9 張圖表**，T1 三方數值比對 22 個系列全數通過。commit message 已標明「未測串接 API」，
-這也是下一步的第一件事。
+```
+main         99565e8   領先 ppt_current 4 個 commit
+ppt_current  0231abd   領先 main 1 個 commit ← 本輪成果
+```
+
+`main` 新增的 4 個 commit（human review correction、25 分鐘 SLA 與有界平行控制）
+**完全沒有動到我改的 5 支檔案**，`git merge-tree` 預演也無衝突，合併應該乾淨。
 
 ---
 
 ## 已修改的檔案
 
-工作區目前僅有一項未提交：
+以下為 `0231abd`（分支 `ppt_current`）的內容，共 15 檔、`+975 / -57` 行。
 
-| 狀態 | 檔案路徑 | 說明 |
-|:---|:---|:---|
-| M | `docs/current_progress.md` | 本檔案 |
-
-以下為 HEAD（`5a96086`）已納入的內容。
-
-### 新增：`ppt_generation` 與工具
+### 程式碼
 
 | 狀態 | 檔案路徑 | 行數 | 說明 |
 |:---|:---|:---|:---|
-| A | `src/ppt_generation/charts/table_builder.py` | 390 | 原生表格與熱力圖（FR-2.4／FR-2.3）；`format_value`／`parse_value` 成對格式化 |
-| A | `src/ppt_generation/data/backend_bridge.py` | 330 | 呼叫 backend ingestion，支援單檔多表／目錄多檔兩種版型 |
-| A | `tools/build_fsc_workbook.py` | 187 | 月報 → 單檔多工作表 xlsx（附件四版型） |
-| A | `fixtures/data/fsc_114_workbook.xlsx` | — | 產出物：6 工作表 × 34 列 × 13 欄 |
+| A（新增） | `src/ppt_generation/agents/text_quality.py` | +437 | 錯別字／疊字／用詞檢查；佔位符邊界重複偵測、簡體字對照表、合法疊字白名單 |
+| M（修改） | `src/ppt_generation/output/renderer.py` | +170 | 自適應字級套用、數值改紅字、主題標語（`add_theme_callout`）、移除 `p:style` 主題色引用 |
+| M（修改） | `src/ppt_generation/core/theme.py` | +105 | 圖表單色階調色盤、`fit_font_size` 系列、`fit_chart_label_font_size`、`METRIC_VALUE_COLOR` |
+| M（修改） | `src/ppt_generation/charts/chart_builder.py` | +83 | `apply_chart_style()` 單一樣式入口、類別軸標籤自適應與 45° 旋轉、圖表底板透明化 |
+| M（修改） | `src/ppt_generation/agents/reviewer.py` | +39 | `check_text_quality()` 掛進規則層；語意層 prompt 補第 7 項（錯別字與用詞） |
+| M（修改） | `src/ppt_generation/agents/narrative_writer.py` | +13 | prompt 補「佔位符代入後自帶單位，不可重複寫」與「一律繁體中文」 |
 
-### 新增：測試（共 168 個案例）
-
-| 狀態 | 檔案路徑 | 案例 | 涵蓋 |
-|:---|:---|:---|:---|
-| A | `tests/test_metric_engine_total_row.py` | 37 | 合計列規則（含「不排除會剛好少一半」的反面斷言） |
-| A | `tests/test_metric_engine_views.py` | 33 | Top N 切片與市場期間序列 |
-| A | `tests/test_table_builder.py` | 33 | 原生表格、熱力圖色階、格式化成對性 |
-| A | `tests/test_combo_chart.py` | 17 | 雙軸圖 XML 結構與內嵌 workbook 一致性 |
-| A | `tests/test_backend_bridge.py` | 17 | 兩種輸入版型（含逐格比對） |
-| A | `tests/test_deck_structure.py` | 14 | 簡報結構、頁碼指派與實際投影片位置交叉驗證 |
-| A | `src/backend/tests/test_period_header.py` | 30 | 期間欄名辨識與交叉表表頭偵測 |
-
-### 修改：`ppt_generation`
+### 產出物與設定
 
 | 狀態 | 檔案路徑 | 說明 |
 |:---|:---|:---|
-| M | `charts/chart_builder.py` | `ComboSpec` / `add_combo_chart()`（雙軸圖）；combo 註冊進 `CHART_SKILLS` 與 tool schema |
-| M | `charts/chart_planner.py` | `VISUAL_SKILLS`（圖表 + 表格合集）、`TABLE_LIKE_CHARTS`、combo 與表格防呆、`TableSpec`／`ComboSpec` 組裝 |
-| M | `data/metric_engine.py` | `derive_top()`、`build_market_timeline()`、`is_period_label()`；`_TEMPORAL_PATTERNS` 加民國年月；合計列排除；`EngineConfig` 加 `enable_top_n` / `top_n` / `enable_market_timeline`，`enable_forecast` 預設改 True |
-| M | `output/renderer.py` | `add_agenda_page()` / `add_closing_page()` / `assign_page_numbers()`；`render_deck()` 組裝完整簡報結構；`RenderReport` 加 `slide_count` / `divider_count` / `chapters` |
-| M | `agents/section_planner.py` | `SectionPlan.chapter`；`DEFAULT_CHAPTERS`（FR-2.6 八章節）；`MAX_SECTIONS` 16；`group_by_chapter()`；forecast 章節只能引用 `.forecast` |
-| M | `agents/chart_agent.py` | 改用 `VISUAL_SKILL_TOOL_SCHEMAS`；system prompt 補 combo／table／heatmap 規則 |
-| M | `verification/verify_chart_consistency.py` | 走遍所有 `plots`；`read_table_shape()` 與表格比對路徑；顯示精度正規化 |
-| M | `run_pipeline.py` | `--excel` / `--excel-sheet` / `--title`；blueprint 驅動的假 LLM（八章節）；`_pick_metric_keys` 前綴誤中修正；產出前依最終存留頁面重新指派頁碼 |
-| M | `data/__init__.py` | 匯出 `ingest_excel` 與兩個例外 |
+| A | `outputs/styled_preview/fsc_114_workbook-分析簡報.pptx` | 本輪示範產出（20 頁） |
+| A | `outputs/styled_preview/fsc_114_workbook-分析資料.xlsx` | 對應稽核 Excel |
+| M | `outputs/styled_preview/{deckspec,generation_manifest}.json`、`stages/*.json` | 重跑後的階段輸出 |
+| M | `.gitignore` | +1 行 |
 
-### 修改：`backend`（修 bug）
+### 前一輪已併入 `main` 的相關工作
 
-| 狀態 | 檔案路徑 | 說明 |
-|:---|:---|:---|
-| M | `app/ingestion/classifier.py` | `is_period_like_header()`；`_detect_header_row()` 改計「文字或期間型欄名」比例 |
-| M | `app/ingestion/extractor.py` | `_header_value_is_plausible()` 改共用 `is_period_like_header()` |
-| M | `app/ingestion/pipeline.py` | PDF／影像剖析器改延遲載入，xlsx 路徑不需 pymupdf／pdfplumber |
-
-### 修改：設定與文件
-
-| 狀態 | 檔案路徑 | 說明 |
-|:---|:---|:---|
-| M | `tests/conftest.py` | 加掛 `src` 到 sys.path（`ppt_generation` 的 import 根目錄） |
-| M | `.gitignore` | 放行 `fixtures/data/fsc_114_workbook.xlsx` |
-| M | `README.md` / `fixtures/README.md` | 補單檔多表版型與產生指令 |
-| M | `src/ppt_generation/Guide.md` | skill 對照表、combo 做法、表格數字守法、簡報結構、已知落差 |
-| M | `docs/圖表原生性與資料同步設計.md` | §8 雙軸圖做法與坑、§8.2 表格驗證、狀態表與 `CHART_SKILLS` 更新 |
-| R | `outputs/deck.pptx` → `outputs/full_deck/deck.pptx` | 產出物移入子目錄，並換成 20 頁完整版 |
+`table_builder.py` 的 `NO_STYLE_NO_GRID`、`chart_builder.py` 的 `apply_chart_style` 已在
+`main` 上（經先前的 PR 併入），因此 `main` 目前已具備「表格不再露出藍底」與
+「圖表走單一樣式入口」兩項修復。
 
 ---
 
-## 本次修掉的四個 bug
+## 本輪修掉的問題
 
-1. **`_detect_header_row()` 讀不到 entity × period 交叉表**（阻斷性）。表頭要求「至少一半
-   是文字」，而 `金融機構名稱 + 11401…11412` 的文字比例只有 1/13 → 整張工作表被跳過。
-   修復前 `fsc_114/流通卡數.xlsx` 得到 0 個 dataset。
-2. **`metric_engine` 沒有合計列意識**（數值正確性）。占比分母變兩倍（每家剛好少一半，
-   實測臺灣銀行 0.2393% vs 正確 0.4786%）、排名整體位移一位。
-3. **三方比對只檢查 `chart.plots[0]`**（靜默漏驗）。雙軸圖是 `barChart` + `lineChart`
-   兩個 plot，次軸系列完全沒被驗過——那正是量級差異大、最需要核對的一組。
-4. **`_pick_metric_keys()` 子字串誤中**。`流通卡數.value` 是 `流通卡數.value.top10` 的
-   前綴，敘事會引用本頁不允許的指標而被審查退回，實測 10 頁掉 5 頁。
+1. **圖表五彩繽紛**（視覺一致性）。`chart_builder.py` 原本**完全沒有設定任何系列顏色**，
+   所有圖表繼承模板主題的 `accent1..accent6`，一張圖出現藍、橘、灰、黃四色。
+   改為單色階：單系列逐資料點依排名取白→紅漸層，多系列紅／黑交錯。
+2. **表格露出藍底**（視覺一致性）。`shapes.add_table()` 不接受樣式參數，一律套用
+   「Medium Style 2 - Accent 1」，其 `wholeTbl` 帶著 accent1（本模板為藍 `4472C4`）的淺色底。
+   先前只填了部分儲存格，奇數列與熱力圖標籤欄留空 → 露出藍色。
+   改為換掉 `tableStyleId` 並逐格填色。
+3. **字級有的太大有的太小**（版面）。python-pptx 建立的 `chartSpace` 帶著 `sz="1800"`，
+   沒被逐一設定的圖表元素都以 18pt 渲染；而文字框只有 `normAutofit`，它**只會縮小不會放大**，
+   短敘事永遠停在 11pt。改為依內容長度推算字級，autofit 僅作最後保險。
+4. **「第一名名」重複字**（文字品質）。`format_value()` 產出的值自帶單位或前後綴
+   （`名` → `第 3 名`、`%` → `12.3%`），模型只看得到佔位符、看不到展開結果，
+   於是寫出「排名第 {{…}} 名」→「排名第第 3 名名」。**敘事模板本身完全合法，
+   錯誤只在代入後才存在**，因此檢查必須跑在代入後的文字上。
 
 ---
 
@@ -106,112 +82,94 @@
 
 ### 下一步（依「離可 Demo 最近」排序）
 
-- [x] **A1 真實 API 已實跑**（2026-07-30）。Gemini（`gemini-3.5-flash-lite` 敘事 /
-      `gemini-3.1-flash-lite` 章節與圖表），端到端產出 `outputs/real_llm/deck.pptx`：
-      20 投影片 / 8 章節 / 8 圖表，敘事 8 頁全數一次過規則檢查，T1 71/71 PASS。
-      首跑抓到三個假 LLM 永遠測不到的契約問題（schema 沒送進 prompt → 模型把
-      `sections` 猜成 `pages`；非必填欄位的 null 被當型別錯誤；429 限流沒有重試），
-      已修並有 `tests/test_llm_client_contract.py` 守著。
-      註：免費額度是 per-model per-day（約 20 次），全流程要靠 per-stage 模型路由分散
-- [ ] **真實模型的 prompt 迭代**。目前敘事品質已可用，後續以
-      `python -m tools.compare_models` 對固定 Excel/prompt 跑完整 generation pipeline，
-      比較 reviewer fail-closed、T1 通過率與延遲
-- [ ] **F4 自動寄送完全未做**。`src/` 下沒有 mailer 模組，也沒有 MailHog 的
-      docker compose。做起來最快、Demo 效果明顯
-- [x] **F5.3 非同步 job API 已接通**。`POST /api/v1/jobs/generate` 回 `202 + job_id`，
-      worker 透過 `GenerationRequest` 呼叫正式 orchestrator，`GET /api/v1/jobs/{id}`
-      回傳狀態與四項 artifacts
-- [ ] **job durable dispatch / restart recovery 尚未完成**。job 狀態已落 S3，但目前以
-      process-local `asyncio.create_task` 執行；程序在 queued/running 中重啟時，尚無重新 claim
-      與 retry 機制。部署前需改為可恢復的 worker queue 或啟動時 recovery scan
-- [ ] **A2 DeckSpec / Refresh 未做**。找不到 deckspec 模組，`replay(deckspec, new_data)`
-      不存在
-- [ ] **intent 契約尚未獨立落地**。目前 `run_pipeline` 直接把 prompt 交給
-      section planner；若要完整滿足 FR-5.2，仍需在正式 agent schemas 中加入頁數、
-      對象與收件人的結構化意圖契約，不得恢復已刪除的第二套 core contracts
-- [ ] **敘事平行化未做**。`narrative_writer.py:306` 自己留了註記，目前序列執行，
-      影響 NFR-1 的 5 分鐘目標
-- [x] **S3 落檔已接通**。uploads、jobs 與生成 artifacts 由 backend storage/repository
-      保存；本地 worker temp path 不成為持久化真相來源
-- [ ] **前端**只有 `.gitkeep`；**部署**沒有 Dockerfile / docker-compose
-
-### 圖表與驗收
-
-- [ ] **雙軸圖的 PowerPoint 實機驗收**。XML 結構、軸配對、內嵌 workbook 兩系列完整、
-      與快取逐格相同都有測試守著，但「右鍵編輯資料」尚未在 PowerPoint 實機開啟確認
-      （本機無可自動化的 PowerPoint／LibreOffice CLI）。建議手動開
-      `outputs/full_deck/deck.pptx` 第 6 頁確認
-- [ ] **散點圖資料點標籤**（附件三 P.10 需顯示銀行名稱）需操作 `c:dLbls` XML
-- [ ] **FR-3.4 數字溯源附錄**未做
-- [ ] 真模型接上後確認內容頁數是否符合 FR-2.6 的 16 頁（目前假 LLM 的 blueprint 產 9 頁）
+- [ ] **把 `ppt_current` 合併回 `main`**。`git merge-tree` 預演無衝突，我改的 5 支檔案
+      在 `main` 上沒有被新 commit 動過。合併後需重跑 `scripts/verify_all.py`
+- [ ] **`text_quality.py` 沒有單元測試**。這是本輪唯一的新邏輯，且審查是 fail-closed 的
+      ——合法疊字白名單（漸漸、層層、年年…）若誤判會把正常頁面退件。
+      應補：邊界重複偵測、白名單不誤判、簡體字對照表無「簡繁相同」項
+- [ ] **文字品質檢查尚未在真模型路徑驗證過**。`--fake-llm` 的敘事是模板化的，
+      不會產生錯字，剛才的乾淨產出**不代表檢查生效**。目前是用手寫 case 直接呼叫
+      `check_text_quality()` 驗證的，需接真模型端到端確認
+- [ ] **P.18 有 33 個類別**，即使旋轉 45° 也只有 6.5pt。這是資料密度問題不是排版能救的，
+      該頁應改用 Top N 或表格呈現
+- [ ] **雙軸圖與圓餅圖的 PowerPoint 實機驗收**。本機無 PowerPoint 也無 LibreOffice CLI，
+      顏色與版面都是靠 XML 稽核而非實際渲染判斷。建議手動開新產出的
+      `fsc_114_workbook-分析簡報.pptx` 確認 P.6（雙軸）、P.12（圓餅）、P.4／P.14（表格）
 
 ### 版控整理
 
-- [ ] `outputs/full_deck/stages/` 的階段 JSON 已進版控，佔本次 commit 約 10 萬行
-      （`00_ingestion.json` 5.9 萬行、`01_metrics.json` 4.1 萬行）。這些是每次重跑都會
-      變的除錯產物，值得確認是否該留在版控裡，或改為只保留 `deck.pptx` / `deck_data.xlsx`
-- [ ] `outputs/current_progress.md`（7/29 舊檔，已進版控）與本檔並存，
-      `structure.md` 指的是 `docs/` 這份，建議刪掉 `outputs/` 那份
-- [ ] `outputs/stages/`（舊的 3 頁版產出）目前被 gitignore 忽略但仍留在本機，可清掉
-- [ ] `src/backend/test_sales.csv` 孤兒檔案（無任何程式碼引用）仍待處理
+- [ ] `outputs/styled_preview/~$deck.pptx` 與 `~$fsc_114_workbook-分析簡報.pptx` 是
+      PowerPoint 的鎖定暫存檔，**不該進版控**。應把 `~$*` 加進 `.gitignore`
+- [ ] `outputs/styled_preview/deck.pptx`（08/01 21:44）與 `deck_data.xlsx` 是舊檔名的殘留。
+      `run_pipeline.py:2195` 已改為依來源檔名命名（`{source_stem}-分析簡報.pptx`），
+      這兩個舊檔可清掉
+- [ ] `outputs/current_progress.md`（07/29 舊檔）與本檔並存，`structure.md` 指的是 `docs/` 這份，
+      建議刪掉 `outputs/` 那份
+- [ ] `outputs/segmented_passphrases_bedrock_20260801_122728/` 佔 37 MB
+      （`ingestion.json` 單檔 26 MB），確認是否需要保留
+
+### 承接前一輪、仍未完成
+
+- [ ] **F4 自動寄送**：backend 已有 `/jobs/{id}/send` 與 SES／mock provider，
+      但 MailHog 的 docker compose stack 未建
+- [ ] **A2 DeckSpec Refresh**：`deckspec.json` 已產出，`replay(deckspec, new_data)` 未實作
+- [ ] **敘事平行化**：`narrative_writer.py` 目前序列執行（新 commit 已加入有界平行控制，
+      需確認是否已涵蓋敘事階段）
+- [ ] **散點圖資料點標籤**（附件三 P.10 需顯示銀行名稱）需操作 `c:dLbls` XML
+- [ ] **FR-3.4 數字溯源附錄**未做
 
 ---
 
 ## 測試 / 執行結果
 
-### 回歸
+### 目前 `main`（`99565e8`，不含本輪改動）
 
-| 測試 | 結果 | 備註 |
+| 關卡 | 結果 | 備註 |
 |:---|:---|:---|
-| root `pytest` | ✅ 187 passed | 已移除只綁舊 core engine/contracts 的重複測試；關鍵 YoY 斷言已遷到正式 metric engine |
-| `src/backend` `pytest` | ✅ 73 passed | ingestion、API、S3 repository/worker 路徑全綠 |
-| `scripts/verify_all.py` | ✅ 4 gates 全綠 | root/backend tests、分層掃描、正式 orchestrator full smoke；21 slides / 9 charts / T1 22/22 / 4 artifacts |
+| root `pytest` | ✅ 189 passed | |
+| `src/backend` `pytest` | ✅ 114 passed, 2 skipped | 比本輪工作時多 2 個（新 commit 帶入） |
+| 分層依賴掃描 | ✅ 通過 | `src/` 100 支檔案符合 backend → core → ppt_generation |
+| 正式端到端管線 | ✅ 通過 | 18 slides / 8 charts；T1 21/21；4 artifacts |
+| **`scripts/verify_all.py`** | **✅ 四關全綠** | |
 
-### 端到端（全部 `--fake-llm`，零次模型呼叫）
+### 本輪工作分支 `ppt_current`（`0231abd`）
 
-| 輸入 | 結果 | 產出 |
+| 關卡 | 結果 | 備註 |
 |:---|:---|:---|
-| `fsc_114_workbook.xlsx`（版型 A） | ✅ exit 0，T1 22/22 PASS | 20 投影片 / 8 章節 / 9 圖表 |
-| `fsc_114/`（版型 B 目錄） | ✅ exit 0，T1 22/22 PASS | 與版型 A 完全一致 |
-| `fsc_113_114/` | ✅ exit 0，T1 22/22 PASS | 20 投影片 / 8 章節 |
-| `source/附件四` | ✅ exit 0，T1 全 PASS | 20 投影片；13 指標被防呆擋下（單年資料，符合預期） |
-| `--sample`（回歸） | ✅ exit 0，T1 PASS | 8 投影片 / 2 章節 |
+| root `pytest` | ✅ 189 passed | 含 3 個新增測試（表格填色、表格樣式、熱力圖色階改看亮度） |
+| `src/backend` `pytest` | ✅ 112 passed, 2 skipped | |
+| 分層依賴掃描 | ✅ 通過 | |
+| 正式端到端管線 | ✅ 通過 | 20 slides / 9 charts；T1 22/22；4 artifacts |
+| **`scripts/verify_all.py`** | **✅ 四關全綠** | |
 
-（含結論頁後，`fsc_114_workbook.xlsx` 的投影片數由 20 增為 21。）
+### 本輪的專項驗證（非 pytest，一次性腳本）
 
-### 端到端（真實 LLM，Gemini）
-
-| 輸入 | 結果 | 產出 |
+| 驗證項目 | 結果 | 內容 |
 |:---|:---|:---|
-| `fsc_114_workbook.xlsx` | ✅ exit 0，T1 71/71 PASS | `outputs/real_llm/`：20 投影片 / 8 章節 / 8 圖表 |
+| 全簡報顏色歸屬 | ✅ | 100 種 `srgbClr` 全數歸屬（圖表漸層 57、熱力圖漸層 56、中性 7、黃色重點 3）；**`schemeClr` 主題色引用 0 處** |
+| 表格填色完整性 | ✅ | 兩張表 77 格全部有明確填色；`tableStyleId` 已換成無樣式；`firstRow`／`bandRow` 已關 |
+| 圖表原生性 | ✅ | 7 張圖表對應 7 份內嵌工作簿 |
+| `c:ser` 子元素順序 | ✅ | barChart／lineChart／pieChart 皆符合 DrawingML schema |
+| 類別軸標籤自適應 | ✅ | 12 期間→9pt 橫排；10 家銀行全名→9pt 旋轉 45°；33 家→6.5pt 旋轉 45° |
+| 主題標語四條路徑 | ✅ | 預設 0 條、兩條→P.2+P.7、三條→截斷並 warning、空清單→0 條；**封面不再出現** |
+| 文字品質檢查 | ✅ | 「第一名名」「12.3%%」「張張」「疊詞」「簡體字」「錯別字」皆抓到；合法疊字與正常句不誤判 |
+| **確定性 fallback 安全性** | ✅ | 33 個可計算指標（含 6 個單位 `名`、13 個 `%`）逐一建出 fallback，**全數不觸發新規則** → 未新增崩潰路徑 |
 
-模型路由：`LLM_MODEL_INTENT` 與 `LLM_MODEL_CHART` 走 `gemini-3.1-flash-lite`，
-`LLM_MODEL_WRITER` 走 `gemini-3.5-flash-lite`（免費額度是 per-model per-day，
-分散才跑得完）。8 頁敘事全數第一次就通過規則檢查，無退件。
+> `hard_issues_for()` 跑的是整個規則層，我新加的檢查也在其中。若確定性 fallback 本身
+> 觸發新規則，required 模式的最後一層安全網就會崩、整份簡報失敗。上表最後一項專門驗這件事。
 
-註：`outputs/real_llm/` 產出於 `narrative_writer._label_hints()` 與正文
-`normAutofit` 兩項改動之前，因此該檔仍有一句「規模於 60,485,911 達到波段高點」
-（selector 語意誤用）。改動後另跑 4 頁小樣驗證，模型已正確寫出
-「114 年 12 月」與 `max_category`。
+### 環境修復
 
-### 產出簡報結構（`outputs/full_deck/deck.pptx`）
+`verify_all.py` 的 backend gate 先前一直紅燈，原因不是程式而是 `.venv` 未同步——
+以下 8 個套件**都已宣告在 `src/backend/requirements.txt`，只是沒安裝**
+（隊友新增 auth 模組 PR #12 之後）：
 
-| 頁 | 版面 | 內容 |
-|:---|:---|:---|
-| 1 | 2_標題投影片 | 封面「信用卡市場分析與經營洞察」 |
-| 2 | 1_標題及內容 | 目錄（8 章節） |
-| 3–4 | 章節頁 + 內容 | Executive Summary → 原生表格 11×7 |
-| 5–7 | 章節頁 + 內容 | 市場整體概況 → **CHART[Bar+Line] 雙軸**、CHART[Line] |
-| 8–9 | 章節頁 + 內容 | 同業成長及競爭分析 → CHART[Pie] |
-| 10–11 | 章節頁 + 內容 | 客戶活躍度 → CHART[Bar] |
-| 12–13 | 章節頁 + 內容 | 獲利能力 → CHART[Bar] |
-| 14–15 | 章節頁 + 內容 | 風險與警訊 → 熱力圖（原生表格 + 色階） |
-| 16–17 | 章節頁 + 內容 | 未來趨勢推測 → CHART[Line]（forecast 指標） |
-| 18–19 | 章節頁 + 內容 | 對台新的策略建議 → CHART[Bar] |
-| 20 | 3_標題投影片 | 感謝聆聽 |
+```
+PyJWT==2.9.0        PyMuPDF==1.28.0      pdfplumber==0.11.10   reportlab==5.0.0
+Pillow==12.3.0      beautifulsoup4==4.15.0   pypdf==6.14.2     email-validator==2.2.0
+```
 
-稽核 Excel `deck_data.xlsx`：10 工作表（索引 + 9 圖表），工作表名為 `P.{頁碼}_{指標名稱}`，
-頁碼已驗證等於實際投影片序號。
+已全部按宣告版本安裝，backend gate 因此轉綠。
 
 ---
 
@@ -220,27 +178,26 @@
 ```bash
 cd "/Users/william2013/Desktop/Main File/coding/llmanage-slidegen"
 
-# 1. 產生單檔多表版型
-.venv/bin/python -m tools.build_fsc_workbook --out fixtures/data/fsc_114_workbook.xlsx \
-    --periods 11401,11402,11403,11404,11405,11406,11407,11408,11409,11410,11411,11412
+# 0. 切到本輪成果所在分支
+git checkout ppt_current
 
-# 2. 完整簡報端到端（不呼叫 LLM）
-cd src
-../.venv/bin/python -m ppt_generation.run_pipeline \
-    --excel ../fixtures/data/fsc_114_workbook.xlsx \
-    --fake-llm --skip-semantic-review --output-dir ../outputs/full_deck
+# 1. Excel → ingestion JSON（run_pipeline 只吃 JSON，不再有 --excel 參數）
+PYTHONPATH=src:src/backend .venv/bin/python -c "
+from app.ingestion import generation_bridge
+generation_bridge.save_payload(
+    generation_bridge.ingest_excel('fixtures/data/fsc_114_workbook.xlsx'),
+    'outputs/styled_preview/ingestion.json')
+"
 
-# 3. 回歸
-cd ..
-.venv/bin/python -m pytest -q
-PYTHONIOENCODING=utf-8 .venv/bin/python scripts/verify_all.py
-cd src/backend && ../../.venv/bin/python -m pytest tests/ -q \
-    --ignore=tests/test_pdf_ingestion.py --ignore=tests/test_visual_ingestion.py
+# 2. 端到端（不呼叫 LLM）
+cd src && ../.venv/bin/python -m ppt_generation.run_pipeline \
+    --ingestion ../outputs/styled_preview/ingestion.json \
+    --title "信用卡市場分析與經營洞察" \
+    --fake-llm --skip-semantic-review \
+    --output-dir ../outputs/styled_preview
 
-# 4.（下一步，尚未執行）真實模型
-cd src
-../.venv/bin/python -m ppt_generation.run_pipeline --check-llm
-../.venv/bin/python -m ppt_generation.run_pipeline \
-    --excel ../fixtures/data/fsc_114_workbook.xlsx \
-    --prompt "做一份給信用卡事業處的市場分析簡報" --output-dir ../outputs/real_llm
+# 3. 合併前唯一關卡
+cd .. && PYTHONIOENCODING=utf-8 .venv/bin/python scripts/verify_all.py
 ```
+
+產出檔名為 `{來源檔名}-分析簡報.pptx`（非 `deck.pptx`）。

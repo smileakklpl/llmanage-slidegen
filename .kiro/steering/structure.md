@@ -37,8 +37,8 @@ llmanage-slidegen/
 │   │   ├── contracts/generation.py
 │   │   └── generation_orchestrator.py
 │   ├── ppt_generation/
-│   │   ├── agents/           section/chart/narrative/reviewer
-│   │   ├── core/             LLM abstraction/config/placeholders
+│   │   ├── agents/           section/chart/narrative/reviewer/text_quality
+│   │   ├── core/             LLM abstraction/config/placeholders/theme
 │   │   ├── data/             ingestion bridge/MetricStore/engine
 │   │   ├── charts/           原生圖表規格與 builder
 │   │   ├── output/           PPTX 與稽核 XLSX

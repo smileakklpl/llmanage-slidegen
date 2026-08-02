@@ -130,8 +130,8 @@ src/
 │   ├── contracts/generation.py
 │   └── generation_orchestrator.py
 ├── ppt_generation/
-│   ├── agents/              section/chart/narrative/reviewer
-│   ├── core/                LLM abstraction、設定、placeholder
+│   ├── agents/              section/chart/narrative/reviewer、text_quality
+│   ├── core/                LLM abstraction、設定、placeholder、theme（唯一視覺來源）
 │   ├── data/                ingestion bridge、MetricStore、確定性 engine
 │   ├── charts/              原生圖表規格與 builder
 │   ├── output/              PPTX 與稽核 XLSX renderer
