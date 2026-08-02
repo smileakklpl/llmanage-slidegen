@@ -67,6 +67,7 @@ async def generate_job(
     generation_policy: str | None = Form(default=None),
     generation_deadline_seconds: float | None = Form(default=None),
     generation_render_reserve_seconds: float | None = Form(default=None),
+    current_user: dict = Depends(get_current_user),
 ) -> JobCreateResponse:
     """Persist data uploads and an optional PowerPoint template in S3."""
 
@@ -178,6 +179,7 @@ async def generate_job(
             generation_render_reserve_seconds=(
                 generation_render_reserve_seconds
             ),
+            user_email=current_user["email"],
         )
     except HTTPException:
         raise

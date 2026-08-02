@@ -8,8 +8,8 @@ JWT_SECRET_KEY: str = os.getenv("JWT_SECRET_KEY", secrets.token_urlsafe(32))
 JWT_ALGORITHM: str = "HS256"
 JWT_EXPIRE_MINUTES: int = int(os.getenv("JWT_EXPIRE_MINUTES", "1440"))  # default: 24h
 
-# Path to user registry JSON file
-USERS_FILE: str = os.getenv(
-    "AUTH_USERS_FILE",
-    os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", "config", "users.json"),
-)
+# DynamoDB settings
+DYNAMODB_ENDPOINT_URL: str | None = os.getenv("DYNAMODB_ENDPOINT_URL", None)
+DYNAMODB_USERS_TABLE: str = os.getenv("DYNAMODB_USERS_TABLE", "slidegen_users")
+DYNAMODB_HISTORY_TABLE: str = os.getenv("DYNAMODB_HISTORY_TABLE", "slidegen_history")
+AWS_REGION: str = os.getenv("AWS_REGION", "us-west-2")

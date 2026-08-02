@@ -11,11 +11,14 @@ export interface AuthResponse {
   name: string;
 }
 
-export async function loginApi(email: string): Promise<AuthResponse> {
+export async function loginApi(
+  email: string,
+  password: string
+): Promise<AuthResponse> {
   const res = await fetch(`${BASE_URL}/auth/login`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email }),
+    body: JSON.stringify({ email, password }),
   });
 
   if (!res.ok) {
@@ -28,12 +31,13 @@ export async function loginApi(email: string): Promise<AuthResponse> {
 
 export async function registerApi(
   email: string,
+  password: string,
   name: string
 ): Promise<AuthResponse> {
   const res = await fetch(`${BASE_URL}/auth/register`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email, name }),
+    body: JSON.stringify({ email, password, name }),
   });
 
   if (!res.ok) {

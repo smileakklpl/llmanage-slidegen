@@ -233,6 +233,31 @@ async def _generate_from_ingestion_path(
         review_required_count=0,
     )
 
+    # Save generation history for the user
+    if job.user_email:
+        try:
+            from app.auth.history import add_history_record
+
+            add_history_record(
+                email=job.user_email,
+                job_id=job.job_id,
+                prompt=job.prompt,
+                artifacts=[
+                    {
+                        "filename": a.filename,
+                        "object_key": a.object_key or "",
+                        "type": a.type,
+                        "size_bytes": a.size_bytes or 0,
+                    }
+                    for a in artifacts
+                    if a.type != "json"
+                ],
+                created_at=datetime.now(timezone.utc).isoformat(),
+            )
+        except Exception:
+            # History saving is best-effort; do not fail the job
+            pass
+
 
 async def run_generation_job(
     job_id: str,
@@ -295,7 +320,14 @@ async def run_generation_job(
                 ocr_deadline_monotonic=ocr_deadline_monotonic,
                 ocr_max_pages=job.generation_options.ocr_max_pages,
             )
-            _ensure_before_deadline(job, phase="ingestion persistence", pipeline=True)
+            ingestion_payload = _prepare_ingestion_for_review(
+                ingestion_payload
+            )
+            _ensure_before_deadline(
+                job,
+                phase="ingestion persistence",
+                pipeline=True,
+            )
             ingestion_path = generation_bridge.save_payload(
                 ingestion_payload,
                 workspace / "ingestion.json",
@@ -334,19 +366,7 @@ async def run_generation_job(
                 progress=45,
                 message=message,
                 ingestion_object=ingestion_object,
-                review_required_count=0,
-            )
-
-            refreshed = await repository.get(job_id)
-            if refreshed is None:
-                return
-            await _generate_from_ingestion_path(
-                job=refreshed,
-                ingestion_path=ingestion_path,
-                template_path=template_path,
-                output_dir=output_dir,
-                repository=repository,
-                storage=storage,
+                review_required_count=pending_count,
             )
             return
 

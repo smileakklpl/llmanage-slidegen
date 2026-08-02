@@ -11,6 +11,7 @@ export function RegisterPage() {
 
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
+  const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
 
@@ -23,10 +24,18 @@ export function RegisterPage() {
       setError(t("loginEmailRequired"));
       return;
     }
+    if (!password) {
+      setError(t("registerPasswordRequired"));
+      return;
+    }
+    if (password.length < 6) {
+      setError(t("registerPasswordRequired"));
+      return;
+    }
 
     setIsLoading(true);
     try {
-      const res = await registerApi(trimmedEmail, name.trim());
+      const res = await registerApi(trimmedEmail, password, name.trim());
       login(res.access_token, { email: res.email, name: res.name });
       navigate("/", { replace: true });
     } catch (err) {
@@ -90,6 +99,25 @@ export function RegisterPage() {
                 placeholder={t("loginEmailPlaceholder")}
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
+                disabled={isLoading}
+                className="w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm placeholder:text-gray-400 focus:border-red-500 focus:ring-2 focus:ring-red-500/20 focus:outline-none disabled:opacity-50 transition-all"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <label
+                htmlFor="register-password"
+                className="block text-xs font-semibold text-gray-500 uppercase tracking-wide"
+              >
+                {t("registerPasswordLabel")}
+              </label>
+              <input
+                id="register-password"
+                type="password"
+                autoComplete="new-password"
+                placeholder={t("registerPasswordPlaceholder")}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
                 disabled={isLoading}
                 className="w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm placeholder:text-gray-400 focus:border-red-500 focus:ring-2 focus:ring-red-500/20 focus:outline-none disabled:opacity-50 transition-all"
               />

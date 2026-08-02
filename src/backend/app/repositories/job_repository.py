@@ -44,6 +44,7 @@ class JobModel(BaseModel):
     generation_options: GenerationOptions = Field(
         default_factory=GenerationOptions
     )
+    user_email: str = ""
 
 
 class JobRepository(ABC):

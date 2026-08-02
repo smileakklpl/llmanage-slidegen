@@ -119,6 +119,7 @@ class JobService:
         generation_policy: str | None = None,
         generation_deadline_seconds: float | None = None,
         generation_render_reserve_seconds: float | None = None,
+        user_email: str = "",
     ) -> JobModel:
         """Persist a queued job and start its non-blocking worker task."""
 
@@ -146,6 +147,7 @@ class JobService:
             input_objects=input_objects,
             template_object=template_object,
             generation_options=options,
+            user_email=user_email,
         )
         created = await self._repository.create(job)
 

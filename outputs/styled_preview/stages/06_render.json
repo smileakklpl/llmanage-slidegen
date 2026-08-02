@@ -1,6 +1,6 @@
 {
-  "pptx": "../outputs/styled_preview/deck.pptx",
-  "xlsx": "../outputs/styled_preview/deck_data.xlsx",
+  "pptx": "../outputs/styled_preview/fsc_114_workbook-分析簡報.pptx",
+  "xlsx": "../outputs/styled_preview/fsc_114_workbook-分析資料.xlsx",
   "deckspec": "../outputs/styled_preview/deckspec.json",
   "page_count": 9,
   "slide_count": 20,
