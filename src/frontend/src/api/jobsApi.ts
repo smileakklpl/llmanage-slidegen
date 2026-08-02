@@ -4,6 +4,7 @@ import {
   jobStatusResponseSchema,
 } from "@/schemas/jobSchema";
 import type { JobCreateResponse, JobStatusResponse } from "@/types";
+import type { HumanReviewRequest } from "@/schemas/ingestionSchema";
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "";
 const TOKEN_KEY = "auth_token";
@@ -65,7 +66,7 @@ export async function getJobReview(jobId: string): Promise<JobReviewResponse> {
 export async function reviewJobDataset(
   jobId: string,
   datasetId: string,
-  review: { decision: "approve" | "reject"; reviewer: string; notes?: string; corrections: unknown[] }
+  review: HumanReviewRequest
 ): Promise<Record<string, unknown>> {
   const res = await fetch(`${BASE_URL}/api/v1/jobs/${jobId}/datasets/${datasetId}/review`, {
     method: "POST",

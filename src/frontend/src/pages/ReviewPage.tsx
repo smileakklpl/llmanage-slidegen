@@ -5,6 +5,7 @@ import { reviewDataset } from "@/api/ingestionApi";
 import { DatasetReviewPanel } from "@/components/review/DatasetReviewPanel";
 import { SourcePreview } from "@/components/review/SourcePreview";
 import type {
+  DatasetCorrection,
   UnifiedDatasetSpec,
   UnifiedIngestionResult,
 } from "@/schemas/ingestionSchema";
@@ -43,6 +44,7 @@ export function ReviewPage() {
   const [datasets, setDatasets] = useState<UnifiedDatasetSpec[]>(initialDatasets);
   const [reviewer, setReviewer] = useState("user");
   const [notes, setNotes] = useState("");
+  const [corrections, setCorrections] = useState<DatasetCorrection[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -105,10 +107,11 @@ export function ReviewPage() {
         decision,
         reviewer: reviewer.trim(),
         notes: notes.trim() || undefined,
-        corrections: [],
+        corrections: decision === "approve" ? corrections : [],
       });
       replaceDataset(updated);
       setNotes("");
+      setCorrections([]);
     } catch (err) {
       setError(err instanceof Error ? err.message : "人工確認失敗");
     } finally {
@@ -230,7 +233,12 @@ export function ReviewPage() {
         <SourcePreview file={sourceFile} filename={currentDataset.filename} />
 
         <div className="space-y-5">
-          <DatasetReviewPanel dataset={currentDataset} />
+          <DatasetReviewPanel
+            dataset={currentDataset}
+            corrections={corrections}
+            onCorrectionsChange={setCorrections}
+            disabled={isSubmitting}
+          />
 
           <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
             <div className="grid gap-4 sm:grid-cols-2">
@@ -260,7 +268,9 @@ export function ReviewPage() {
 
             <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-gray-100 pt-5">
               <p className="text-xs leading-5 text-gray-500">
-                Approve 表示你已核對原始文件；Reject 會阻止這批資料進入後續生成流程。
+                {corrections.length > 0
+                  ? `已修改 ${corrections.length} 格。確認後會先套用人工修正，再讓資料進入後續生成流程。`
+                  : "確認表示你已核對原始文件；拒絕會阻止這批資料進入後續生成流程。"}
               </p>
               <div className="flex gap-3">
                 <button
@@ -277,7 +287,11 @@ export function ReviewPage() {
                   onClick={() => handleReview("approve")}
                   className="rounded-lg bg-red-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-red-700 disabled:cursor-not-allowed disabled:bg-red-300"
                 >
-                  {isSubmitting ? "送出中…" : "確認資料正確"}
+                  {isSubmitting
+                    ? "送出中…"
+                    : corrections.length > 0
+                      ? `確認並套用 ${corrections.length} 項修正`
+                      : "確認資料正確"}
                 </button>
               </div>
             </div>

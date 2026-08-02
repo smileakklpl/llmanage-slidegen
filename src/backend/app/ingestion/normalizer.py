@@ -729,6 +729,8 @@ def _apply_corrections(
             confidence=1.0,
             note=(
                 f"由 {reviewer} 人工修正。"
+                f" 原值：{original_value.value!r}；"
+                f"修正值：{correction.corrected_value!r}。"
                 + (
                     f" {correction.note}"
                     if correction.note
